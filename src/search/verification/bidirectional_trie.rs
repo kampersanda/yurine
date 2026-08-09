@@ -146,17 +146,16 @@ impl<Symbol> Verifier<Symbol> for BidirectionalTrieVerifier<Symbol>
 where
     Symbol: Clone + PartialEq,
 {
-    fn verify<Costs, Store>(
+    fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &Store,
+        corpus: &CorpusStore<Symbol>,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
         Costs: EditCosts<Symbol>,
-        Store: CorpusStore<Symbol>,
     {
         let threshold = threshold.next_up()?;
         for candidate in candidates {

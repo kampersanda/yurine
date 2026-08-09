@@ -25,17 +25,16 @@ use crate::types::{Position, StringId};
 pub struct SmithWatermanVerifier;
 
 impl<Symbol> Verifier<Symbol> for SmithWatermanVerifier {
-    fn verify<Costs, Store>(
+    fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &Store,
+        corpus: &CorpusStore<Symbol>,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
         Costs: EditCosts<Symbol>,
-        Store: CorpusStore<Symbol>,
     {
         let threshold = threshold.next_up()?;
         let string_ids = validated_candidate_strings(query, candidates, corpus)?;
@@ -61,21 +60,16 @@ impl<Symbol> Verifier<Symbol> for SmithWatermanVerifier {
 
 /// Validates that every candidate's string ID is known and positions are within bounds.
 /// Returns the unique string IDs referenced by the candidates.
-fn validated_candidate_strings<Symbol, Store>(
+fn validated_candidate_strings<Symbol>(
     query: &[Symbol],
     candidates: &[Candidate],
-    corpus: &Store,
-) -> Result<BTreeSet<StringId>>
-where
-    Store: CorpusStore<Symbol>,
-{
+    corpus: &CorpusStore<Symbol>,
+) -> Result<BTreeSet<StringId>> {
     let mut string_ids = BTreeSet::new();
-
     for candidate in candidates {
         validated_candidate_data(query, candidate, corpus)?;
         string_ids.insert(candidate.string_id);
     }
-
     Ok(string_ids)
 }
 

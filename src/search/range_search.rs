@@ -62,11 +62,10 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
     }
 }
 
-impl<Symbol, Costs, Store> SearchEngine<Symbol, Costs, Store>
+impl<Symbol, Costs> SearchEngine<Symbol, Costs>
 where
     Symbol: Clone + PartialEq + Hash + Eq,
     Costs: EditCosts<Symbol>,
-    Store: CorpusStore<Symbol>,
 {
     /// Finds non-empty substrings satisfying the configured range search.
     ///
@@ -144,15 +143,14 @@ where
 /// when the selector cannot construct a complete threshold subsequence for a
 /// non-empty query. It is slower and can return more results than the normal
 /// filter-and-verify path, but is guaranteed to be correct.
-fn verify_exhaustively<Symbol, Costs, Store>(
+fn verify_exhaustively<Symbol, Costs>(
     query: &[Symbol],
     threshold: Cost,
-    corpus: &Store,
+    corpus: &CorpusStore<Symbol>,
     costs: &Costs,
 ) -> Result<Vec<Match>>
 where
     Costs: EditCosts<Symbol>,
-    Store: CorpusStore<Symbol>,
 {
     // SmithWatermanVerifier uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification

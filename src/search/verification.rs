@@ -18,28 +18,24 @@ pub trait Verifier<Symbol> {
     ///
     /// Each interval must occur exactly once. Results must be ordered by
     /// string ID, then range start, then range end.
-    fn verify<Costs, Store>(
+    fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &Store,
+        corpus: &CorpusStore<Symbol>,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts<Symbol>,
-        Store: CorpusStore<Symbol>;
+        Costs: EditCosts<Symbol>;
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.
-fn validated_candidate_data<'a, Symbol: 'a, Store>(
+fn validated_candidate_data<'a, Symbol: 'a>(
     query: &[Symbol],
     candidate: &Candidate,
-    corpus: &'a Store,
-) -> Result<Store::Sequence<'a>>
-where
-    Store: CorpusStore<Symbol>,
-{
+    corpus: &'a CorpusStore<Symbol>,
+) -> Result<&'a [Symbol]> {
     let data = corpus
         .sequence(candidate.string_id)?
         .ok_or(Error::UnknownString(candidate.string_id))?;

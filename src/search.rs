@@ -33,22 +33,25 @@ pub struct Match {
 }
 
 /// Coordinates threshold-subsequence filtering and exact verification.
-pub struct SearchEngine<Symbol, Costs, Store> {
+pub struct SearchEngine<Symbol, Costs> {
     costs: Costs,
     index: PostingsIndex<Symbol>,
-    store: Store,
+    store: CorpusStore<Symbol>,
     neighborhood: SubstitutionNeighborhood<Symbol>,
 }
 
-impl<Symbol, Costs, Store> SearchEngine<Symbol, Costs, Store>
+impl<Symbol, Costs> SearchEngine<Symbol, Costs>
 where
-    Symbol: Eq + Hash + Clone,
+    Symbol: Eq + Hash + Clone + Ord,
     Costs: EditCosts<Symbol>,
-    Store: CorpusStore<Symbol>,
 {
     /// Creates a search engine.
-    pub fn new(costs: Costs, index: PostingsIndex<Symbol>, store: Store) -> Result<Self> {
-        let neighborhood = SubstitutionNeighborhood::new(store.alphabet())?;
+    pub fn new(
+        costs: Costs,
+        index: PostingsIndex<Symbol>,
+        store: CorpusStore<Symbol>,
+    ) -> Result<Self> {
+        let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().cloned())?;
         Ok(Self {
             costs,
             index,
