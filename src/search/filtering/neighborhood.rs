@@ -35,7 +35,6 @@ where
                 }
             }
         }
-
         Ok(Self { alphabet })
     }
 

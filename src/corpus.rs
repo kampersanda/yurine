@@ -21,4 +21,7 @@ pub trait CorpusStore<Symbol> {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Returns the alphabet of symbols in the corpus.
+    fn alphabet(&self) -> Vec<Symbol>;
 }
