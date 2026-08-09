@@ -15,18 +15,17 @@ pub struct MinCandidateSelector;
 impl MinCandidateSelector {
     /// Selects a subsequence complete for matches with distance at most
     /// `threshold`.
-    pub fn select<Symbol, Index, Costs>(
+    pub fn select<Symbol, Costs>(
         &self,
         query: &[Symbol],
         threshold: Cost,
         eta: Cost,
-        index: &Index,
+        index: &PostingsIndex<Symbol>,
         costs: &Costs,
         neighborhood: &SubstitutionNeighborhood<Symbol>,
     ) -> Result<Vec<Position>>
     where
         Symbol: Eq + Hash + Clone,
-        Index: PostingsIndex<Symbol>,
         Costs: EditCosts<Symbol>,
     {
         let threshold = threshold.next_up()?;

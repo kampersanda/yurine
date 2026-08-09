@@ -19,17 +19,16 @@ use crate::types::Position;
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
 /// outside `query`.
-pub(super) fn generate_candidates<Symbol, Index, Costs>(
+pub(super) fn generate_candidates<Symbol, Costs>(
     query: &[Symbol],
     selected: &[Position],
     eta: Cost,
-    index: &Index,
+    index: &PostingsIndex<Symbol>,
     costs: &Costs,
     neighborhood: &SubstitutionNeighborhood<Symbol>,
 ) -> Result<Vec<Candidate>>
 where
     Symbol: Eq + Hash + Clone,
-    Index: PostingsIndex<Symbol>,
     Costs: EditCosts<Symbol>,
 {
     let mut candidates = Vec::new();

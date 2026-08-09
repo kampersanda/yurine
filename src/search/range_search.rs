@@ -5,7 +5,6 @@ use std::hash::Hash;
 use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
-use crate::postings::PostingsIndex;
 use crate::search::SearchEngine;
 use crate::search::filtering::candidate::MinCandidateSelector;
 use crate::search::filtering::generate_candidates;
@@ -63,11 +62,10 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
     }
 }
 
-impl<Symbol, Costs, Index, Store> SearchEngine<Symbol, Costs, Index, Store>
+impl<Symbol, Costs, Store> SearchEngine<Symbol, Costs, Store>
 where
     Symbol: Clone + PartialEq + Hash + Eq,
     Costs: EditCosts<Symbol>,
-    Index: PostingsIndex<Symbol>,
     Store: CorpusStore<Symbol>,
 {
     /// Finds non-empty substrings satisfying the configured range search.
