@@ -4,7 +4,7 @@ use std::hash::Hash;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
-use crate::index::PostingsIndex;
+use crate::postings::PostingsIndex;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::Position;
 

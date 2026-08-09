@@ -8,7 +8,7 @@ use std::ops::Range;
 use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::Result;
-use crate::index::PostingsIndex;
+use crate::postings::PostingsIndex;
 use crate::types::{Position, StringId};
 
 use filtering::neighborhood::SubstitutionNeighborhood;

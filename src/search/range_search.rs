@@ -5,7 +5,7 @@ use std::hash::Hash;
 use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
-use crate::index::PostingsIndex;
+use crate::postings::PostingsIndex;
 use crate::search::SearchEngine;
 use crate::search::filtering::candidate::MinCandidateSelector;
 use crate::search::filtering::generate_candidates;
