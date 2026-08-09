@@ -38,11 +38,6 @@ where
         Ok(Self { alphabet })
     }
 
-    /// Returns the finite alphabet in its original order.
-    pub fn alphabet(&self) -> &[Symbol] {
-        &self.alphabet
-    }
-
     /// Visits symbols whose substitution cost from `symbol` is at most eta.
     ///
     /// The returned symbols must be unique. The supplied edit-cost policy is
