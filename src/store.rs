@@ -1,57 +1,50 @@
 //! Storage abstractions for indexed strings.
 
 use std::collections::HashSet;
-use std::hash::Hash;
 
 use crate::errors::Result;
-use crate::types::StringId;
+use crate::types::{StringId, Symbol};
 
 /// A builder for a [`CorpusStore`].
-pub struct CorpusStoreBuilder<Symbol> {
+#[derive(Debug, Default)]
+pub struct CorpusStoreBuilder {
     strings: Vec<Vec<Symbol>>,
-    alphabet: Vec<Symbol>,
+    alphabet: HashSet<Symbol>,
 }
 
-impl<Symbol> CorpusStoreBuilder<Symbol>
-where
-    Symbol: Eq + Clone + Hash + Ord,
-{
+impl CorpusStoreBuilder {
     /// Creates a new builder.
     pub fn new() -> Self {
         Self {
             strings: Vec::new(),
-            alphabet: Vec::new(),
+            alphabet: HashSet::new(),
         }
     }
 
     /// Adds a sequence to the corpus.
     pub fn add_sequence(&mut self, sequence: Vec<Symbol>) {
-        let mut unique_symbols = HashSet::new();
-        for symbol in &sequence {
-            if unique_symbols.insert(symbol.clone()) {
-                self.alphabet.push(symbol.clone());
-            }
-        }
+        self.alphabet.extend(sequence.iter().copied());
         self.strings.push(sequence);
-        self.alphabet.sort();
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(self) -> CorpusStore<Symbol> {
+    pub fn build(self) -> CorpusStore {
+        let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
+        alphabet.sort_unstable();
         CorpusStore {
             strings: self.strings,
-            alphabet: self.alphabet,
+            alphabet,
         }
     }
 }
 
-pub struct CorpusStore<Symbol> {
+pub struct CorpusStore {
     strings: Vec<Vec<Symbol>>,
     alphabet: Vec<Symbol>,
 }
 
 /// Read access to indexed token sequences.
-impl<Symbol> CorpusStore<Symbol> {
+impl CorpusStore {
     /// Returns the sequence identified by `id`, or `None` when it is unknown.
     pub fn sequence(&self, id: StringId) -> Result<Option<&[Symbol]>> {
         let index = id.as_usize();
@@ -75,5 +68,25 @@ impl<Symbol> CorpusStore<Symbol> {
     /// Returns the alphabet of symbols in the corpus.
     pub fn alphabet(&self) -> &[Symbol] {
         &self.alphabet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CorpusStoreBuilder;
+    use crate::types::Symbol;
+
+    #[test]
+    fn alphabet_is_unique_across_sequences() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let third = Symbol::new(2);
+        let mut builder = CorpusStoreBuilder::new();
+        builder.add_sequence(vec![second, first, second]);
+        builder.add_sequence(vec![first, third]);
+
+        let store = builder.build();
+
+        assert_eq!(store.alphabet(), [first, second, third]);
     }
 }

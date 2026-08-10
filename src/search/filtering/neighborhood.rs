@@ -1,21 +1,18 @@
 //! Substitution neighborhoods.
 
 use std::collections::HashSet;
-use std::hash::Hash;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::types::Symbol;
 
 /// A substitution neighborhood enumerated from a finite alphabet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubstitutionNeighborhood<Symbol> {
+pub struct SubstitutionNeighborhood {
     alphabet: Vec<Symbol>,
 }
 
-impl<Symbol> SubstitutionNeighborhood<Symbol>
-where
-    Symbol: Eq + Hash + Clone,
-{
+impl SubstitutionNeighborhood {
     /// Creates a neighborhood over `alphabet`.
     ///
     /// # Errors
@@ -42,25 +39,26 @@ where
     ///
     /// The returned symbols must be unique. The supplied edit-cost policy is
     /// the same policy that verification uses.
-    pub fn neighbors<Costs>(&self, symbol: &Symbol, eta: Cost, costs: &Costs) -> Vec<Symbol>
+    pub fn neighbors<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Vec<Symbol>
     where
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         self.alphabet
             .iter()
-            .filter(|candidate| costs.substitution(symbol, candidate) <= eta)
-            .cloned()
+            .copied()
+            .filter(|candidate| costs.substitution(symbol, *candidate) <= eta)
             .collect()
     }
 
     /// Returns the minimum cost of deleting `symbol` or substituting it with a
     /// symbol outside its neighborhood.
-    pub fn minimum_outside_cost<Costs>(&self, symbol: &Symbol, eta: Cost, costs: &Costs) -> Cost
+    pub fn minimum_outside_cost<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Cost
     where
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         self.alphabet
             .iter()
+            .copied()
             .map(|candidate| costs.substitution(symbol, candidate))
             .filter(|substitution| *substitution > eta)
             .fold(costs.deletion(symbol), Cost::min)

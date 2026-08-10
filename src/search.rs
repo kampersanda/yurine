@@ -2,7 +2,6 @@ mod filtering;
 pub mod range_search;
 mod verification;
 
-use std::hash::Hash;
 use std::ops::Range;
 
 use crate::costs::{Cost, EditCosts};
@@ -33,25 +32,20 @@ pub struct Match {
 }
 
 /// Coordinates threshold-subsequence filtering and exact verification.
-pub struct SearchEngine<Symbol, Costs> {
+pub struct SearchEngine<Costs> {
     costs: Costs,
-    index: PostingsIndex<Symbol>,
-    store: CorpusStore<Symbol>,
-    neighborhood: SubstitutionNeighborhood<Symbol>,
+    index: PostingsIndex,
+    store: CorpusStore,
+    neighborhood: SubstitutionNeighborhood,
 }
 
-impl<Symbol, Costs> SearchEngine<Symbol, Costs>
+impl<Costs> SearchEngine<Costs>
 where
-    Symbol: Eq + Hash + Clone + Ord,
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     /// Creates a search engine.
-    pub fn new(
-        costs: Costs,
-        index: PostingsIndex<Symbol>,
-        store: CorpusStore<Symbol>,
-    ) -> Result<Self> {
-        let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().cloned())?;
+    pub fn new(costs: Costs, index: PostingsIndex, store: CorpusStore) -> Result<Self> {
+        let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
         Ok(Self {
             costs,
             index,

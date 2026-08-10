@@ -78,3 +78,50 @@ pub struct Posting {
     pub string_id: StringId,
     pub position: Position,
 }
+
+/// Identifies a token in a vocabulary.
+///
+/// A symbol is meaningful only together with the vocabulary that assigned it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Symbol(u32);
+
+impl Symbol {
+    /// The symbol reserved for tokens absent from a vocabulary.
+    pub const UNKNOWN: Self = Self(u32::MAX);
+
+    /// Creates a symbol from its zero-based integer representation.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the zero-based integer representation.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    /// Creates a symbol from a usize value.
+    pub fn from_usize(value: usize) -> Result<Self> {
+        let value = u32::try_from(value).map_err(|_| Error::SymbolOverflow)?;
+        if value == Self::UNKNOWN.0 {
+            Err(Error::SymbolOverflow)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    /// Returns whether this is the reserved unknown-token symbol.
+    pub const fn is_unknown(self) -> bool {
+        self.0 == Self::UNKNOWN.0
+    }
+
+    /// Returns the symbol as a usize value.
+    pub fn as_usize(self) -> usize {
+        usize::try_from(self.0).unwrap()
+    }
+}
+
+impl Display for Symbol {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}

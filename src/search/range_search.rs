@@ -1,7 +1,5 @@
 //! Fixed-threshold range search orchestration.
 
-use std::hash::Hash;
-
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
@@ -12,7 +10,7 @@ use crate::search::verification::bidirectional_trie::BidirectionalTrieVerifier;
 use crate::search::verification::smith_waterman::SmithWatermanVerifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId};
+use crate::types::{Position, StringId, Symbol};
 
 /// Parameters for threshold range search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,10 +60,9 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
     }
 }
 
-impl<Symbol, Costs> SearchEngine<Symbol, Costs>
+impl<Costs> SearchEngine<Costs>
 where
-    Symbol: Clone + PartialEq + Hash + Eq,
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     /// Finds non-empty substrings satisfying the configured range search.
     ///
@@ -143,14 +140,14 @@ where
 /// when the selector cannot construct a complete threshold subsequence for a
 /// non-empty query. It is slower and can return more results than the normal
 /// filter-and-verify path, but is guaranteed to be correct.
-fn verify_exhaustively<Symbol, Costs>(
+fn verify_exhaustively<Costs>(
     query: &[Symbol],
     threshold: Cost,
-    corpus: &CorpusStore<Symbol>,
+    corpus: &CorpusStore,
     costs: &Costs,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     // SmithWatermanVerifier uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification
@@ -161,7 +158,7 @@ where
         let sequence = corpus
             .sequence(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
-        if !sequence.as_ref().is_empty() {
+        if !sequence.is_empty() {
             candidates.push(Candidate {
                 string_id,
                 data_position: Position::new(0),

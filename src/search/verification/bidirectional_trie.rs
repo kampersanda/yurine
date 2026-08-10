@@ -1,37 +1,34 @@
 //! Anchor-local verification with bidirectional trie caches.
 
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 
 use super::{Verifier, add_distance, root_column, step_dp, validated_candidate_data};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId};
+use crate::types::{Position, StringId, Symbol};
 
 /// Local verification with query-position-specific forward and backward tries.
 ///
 /// The verifier itself is stateless; all caches live for a single
 /// verification call.
-#[derive(Debug, Clone)]
-pub(in crate::search) struct BidirectionalTrieVerifier<Symbol> {
-    marker: PhantomData<fn() -> Symbol>,
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::search) struct BidirectionalTrieVerifier;
 
-struct TrieNode<Symbol> {
+struct TrieNode {
     // `column` is the WED state after consuming the edge labels from the root
     // through this node. A child therefore needs exactly one `step_dp` call.
     column: Vec<f32>,
     // Labels are owned so a disk-backed store may release each decoded
     // document after processing one candidate.
-    children: Vec<(Symbol, TrieNode<Symbol>)>,
+    children: Vec<(Symbol, TrieNode)>,
 }
 
-impl<Symbol> TrieNode<Symbol> {
-    fn root<Costs>(query: &[&Symbol], costs: &Costs) -> Self
+impl TrieNode {
+    fn root<Costs>(query: &[Symbol], costs: &Costs) -> Self
     where
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         Self {
             column: root_column(query, costs),
@@ -40,50 +37,41 @@ impl<Symbol> TrieNode<Symbol> {
     }
 }
 
-struct TrieForest<Symbol> {
+#[derive(Default)]
+struct TrieForest {
     // Query position is part of the cache key because it determines the query
     // prefix/suffix represented by every DP row. Direction is represented by
     // separate maps so backward and forward columns can never be mixed.
-    backward: BTreeMap<usize, TrieNode<Symbol>>,
-    forward: BTreeMap<usize, TrieNode<Symbol>>,
+    backward: BTreeMap<usize, TrieNode>,
+    forward: BTreeMap<usize, TrieNode>,
 }
 
-impl<Symbol> Default for TrieForest<Symbol> {
-    fn default() -> Self {
-        Self {
-            backward: BTreeMap::new(),
-            forward: BTreeMap::new(),
-        }
-    }
-}
-
-struct DirectionalQueries<'query, Symbol> {
+struct DirectionalQueries {
     // The backward data iterator is also reversed below. Reversing both sides
     // preserves wed(query, data), including asymmetric insertion/deletion.
-    backward: Vec<&'query Symbol>,
-    forward: Vec<&'query Symbol>,
+    backward: Vec<Symbol>,
+    forward: Vec<Symbol>,
 }
 
-impl<'query, Symbol> DirectionalQueries<'query, Symbol> {
-    fn new(query: &'query [Symbol], query_position: usize) -> Self {
+impl DirectionalQueries {
+    fn new(query: &[Symbol], query_position: usize) -> Self {
         Self {
-            backward: query[..query_position].iter().rev().collect(),
-            forward: query[query_position + 1..].iter().collect(),
+            backward: query[..query_position].iter().rev().copied().collect(),
+            forward: query[query_position + 1..].to_vec(),
         }
     }
 }
 
-fn cached_prefix_distances<'query, 'data, Symbol, Costs, Data>(
-    query: &[&'query Symbol],
+fn cached_prefix_distances<Costs, Data>(
+    query: &[Symbol],
     data: Data,
     budget: f32,
-    root: &mut TrieNode<Symbol>,
+    root: &mut TrieNode,
     costs: &Costs,
 ) -> Vec<f32>
 where
-    Symbol: Clone + PartialEq + 'query + 'data,
-    Costs: EditCosts<Symbol>,
-    Data: IntoIterator<Item = &'data Symbol>,
+    Costs: EditCosts,
+    Data: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
     // Index zero denotes the empty data prefix. It must be retained so an
@@ -97,14 +85,14 @@ where
         let child_index = node
             .children
             .iter()
-            .position(|(symbol, _)| symbol == data_symbol);
+            .position(|(symbol, _)| *symbol == data_symbol);
 
         let index = match child_index {
             Some(index) => index,
             None => {
                 let column = step_dp(query, data_symbol, &node.column, costs);
                 node.children.push((
-                    data_symbol.clone(),
+                    data_symbol,
                     TrieNode {
                         column,
                         children: Vec::new(),
@@ -127,35 +115,24 @@ where
     distances
 }
 
-impl<Symbol> BidirectionalTrieVerifier<Symbol> {
+impl BidirectionalTrieVerifier {
     /// Creates a verifier. Its caches are populated per verification call.
     pub(in crate::search) const fn new() -> Self {
-        Self {
-            marker: PhantomData,
-        }
+        Self
     }
 }
 
-impl<Symbol> Default for BidirectionalTrieVerifier<Symbol> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Symbol> Verifier<Symbol> for BidirectionalTrieVerifier<Symbol>
-where
-    Symbol: Clone + PartialEq,
-{
+impl Verifier for BidirectionalTrieVerifier {
     fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &CorpusStore<Symbol>,
+        corpus: &CorpusStore,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         let threshold = threshold.next_up()?;
         for candidate in candidates {
@@ -164,8 +141,8 @@ where
 
         // Both caches are call-local deliberately: a DP column depends on this
         // query and cost policy, so sharing it across calls would be unsound.
-        let mut forest = TrieForest::<Symbol>::default();
-        let mut directional_queries = BTreeMap::<usize, DirectionalQueries<Symbol>>::new();
+        let mut forest = TrieForest::default();
+        let mut directional_queries = BTreeMap::<usize, DirectionalQueries>::new();
         let mut intervals = BTreeMap::<(StringId, usize, usize), f32>::new();
 
         for candidate in candidates {
@@ -174,11 +151,10 @@ where
             let data = corpus
                 .sequence(candidate.string_id)?
                 .ok_or(Error::UnknownString(candidate.string_id))?;
-            let data = data.as_ref();
             let query_position = candidate.query_position.as_usize();
             let data_position = candidate.data_position.as_usize();
             let anchor_cost = costs
-                .substitution(&query[query_position], &data[data_position])
+                .substitution(query[query_position], data[data_position])
                 .get();
             if anchor_cost >= threshold {
                 continue;
@@ -201,7 +177,7 @@ where
                 &directional_query.backward,
                 // Distance from the anchor increases while indices decrease,
                 // hence the data prefix must be visited in reverse as well.
-                data[..data_position].iter().rev(),
+                data[..data_position].iter().rev().copied(),
                 budget,
                 backward_root,
                 costs,
@@ -215,7 +191,7 @@ where
             };
             let forward = cached_prefix_distances(
                 &directional_query.forward,
-                data[data_position + 1..].iter(),
+                data[data_position + 1..].iter().copied(),
                 budget,
                 forward_root,
                 costs,

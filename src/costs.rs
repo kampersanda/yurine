@@ -5,22 +5,23 @@ use std::fmt;
 use std::ops::Sub;
 
 use crate::errors::{Error, Result};
+use crate::types::Symbol;
 
 /// Supplies the costs that define a weighted edit distance.
 ///
 /// The search direction is always from the query to a data substring. Thus,
 /// deletion consumes a query symbol and insertion consumes a data symbol.
-pub trait EditCosts<Symbol> {
+pub trait EditCosts {
     /// Returns the cost of replacing `from` with `to`.
     ///
     /// If `from` and `to` are the same symbol, this must return zero.
-    fn substitution(&self, from: &Symbol, to: &Symbol) -> Cost;
+    fn substitution(&self, from: Symbol, to: Symbol) -> Cost;
 
     /// Returns the cost of deleting a query symbol.
-    fn deletion(&self, symbol: &Symbol) -> Cost;
+    fn deletion(&self, symbol: Symbol) -> Cost;
 
     /// Returns the cost of inserting a data symbol.
-    fn insertion(&self, symbol: &Symbol) -> Cost;
+    fn insertion(&self, symbol: Symbol) -> Cost;
 }
 
 /// A finite, non-negative, single-precision edit cost or search threshold.
