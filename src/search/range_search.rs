@@ -232,7 +232,7 @@ mod tests {
         store_builder.add_string(vec![symbol]);
         store_builder.add_string(vec![symbol]);
 
-        SearchEngine::new(
+        SearchEngine::from_parts(
             CharacterTokenizer::new(),
             vocabulary,
             CharacterCosts,

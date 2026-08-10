@@ -1,3 +1,4 @@
+mod builder;
 mod encoding;
 mod filtering;
 pub mod range_search;
@@ -15,6 +16,8 @@ use crate::types::{Position, StringId};
 use crate::vocabulary::Vocabulary;
 
 use filtering::neighborhood::SubstitutionNeighborhood;
+
+pub use builder::SearchEngineBuilder;
 
 /// A candidate match of a query in a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,6 +39,8 @@ pub struct Match {
 }
 
 /// Coordinates threshold-subsequence filtering and exact verification.
+///
+/// Create an engine with [`SearchEngineBuilder`].
 pub struct SearchEngine<T, Costs>
 where
     T: Tokenizer,
@@ -54,15 +59,7 @@ where
     T::Token: Clone + Eq + Hash,
     Costs: EditCosts<T::Token>,
 {
-    /// Creates a search engine from prebuilt token and symbol data.
-    ///
-    /// The index and store must use symbols assigned by `vocabulary`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::UnknownCorpusSymbol`] if the store contains a symbol
-    /// that is not present in `vocabulary`.
-    pub fn new(
+    pub(crate) fn from_parts(
         tokenizer: T,
         vocabulary: Vocabulary<T::Token>,
         costs: Costs,
@@ -107,7 +104,7 @@ mod tests {
         let mut store_builder = CorpusStoreBuilder::new();
         store_builder.add_string(vec![unknown_symbol]);
 
-        let result = SearchEngine::new(
+        let result = SearchEngine::from_parts(
             CharacterTokenizer::new(),
             vocabulary,
             LevenshteinCosts::new(),
