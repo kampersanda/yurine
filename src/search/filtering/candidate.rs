@@ -43,7 +43,7 @@ impl MinCandidateSelector {
             let mut candidate_count = 0usize;
             for neighbor in neighborhood.neighbors(symbol, eta, costs) {
                 candidate_count = candidate_count
-                    .checked_add(index.frequency(&neighbor)?)
+                    .checked_add(index.frequency(&neighbor))
                     .ok_or(Error::ThresholdSubsequenceUnavailable)?;
             }
 

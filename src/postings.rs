@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::errors::Result;
 use crate::types::Posting;
 
 /// Postings index mapping symbols to their occurrences in the corpus.
@@ -11,31 +10,10 @@ pub struct PostingsIndex<Symbol> {
     postings: HashMap<Symbol, Vec<Posting>>,
 }
 
-/// Builds a postings index from symbols and their occurrences.
-pub struct PostingsIndexBuilder<Symbol> {
-    postings: HashMap<Symbol, Vec<Posting>>,
-}
-
-impl<Symbol> Default for PostingsIndexBuilder<Symbol>
-where
-    Symbol: Eq + Hash,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<Symbol> PostingsIndex<Symbol>
 where
     Symbol: Eq + Hash,
 {
-    /// Creates a new postings index.
-    pub fn new() -> Self {
-        Self {
-            postings: HashMap::new(),
-        }
-    }
-
     /// Returns indexed occurrences in `(StringId, Position)` order.
     ///
     /// The iterator does not emit duplicates.
@@ -44,12 +22,17 @@ where
     }
 
     /// Returns the total frequency of `symbol` in the corpus.
-    pub fn frequency(&self, symbol: &Symbol) -> Result<usize> {
-        Ok(self
-            .postings
+    pub fn frequency(&self, symbol: &Symbol) -> usize {
+        self.postings
             .get(symbol)
-            .map_or(0, |postings| postings.len()))
+            .map_or(0, |postings| postings.len())
     }
+}
+
+/// Builds a postings index from symbols and their occurrences.
+#[derive(Debug, Default)]
+pub struct PostingsIndexBuilder<Symbol> {
+    postings: HashMap<Symbol, Vec<Posting>>,
 }
 
 impl<Symbol> PostingsIndexBuilder<Symbol>
@@ -112,6 +95,6 @@ mod tests {
             index.postings(&'a').collect::<Vec<_>>(),
             [first, second, third]
         );
-        assert_eq!(index.frequency(&'a').unwrap(), 3);
+        assert_eq!(index.frequency(&'a'), 3);
     }
 }
