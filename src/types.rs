@@ -86,6 +86,9 @@ pub struct Posting {
 pub struct Symbol(u32);
 
 impl Symbol {
+    /// The symbol reserved for tokens absent from a vocabulary.
+    pub const UNKNOWN: Self = Self(u32::MAX);
+
     /// Creates a symbol from its zero-based integer representation.
     pub const fn new(value: u32) -> Self {
         Self(value)
@@ -98,9 +101,17 @@ impl Symbol {
 
     /// Creates a symbol from a usize value.
     pub fn from_usize(value: usize) -> Result<Self> {
-        u32::try_from(value)
-            .map(Self)
-            .map_err(|_| Error::SymbolOverflow)
+        let value = u32::try_from(value).map_err(|_| Error::SymbolOverflow)?;
+        if value == Self::UNKNOWN.0 {
+            Err(Error::SymbolOverflow)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    /// Returns whether this is the reserved unknown-token symbol.
+    pub const fn is_unknown(self) -> bool {
+        self.0 == Self::UNKNOWN.0
     }
 
     /// Returns the symbol as a usize value.

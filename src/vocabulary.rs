@@ -4,7 +4,7 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::errors::{Error, Result};
+use crate::errors::Result;
 use crate::types::Symbol;
 
 /// Collects token frequencies for building a [`Vocabulary`].
@@ -82,24 +82,30 @@ impl<Token> Vocabulary<Token>
 where
     Token: Eq + Hash,
 {
-    /// Returns the symbol assigned to `token`.
-    pub fn symbol(&self, token: &Token) -> Option<Symbol> {
-        self.symbols.get(token).copied()
+    /// Returns the symbol assigned to `token`, or [`Symbol::UNKNOWN`].
+    pub fn symbol(&self, token: &Token) -> Symbol {
+        self.symbols.get(token).copied().unwrap_or(Symbol::UNKNOWN)
     }
 
     /// Returns the token assigned to `symbol`.
     pub fn token(&self, symbol: Symbol) -> Option<&Token> {
-        self.tokens.get(symbol.as_usize())
+        if symbol.is_unknown() {
+            None
+        } else {
+            self.tokens.get(symbol.as_usize())
+        }
     }
 
-    /// Converts known tokens to their symbols in input order.
-    pub fn encode<I>(&self, tokens: I) -> Result<Vec<Symbol>>
+    /// Converts tokens to symbols in input order.
+    ///
+    /// Tokens absent from this vocabulary are mapped to [`Symbol::UNKNOWN`].
+    pub fn encode<I>(&self, tokens: I) -> Vec<Symbol>
     where
         I: IntoIterator<Item = Token>,
     {
         tokens
             .into_iter()
-            .map(|token| self.symbol(&token).ok_or(Error::UnknownToken))
+            .map(|token| self.symbol(&token))
             .collect()
     }
 
@@ -117,7 +123,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::VocabularyBuilder;
-    use crate::errors::Error;
     use crate::types::Symbol;
 
     #[test]
@@ -129,8 +134,8 @@ mod tests {
         builder.insert('b');
 
         let vocabulary = builder.build().unwrap();
-        assert_eq!(vocabulary.symbol(&'b'), Some(Symbol::new(0)));
-        assert_eq!(vocabulary.symbol(&'a'), Some(Symbol::new(1)));
+        assert_eq!(vocabulary.symbol(&'b'), Symbol::new(0));
+        assert_eq!(vocabulary.symbol(&'a'), Symbol::new(1));
     }
 
     #[test]
@@ -140,8 +145,8 @@ mod tests {
 
         let vocabulary = builder.build().unwrap();
 
-        assert_eq!(vocabulary.symbol(&'b'), Some(Symbol::new(0)));
-        assert_eq!(vocabulary.symbol(&'a'), Some(Symbol::new(1)));
+        assert_eq!(vocabulary.symbol(&'b'), Symbol::new(0));
+        assert_eq!(vocabulary.symbol(&'a'), Symbol::new(1));
     }
 
     #[test]
@@ -149,9 +154,9 @@ mod tests {
         let mut builder = VocabularyBuilder::new();
         builder.insert("東京");
         let vocabulary = builder.build().unwrap();
-        let symbol = vocabulary.symbol(&"東京").unwrap();
+        let symbol = vocabulary.symbol(&"東京");
 
-        assert_eq!(vocabulary.symbol(&"東京"), Some(symbol));
+        assert_eq!(vocabulary.symbol(&"東京"), symbol);
         assert_eq!(vocabulary.token(symbol), Some(&"東京"));
         assert_eq!(vocabulary.token(Symbol::new(1)), None);
     }
@@ -162,17 +167,22 @@ mod tests {
         builder.insert_all(['a', 'b', 'a']);
         let vocabulary = builder.build().unwrap();
 
-        let symbols = vocabulary.encode(['a', 'b', 'a']).unwrap();
+        let symbols = vocabulary.encode(['a', 'b', 'a']);
 
         assert_eq!(symbols, [Symbol::new(0), Symbol::new(1), Symbol::new(0)]);
     }
 
     #[test]
-    fn encode_rejects_unknown_tokens() {
+    fn unknown_tokens_use_the_reserved_symbol() {
         let mut builder = VocabularyBuilder::new();
         builder.insert('a');
         let vocabulary = builder.build().unwrap();
 
-        assert_eq!(vocabulary.encode(['b']), Err(Error::UnknownToken));
+        assert_eq!(vocabulary.symbol(&'b'), Symbol::UNKNOWN);
+        assert_eq!(
+            vocabulary.encode(['a', 'b']),
+            [Symbol::new(0), Symbol::UNKNOWN]
+        );
+        assert_eq!(vocabulary.token(Symbol::UNKNOWN), None);
     }
 }
