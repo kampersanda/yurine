@@ -1,5 +1,7 @@
 //! Weighted edit-operation cost abstractions.
 
+pub mod levenshtein;
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Sub;
