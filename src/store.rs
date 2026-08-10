@@ -1,7 +1,5 @@
 //! Storage abstractions for indexed strings.
 
-use std::collections::HashSet;
-
 use crate::errors::Result;
 use crate::types::{StringId, Symbol};
 
@@ -23,18 +21,14 @@ impl CorpusStoreBuilder {
 
     /// Adds a sequence to the corpus.
     pub fn add_sequence(&mut self, sequence: Vec<Symbol>) {
-        let mut unique_symbols = HashSet::new();
-        for symbol in &sequence {
-            if unique_symbols.insert(*symbol) {
-                self.alphabet.push(*symbol);
-            }
-        }
+        self.alphabet.extend(sequence.iter().copied());
         self.strings.push(sequence);
-        self.alphabet.sort();
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(self) -> CorpusStore {
+    pub fn build(mut self) -> CorpusStore {
+        self.alphabet.sort_unstable();
+        self.alphabet.dedup();
         CorpusStore {
             strings: self.strings,
             alphabet: self.alphabet,
@@ -72,5 +66,25 @@ impl CorpusStore {
     /// Returns the alphabet of symbols in the corpus.
     pub fn alphabet(&self) -> &[Symbol] {
         &self.alphabet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CorpusStoreBuilder;
+    use crate::types::Symbol;
+
+    #[test]
+    fn alphabet_is_unique_across_sequences() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let third = Symbol::new(2);
+        let mut builder = CorpusStoreBuilder::new();
+        builder.add_sequence(vec![second, first, second]);
+        builder.add_sequence(vec![first, third]);
+
+        let store = builder.build();
+
+        assert_eq!(store.alphabet(), [first, second, third]);
     }
 }
