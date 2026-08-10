@@ -1,37 +1,10 @@
 //! Bidirectional mappings between tokens and compact symbols.
 
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::hash::Hash;
 
-use crate::errors::{Error, Result};
-
-/// A compact identifier assigned to a token in a [`Vocabulary`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Symbol(u32);
-
-impl Symbol {
-    /// Creates a symbol from its zero-based integer representation.
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    /// Returns the zero-based integer representation.
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-
-    /// Returns the symbol as a `usize` value.
-    pub fn as_usize(self) -> usize {
-        usize::try_from(self.0).unwrap()
-    }
-}
-
-impl Display for Symbol {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
+use crate::errors::Result;
+use crate::types::Symbol;
 
 /// Builds a [`Vocabulary`] by assigning stable, consecutive symbols to tokens.
 #[derive(Debug, Clone)]
@@ -57,8 +30,7 @@ where
         if let Some(&symbol) = self.symbols.get(&token) {
             return Ok(symbol);
         }
-        let value = u32::try_from(self.tokens.len()).map_err(|_| Error::SymbolOverflow)?;
-        let symbol = Symbol::new(value);
+        let symbol = Symbol::from_usize(self.tokens.len())?;
         self.tokens.push(token.clone());
         self.symbols.insert(token, symbol);
         Ok(symbol)
@@ -124,7 +96,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Symbol, VocabularyBuilder};
+    use super::VocabularyBuilder;
+    use crate::types::Symbol;
 
     #[test]
     fn insert_assigns_consecutive_symbols_and_reuses_existing_ones() {

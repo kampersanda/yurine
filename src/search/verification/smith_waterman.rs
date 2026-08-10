@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId};
+use crate::types::{Position, StringId, Symbol};
 
 /// Exact Smith-Waterman-based verification that preserves every start position.
 ///
@@ -24,17 +24,17 @@ use crate::types::{Position, StringId};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SmithWatermanVerifier;
 
-impl<Symbol> Verifier<Symbol> for SmithWatermanVerifier {
+impl Verifier for SmithWatermanVerifier {
     fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &CorpusStore<Symbol>,
+        corpus: &CorpusStore,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         let threshold = threshold.next_up()?;
         let string_ids = validated_candidate_strings(query, candidates, corpus)?;
@@ -44,14 +44,7 @@ impl<Symbol> Verifier<Symbol> for SmithWatermanVerifier {
             let data = corpus
                 .sequence(string_id)?
                 .ok_or(Error::UnknownString(string_id))?;
-            enumerate_matches(
-                query,
-                data.as_ref(),
-                string_id,
-                threshold,
-                costs,
-                &mut matches,
-            )?;
+            enumerate_matches(query, data, string_id, threshold, costs, &mut matches)?;
         }
 
         Ok(matches)
@@ -60,10 +53,10 @@ impl<Symbol> Verifier<Symbol> for SmithWatermanVerifier {
 
 /// Validates that every candidate's string ID is known and positions are within bounds.
 /// Returns the unique string IDs referenced by the candidates.
-fn validated_candidate_strings<Symbol>(
+fn validated_candidate_strings(
     query: &[Symbol],
     candidates: &[Candidate],
-    corpus: &CorpusStore<Symbol>,
+    corpus: &CorpusStore,
 ) -> Result<BTreeSet<StringId>> {
     let mut string_ids = BTreeSet::new();
     for candidate in candidates {
@@ -75,7 +68,7 @@ fn validated_candidate_strings<Symbol>(
 
 /// Enumerates every non-empty substring of `data` whose distance from `query` is
 /// strictly less than `threshold`. Each match is pushed to `matches`.
-fn enumerate_matches<Symbol, Costs>(
+fn enumerate_matches<Costs>(
     query: &[Symbol],
     data: &[Symbol],
     string_id: StringId,
@@ -84,7 +77,7 @@ fn enumerate_matches<Symbol, Costs>(
     matches: &mut Vec<Match>,
 ) -> Result<()>
 where
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     // The two DP columns are reused across all O(n^2) cells of one data
     // string; only their contents are rewritten below.

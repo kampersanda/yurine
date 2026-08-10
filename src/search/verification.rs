@@ -7,12 +7,13 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
+use crate::types::Symbol;
 
 /// Verifies filtering candidates against an inclusive distance threshold.
 ///
 /// Verification takes `&self`, so one verifier can serve concurrent searches.
 /// Implementations must keep any working state local to a single call.
-pub trait Verifier<Symbol> {
+pub trait Verifier {
     /// Returns exactly the non-empty substrings whose distance is at most
     /// `threshold`.
     ///
@@ -22,24 +23,24 @@ pub trait Verifier<Symbol> {
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
-        corpus: &CorpusStore<Symbol>,
+        corpus: &CorpusStore,
         threshold: Cost,
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts<Symbol>;
+        Costs: EditCosts;
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.
-fn validated_candidate_data<'a, Symbol: 'a>(
+fn validated_candidate_data<'a>(
     query: &[Symbol],
     candidate: &Candidate,
-    corpus: &'a CorpusStore<Symbol>,
+    corpus: &'a CorpusStore,
 ) -> Result<&'a [Symbol]> {
     let data = corpus
         .sequence(candidate.string_id)?
         .ok_or(Error::UnknownString(candidate.string_id))?;
-    let data_slice = data.as_ref();
+    let data_slice = data;
     let data_position = candidate.data_position.as_usize();
     if data_position >= data_slice.len() {
         return Err(Error::InvalidDataPosition {
@@ -81,9 +82,9 @@ fn add_distance(left: f32, right: f32) -> f32 {
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
-fn root_column<Symbol, Costs>(query: &[&Symbol], costs: &Costs) -> Vec<f32>
+fn root_column<Costs>(query: &[&Symbol], costs: &Costs) -> Vec<f32>
 where
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     // `column[r]` is wed(query[..r], empty). Reaching the empty data prefix
     // requires deleting every symbol in the query prefix.
@@ -99,14 +100,14 @@ where
 }
 
 /// Advances a weighted-edit-distance column by one data symbol.
-fn step_dp<Symbol, Costs>(
+fn step_dp<Costs>(
     query: &[&Symbol],
     data_symbol: &Symbol,
     previous: &[f32],
     costs: &Costs,
 ) -> Vec<f32>
 where
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     debug_assert_eq!(previous.len(), query.len() + 1);
 

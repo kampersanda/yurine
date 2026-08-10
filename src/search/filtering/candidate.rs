@@ -1,12 +1,10 @@
 //! MinCand threshold-subsequence selection.
 
-use std::hash::Hash;
-
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
-use crate::types::Position;
+use crate::types::{Position, Symbol};
 
 /// The two-approximation MinCand selector described in the design material.
 #[derive(Debug, Clone, Copy, Default)]
@@ -15,18 +13,17 @@ pub struct MinCandidateSelector;
 impl MinCandidateSelector {
     /// Selects a subsequence complete for matches with distance at most
     /// `threshold`.
-    pub fn select<Symbol, Costs>(
+    pub fn select<Costs>(
         &self,
         query: &[Symbol],
         threshold: Cost,
         eta: Cost,
-        index: &PostingsIndex<Symbol>,
+        index: &PostingsIndex,
         costs: &Costs,
-        neighborhood: &SubstitutionNeighborhood<Symbol>,
+        neighborhood: &SubstitutionNeighborhood,
     ) -> Result<Vec<Position>>
     where
-        Symbol: Eq + Hash + Clone,
-        Costs: EditCosts<Symbol>,
+        Costs: EditCosts,
     {
         let threshold = threshold.next_up()?;
         struct Item {

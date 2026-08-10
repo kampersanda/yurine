@@ -2,14 +2,13 @@ pub mod candidate;
 pub mod neighborhood;
 
 use std::collections::HashSet;
-use std::hash::Hash;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::search::Candidate;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
-use crate::types::Position;
+use crate::types::{Position, Symbol};
 
 /// Generates candidate anchors.
 ///
@@ -19,17 +18,16 @@ use crate::types::Position;
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
 /// outside `query`.
-pub(super) fn generate_candidates<Symbol, Costs>(
+pub(super) fn generate_candidates<Costs>(
     query: &[Symbol],
     selected: &[Position],
     eta: Cost,
-    index: &PostingsIndex<Symbol>,
+    index: &PostingsIndex,
     costs: &Costs,
-    neighborhood: &SubstitutionNeighborhood<Symbol>,
+    neighborhood: &SubstitutionNeighborhood,
 ) -> Result<Vec<Candidate>>
 where
-    Symbol: Eq + Hash + Clone,
-    Costs: EditCosts<Symbol>,
+    Costs: EditCosts,
 {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();

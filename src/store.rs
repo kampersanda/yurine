@@ -1,21 +1,18 @@
 //! Storage abstractions for indexed strings.
 
 use std::collections::HashSet;
-use std::hash::Hash;
 
 use crate::errors::Result;
-use crate::types::StringId;
+use crate::types::{StringId, Symbol};
 
 /// A builder for a [`CorpusStore`].
-pub struct CorpusStoreBuilder<Symbol> {
+#[derive(Debug, Default)]
+pub struct CorpusStoreBuilder {
     strings: Vec<Vec<Symbol>>,
     alphabet: Vec<Symbol>,
 }
 
-impl<Symbol> CorpusStoreBuilder<Symbol>
-where
-    Symbol: Eq + Clone + Hash + Ord,
-{
+impl CorpusStoreBuilder {
     /// Creates a new builder.
     pub fn new() -> Self {
         Self {
@@ -28,8 +25,8 @@ where
     pub fn add_sequence(&mut self, sequence: Vec<Symbol>) {
         let mut unique_symbols = HashSet::new();
         for symbol in &sequence {
-            if unique_symbols.insert(symbol.clone()) {
-                self.alphabet.push(symbol.clone());
+            if unique_symbols.insert(*symbol) {
+                self.alphabet.push(*symbol);
             }
         }
         self.strings.push(sequence);
@@ -37,7 +34,7 @@ where
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(self) -> CorpusStore<Symbol> {
+    pub fn build(self) -> CorpusStore {
         CorpusStore {
             strings: self.strings,
             alphabet: self.alphabet,
@@ -45,13 +42,13 @@ where
     }
 }
 
-pub struct CorpusStore<Symbol> {
+pub struct CorpusStore {
     strings: Vec<Vec<Symbol>>,
     alphabet: Vec<Symbol>,
 }
 
 /// Read access to indexed token sequences.
-impl<Symbol> CorpusStore<Symbol> {
+impl CorpusStore {
     /// Returns the sequence identified by `id`, or `None` when it is unknown.
     pub fn sequence(&self, id: StringId) -> Result<Option<&[Symbol]>> {
         let index = id.as_usize();

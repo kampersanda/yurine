@@ -1,19 +1,15 @@
 //! Postings index mapping symbols to their occurrences in the corpus.
 
 use std::collections::HashMap;
-use std::hash::Hash;
 
-use crate::types::Posting;
+use crate::types::{Posting, Symbol};
 
 /// Postings index mapping symbols to their occurrences in the corpus.
-pub struct PostingsIndex<Symbol> {
+pub struct PostingsIndex {
     postings: HashMap<Symbol, Vec<Posting>>,
 }
 
-impl<Symbol> PostingsIndex<Symbol>
-where
-    Symbol: Eq + Hash,
-{
+impl PostingsIndex {
     /// Returns indexed occurrences in `(StringId, Position)` order.
     ///
     /// The iterator does not emit duplicates.
@@ -31,14 +27,11 @@ where
 
 /// Builds a postings index from symbols and their occurrences.
 #[derive(Debug, Default)]
-pub struct PostingsIndexBuilder<Symbol> {
+pub struct PostingsIndexBuilder {
     postings: HashMap<Symbol, Vec<Posting>>,
 }
 
-impl<Symbol> PostingsIndexBuilder<Symbol>
-where
-    Symbol: Eq + Hash,
-{
+impl PostingsIndexBuilder {
     /// Creates a new postings index builder.
     pub fn new() -> Self {
         Self {
@@ -52,7 +45,7 @@ where
     }
 
     /// Builds an index whose postings are ordered and contain no duplicates.
-    pub fn build(mut self) -> PostingsIndex<Symbol> {
+    pub fn build(mut self) -> PostingsIndex {
         for postings in self.postings.values_mut() {
             postings.sort_unstable_by_key(|posting| (posting.string_id, posting.position));
             postings.dedup();
@@ -66,7 +59,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::PostingsIndexBuilder;
-    use crate::types::{Position, Posting, StringId};
+    use crate::types::{Position, Posting, StringId, Symbol};
 
     #[test]
     fn build_orders_and_deduplicates_postings() {
@@ -84,17 +77,18 @@ mod tests {
         };
 
         let mut builder = PostingsIndexBuilder::new();
-        builder.add_posting('a', third);
-        builder.add_posting('a', first);
-        builder.add_posting('a', second);
-        builder.add_posting('a', first);
+        let symbol = Symbol::new(0);
+        builder.add_posting(symbol, third);
+        builder.add_posting(symbol, first);
+        builder.add_posting(symbol, second);
+        builder.add_posting(symbol, first);
 
         let index = builder.build();
 
         assert_eq!(
-            index.postings(&'a').collect::<Vec<_>>(),
+            index.postings(&symbol).collect::<Vec<_>>(),
             [first, second, third]
         );
-        assert_eq!(index.frequency(&'a'), 3);
+        assert_eq!(index.frequency(&symbol), 3);
     }
 }
