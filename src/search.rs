@@ -8,7 +8,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::Result;
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId};
+use crate::types::{Position, StringId, Symbol};
 
 use filtering::neighborhood::SubstitutionNeighborhood;
 
@@ -41,7 +41,7 @@ pub struct SearchEngine<Costs> {
 
 impl<Costs> SearchEngine<Costs>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     /// Creates a search engine.
     pub fn new(costs: Costs, index: PostingsIndex, store: CorpusStore) -> Result<Self> {

@@ -7,23 +7,21 @@ use std::fmt;
 use std::ops::Sub;
 
 use crate::errors::{Error, Result};
-use crate::types::Symbol;
-
 /// Supplies the costs that define a weighted edit distance.
 ///
 /// The search direction is always from the query to a data substring. Thus,
-/// deletion consumes a query symbol and insertion consumes a data symbol.
-pub trait EditCosts {
+/// deletion consumes a query token and insertion consumes a data token.
+pub trait EditCosts<Token> {
     /// Returns the cost of replacing `from` with `to`.
     ///
-    /// If `from` and `to` are the same symbol, this must return zero.
-    fn substitution(&self, from: Symbol, to: Symbol) -> Cost;
+    /// If `from` and `to` are the same token, this must return zero.
+    fn substitution(&self, from: &Token, to: &Token) -> Cost;
 
-    /// Returns the cost of deleting a query symbol.
-    fn deletion(&self, symbol: Symbol) -> Cost;
+    /// Returns the cost of deleting a query token.
+    fn deletion(&self, token: &Token) -> Cost;
 
-    /// Returns the cost of inserting a data symbol.
-    fn insertion(&self, symbol: Symbol) -> Cost;
+    /// Returns the cost of inserting a data token.
+    fn insertion(&self, token: &Token) -> Cost;
 }
 
 /// A finite, non-negative, single-precision edit cost or search threshold.
@@ -164,5 +162,45 @@ impl Sub<f32> for Cost {
 
     fn sub(self, other: f32) -> f32 {
         self.0 - other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cost, EditCosts};
+
+    struct CharacterCosts;
+
+    impl EditCosts<char> for CharacterCosts {
+        fn substitution(&self, from: &char, to: &char) -> Cost {
+            if from == to {
+                Cost::ZERO
+            } else if from.eq_ignore_ascii_case(to) {
+                Cost::new_const(0.5)
+            } else {
+                Cost::ONE
+            }
+        }
+
+        fn deletion(&self, token: &char) -> Cost {
+            if token.is_ascii_punctuation() {
+                Cost::new_const(0.25)
+            } else {
+                Cost::ONE
+            }
+        }
+
+        fn insertion(&self, token: &char) -> Cost {
+            self.deletion(token)
+        }
+    }
+
+    #[test]
+    fn edit_costs_can_depend_on_tokens() {
+        let costs = CharacterCosts;
+
+        assert_eq!(costs.substitution(&'a', &'A'), 0.5);
+        assert_eq!(costs.deletion(&'.'), 0.25);
+        assert_eq!(costs.insertion(&'a'), Cost::ONE);
     }
 }

@@ -29,7 +29,7 @@ pub(super) fn verify<Costs>(
     costs: &Costs,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     let threshold = threshold.next_up()?;
     let string_ids = validated_candidate_strings(query, candidates, corpus)?;
@@ -71,7 +71,7 @@ fn enumerate_matches<Costs>(
     matches: &mut Vec<Match>,
 ) -> Result<()>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     // The two DP columns are reused across all O(n^2) cells of one data
     // string; only their contents are rewritten below.
@@ -90,7 +90,7 @@ where
         for query_symbol in query {
             let deletion = add_distance(
                 previous.last().copied().unwrap_or(0.0),
-                costs.deletion(*query_symbol).get(),
+                costs.deletion(query_symbol).get(),
             );
             previous.push(deletion);
         }
@@ -101,7 +101,7 @@ where
             current.clear();
             current.push(add_distance(
                 previous[0],
-                costs.insertion(*data_symbol).get(),
+                costs.insertion(data_symbol).get(),
             ));
 
             for (query_index, query_symbol) in query.iter().enumerate() {
@@ -111,13 +111,13 @@ where
                 // insertion consumes only the data symbol.
                 let substitution = add_distance(
                     previous[query_index],
-                    costs.substitution(*query_symbol, *data_symbol).get(),
+                    costs.substitution(query_symbol, data_symbol).get(),
                 );
                 let deletion =
-                    add_distance(current[query_index], costs.deletion(*query_symbol).get());
+                    add_distance(current[query_index], costs.deletion(query_symbol).get());
                 let insertion = add_distance(
                     previous[query_index + 1],
-                    costs.insertion(*data_symbol).get(),
+                    costs.insertion(data_symbol).get(),
                 );
                 current.push(substitution.min(deletion).min(insertion));
             }

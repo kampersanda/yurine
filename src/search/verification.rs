@@ -30,7 +30,7 @@ impl Verifier {
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts,
+        Costs: EditCosts<Symbol>,
     {
         match self {
             Self::BidirectionalTrie => {
@@ -96,7 +96,7 @@ fn add_distance(left: f32, right: f32) -> f32 {
 /// infinity instead of being confused with an exact, representable maximum.
 fn root_column<Costs>(query: &[Symbol], costs: &Costs) -> Vec<f32>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     // `column[r]` is wed(query[..r], empty). Reaching the empty data prefix
     // requires deleting every symbol in the query prefix.
@@ -105,7 +105,7 @@ where
     for query_symbol in query {
         column.push(add_distance(
             column.last().copied().unwrap_or(0.0),
-            costs.deletion(*query_symbol).get(),
+            costs.deletion(query_symbol).get(),
         ));
     }
     column
@@ -119,7 +119,7 @@ fn step_dp<Costs>(
     costs: &Costs,
 ) -> Vec<f32>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     debug_assert_eq!(previous.len(), query.len() + 1);
 
@@ -129,7 +129,7 @@ where
     let mut current = Vec::with_capacity(query.len() + 1);
     current.push(add_distance(
         previous[0],
-        costs.insertion(data_symbol).get(),
+        costs.insertion(&data_symbol).get(),
     ));
     for (query_index, query_symbol) in query.iter().enumerate() {
         // The three predecessors consume both symbols, only the data symbol,
@@ -137,13 +137,13 @@ where
         // wed(query, data prefix).
         let substitution = add_distance(
             previous[query_index],
-            costs.substitution(*query_symbol, data_symbol).get(),
+            costs.substitution(query_symbol, &data_symbol).get(),
         );
         let insertion = add_distance(
             previous[query_index + 1],
-            costs.insertion(data_symbol).get(),
+            costs.insertion(&data_symbol).get(),
         );
-        let deletion = add_distance(current[query_index], costs.deletion(*query_symbol).get());
+        let deletion = add_distance(current[query_index], costs.deletion(query_symbol).get());
         current.push(substitution.min(insertion).min(deletion));
     }
     current
@@ -159,16 +159,16 @@ mod tests {
 
     struct UnitCosts;
 
-    impl EditCosts for UnitCosts {
-        fn substitution(&self, from: Symbol, to: Symbol) -> Cost {
+    impl EditCosts<Symbol> for UnitCosts {
+        fn substitution(&self, from: &Symbol, to: &Symbol) -> Cost {
             if from == to { Cost::ZERO } else { Cost::ONE }
         }
 
-        fn deletion(&self, _symbol: Symbol) -> Cost {
+        fn deletion(&self, _symbol: &Symbol) -> Cost {
             Cost::ONE
         }
 
-        fn insertion(&self, _symbol: Symbol) -> Cost {
+        fn insertion(&self, _symbol: &Symbol) -> Cost {
             Cost::ONE
         }
     }
