@@ -1,5 +1,7 @@
 //! Storage abstractions for indexed strings.
 
+use std::collections::HashSet;
+
 use crate::errors::Result;
 use crate::types::{StringId, Symbol};
 
@@ -7,7 +9,7 @@ use crate::types::{StringId, Symbol};
 #[derive(Debug, Default)]
 pub struct CorpusStoreBuilder {
     strings: Vec<Vec<Symbol>>,
-    alphabet: Vec<Symbol>,
+    alphabet: HashSet<Symbol>,
 }
 
 impl CorpusStoreBuilder {
@@ -15,7 +17,7 @@ impl CorpusStoreBuilder {
     pub fn new() -> Self {
         Self {
             strings: Vec::new(),
-            alphabet: Vec::new(),
+            alphabet: HashSet::new(),
         }
     }
 
@@ -26,12 +28,12 @@ impl CorpusStoreBuilder {
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(mut self) -> CorpusStore {
-        self.alphabet.sort_unstable();
-        self.alphabet.dedup();
+    pub fn build(self) -> CorpusStore {
+        let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
+        alphabet.sort_unstable();
         CorpusStore {
             strings: self.strings,
-            alphabet: self.alphabet,
+            alphabet,
         }
     }
 }
