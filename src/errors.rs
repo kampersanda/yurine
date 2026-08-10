@@ -10,13 +10,13 @@ pub enum Error {
     #[error("string identifier exceeds u32")]
     StringIdOverflow,
 
-    /// A vocabulary contains too many tokens for a `u32` symbol.
-    #[error("symbol exceeds u32")]
-    SymbolOverflow,
-
     /// A string or range endpoint is too large for a `u32` position.
     #[error("position exceeds u32")]
     PositionOverflow,
+
+    /// A vocabulary contains too many tokens for a `u32` symbol.
+    #[error("symbol exceeds u32")]
+    SymbolOverflow,
 
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]
