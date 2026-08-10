@@ -125,3 +125,36 @@ impl Display for Symbol {
         self.0.fmt(formatter)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Position, StringId, Symbol};
+    use crate::errors::Error;
+
+    #[test]
+    fn fixed_width_values_round_trip_through_public_representations() {
+        let string_id = StringId::from_usize(12).unwrap();
+        let position = Position::from_usize(34).unwrap();
+        let symbol = Symbol::from_usize(56).unwrap();
+
+        assert_eq!(string_id.get(), 12);
+        assert_eq!(string_id.as_usize(), 12);
+        assert_eq!(string_id.to_string(), "12");
+        assert_eq!(position.get(), 34);
+        assert_eq!(position.as_usize(), 34);
+        assert_eq!(position.to_string(), "34");
+        assert_eq!(symbol.get(), 56);
+        assert_eq!(symbol.as_usize(), 56);
+        assert_eq!(symbol.to_string(), "56");
+    }
+
+    #[test]
+    fn unknown_symbol_is_reserved_from_vocabulary_values() {
+        assert_eq!(
+            Symbol::from_usize(u32::MAX as usize),
+            Err(Error::SymbolOverflow)
+        );
+        assert!(Symbol::UNKNOWN.is_unknown());
+        assert!(!Symbol::new(u32::MAX - 1).is_unknown());
+    }
+}

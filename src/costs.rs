@@ -167,7 +167,10 @@ impl Sub<f32> for Cost {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use super::{Cost, EditCosts};
+    use crate::errors::Error;
 
     struct CharacterCosts;
 
@@ -202,5 +205,41 @@ mod tests {
         assert_eq!(costs.substitution(&'a', &'A'), 0.5);
         assert_eq!(costs.deletion(&'.'), 0.25);
         assert_eq!(costs.insertion(&'a'), Cost::ONE);
+    }
+
+    #[test]
+    fn accepts_finite_non_negative_costs_and_normalizes_negative_zero() {
+        assert_eq!(Cost::new(1.25).unwrap().get(), 1.25);
+        assert_eq!(Cost::new(-0.0).unwrap(), Cost::ZERO);
+        assert_eq!(Cost::new(-0.0).unwrap().get().to_bits(), 0.0_f32.to_bits());
+    }
+
+    #[test]
+    fn rejects_negative_and_non_finite_costs() {
+        for value in [-0.1, f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            assert!(matches!(Cost::new(value), Err(Error::InvalidCost(_))));
+        }
+    }
+
+    #[test]
+    fn compares_costs_in_numeric_order() {
+        let low = Cost::new_const(0.25);
+        let high = Cost::new_const(0.75);
+
+        assert_eq!(low.cmp(&high), Ordering::Less);
+        assert_eq!(low.min(high), low);
+        assert_eq!(low.max(high), high);
+        assert!(low < 0.5);
+        assert!(0.5 < high);
+        assert_eq!(high - 0.25, 0.5);
+    }
+
+    #[test]
+    fn next_up_returns_the_smallest_larger_cost() {
+        let next = Cost::ONE.next_up().unwrap();
+
+        assert!(next > Cost::ONE);
+        assert_eq!(next.get().to_bits(), Cost::ONE.get().to_bits() + 1);
+        assert!(matches!(Cost::MAX.next_up(), Err(Error::InvalidCost(value)) if value == f32::MAX));
     }
 }
