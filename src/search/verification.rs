@@ -164,7 +164,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Verifier;
+    use super::{Verifier, add_distance};
     use crate::costs::{Cost, EditCosts};
     use crate::search::{Candidate, Match};
     use crate::store::{CorpusStore, CorpusStoreBuilder};
@@ -186,43 +186,91 @@ mod tests {
         }
     }
 
-    fn fixture() -> ([Symbol; 1], [Candidate; 1], CorpusStore) {
-        let symbol = Symbol::new(0);
+    fn corpus(symbols: Vec<Symbol>) -> CorpusStore {
         let mut builder = CorpusStoreBuilder::new();
-        builder.add_string(vec![symbol, symbol], vec![0..1, 1..2]);
-        let candidate = Candidate {
-            string_id: StringId::new(0),
-            data_position: Position::new(0),
-            query_position: Position::new(0),
-        };
-        ([symbol], [candidate], builder.build())
+        let byte_ranges = (0..symbols.len())
+            .map(|position| position..position + 1)
+            .collect();
+        builder.add_string(symbols, byte_ranges);
+        builder.build()
     }
 
     #[test]
-    fn bidirectional_trie_dispatches_to_anchor_local_verification() {
-        let (query, candidates, corpus) = fixture();
+    fn bidirectional_trie_returns_each_anchored_interval_once_in_range_order() {
+        let a = Symbol::new(0);
+        let b = Symbol::new(1);
+        let x = Symbol::new(2);
+        let corpus = corpus(vec![a, x, b]);
+        let candidates: Vec<_> = (0..3)
+            .flat_map(|data_position| {
+                (0..2).map(move |query_position| Candidate {
+                    string_id: StringId::new(0),
+                    data_position: Position::new(data_position),
+                    query_position: Position::new(query_position),
+                })
+            })
+            .collect();
 
         let matches = Verifier::BidirectionalTrie
-            .verify(&query, &candidates, &corpus, Cost::ZERO, &UnitCosts)
+            .verify(&[a, b], &candidates, &corpus, Cost::ONE, &UnitCosts)
             .unwrap();
 
         assert_eq!(
             matches,
-            [Match {
-                string_id: StringId::new(0),
-                token_range: Position::new(0)..Position::new(1),
-                byte_range: 0..1,
-                distance: Cost::ZERO,
-            }]
+            [
+                Match {
+                    string_id: StringId::new(0),
+                    token_range: Position::new(0)..Position::new(1),
+                    byte_range: 0..1,
+                    distance: Cost::ONE,
+                },
+                Match {
+                    string_id: StringId::new(0),
+                    token_range: Position::new(0)..Position::new(2),
+                    byte_range: 0..2,
+                    distance: Cost::ONE,
+                },
+                Match {
+                    string_id: StringId::new(0),
+                    token_range: Position::new(0)..Position::new(3),
+                    byte_range: 0..3,
+                    distance: Cost::ONE,
+                },
+                Match {
+                    string_id: StringId::new(0),
+                    token_range: Position::new(1)..Position::new(3),
+                    byte_range: 1..3,
+                    distance: Cost::ONE,
+                },
+                Match {
+                    string_id: StringId::new(0),
+                    token_range: Position::new(2)..Position::new(3),
+                    byte_range: 2..3,
+                    distance: Cost::ONE,
+                },
+            ]
         );
     }
 
     #[test]
-    fn smith_waterman_dispatches_to_exhaustive_verification() {
-        let (query, candidates, corpus) = fixture();
+    fn smith_waterman_exhaustively_checks_each_candidate_string_once() {
+        let a = Symbol::new(0);
+        let corpus = corpus(vec![a, a]);
+        let duplicate_candidates = [
+            Candidate {
+                string_id: StringId::new(0),
+                data_position: Position::new(0),
+                query_position: Position::new(0),
+            },
+            Candidate {
+                string_id: StringId::new(0),
+                data_position: Position::new(1),
+                query_position: Position::new(0),
+            },
+        ];
 
         let matches = Verifier::SmithWaterman
-            .verify(&query, &candidates, &corpus, Cost::ZERO, &UnitCosts)
+            .verify(&[a], &duplicate_candidates, &corpus, Cost::ZERO, &UnitCosts)
             .unwrap();
 
         assert_eq!(
@@ -242,5 +290,89 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn verification_rejects_unknown_string_before_returning_matches() {
+        let symbol = Symbol::new(0);
+        let corpus = corpus(vec![symbol]);
+        let candidate = Candidate {
+            string_id: StringId::new(1),
+            data_position: Position::new(0),
+            query_position: Position::new(0),
+        };
+
+        let result = Verifier::BidirectionalTrie.verify(
+            &[symbol],
+            &[candidate],
+            &corpus,
+            Cost::ZERO,
+            &UnitCosts,
+        );
+
+        assert_eq!(
+            result,
+            Err(crate::errors::Error::UnknownString(StringId::new(1)))
+        );
+    }
+
+    #[test]
+    fn verification_rejects_out_of_bounds_data_position() {
+        let symbol = Symbol::new(0);
+        let corpus = corpus(vec![symbol]);
+        let candidate = Candidate {
+            string_id: StringId::new(0),
+            data_position: Position::new(1),
+            query_position: Position::new(0),
+        };
+
+        let result = Verifier::BidirectionalTrie.verify(
+            &[symbol],
+            &[candidate],
+            &corpus,
+            Cost::ZERO,
+            &UnitCosts,
+        );
+
+        assert_eq!(
+            result,
+            Err(crate::errors::Error::InvalidDataPosition {
+                position: Position::new(1),
+                data_len: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn verification_rejects_out_of_bounds_query_position() {
+        let symbol = Symbol::new(0);
+        let corpus = corpus(vec![symbol]);
+        let candidate = Candidate {
+            string_id: StringId::new(0),
+            data_position: Position::new(0),
+            query_position: Position::new(1),
+        };
+
+        let result = Verifier::BidirectionalTrie.verify(
+            &[symbol],
+            &[candidate],
+            &corpus,
+            Cost::ZERO,
+            &UnitCosts,
+        );
+
+        assert_eq!(
+            result,
+            Err(crate::errors::Error::InvalidQueryPosition {
+                position: Position::new(1),
+                query_len: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn distance_addition_does_not_saturate_at_maximum() {
+        assert_eq!(add_distance(f32::MAX, 0.0), f32::MAX);
+        assert_eq!(add_distance(f32::MAX, 1.0), f32::INFINITY);
     }
 }

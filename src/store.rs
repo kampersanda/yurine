@@ -91,7 +91,7 @@ impl CorpusStore {
 #[cfg(test)]
 mod tests {
     use super::CorpusStoreBuilder;
-    use crate::types::Symbol;
+    use crate::types::{StringId, Symbol};
 
     #[test]
     fn alphabet_is_unique_across_strings() {
@@ -105,5 +105,34 @@ mod tests {
         let store = builder.build();
 
         assert_eq!(store.alphabet(), [first, second, third]);
+    }
+
+    #[test]
+    fn returns_each_string_with_its_byte_ranges() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let mut builder = CorpusStoreBuilder::new();
+        builder.add_string(vec![first, second], vec![0..1, 1..4]);
+        let store = builder.build();
+
+        assert_eq!(store.len(), 1);
+        assert!(!store.is_empty());
+        assert_eq!(
+            store.string(StringId::new(0)).unwrap(),
+            Some(&[first, second][..])
+        );
+        assert_eq!(
+            store.byte_ranges(StringId::new(0)).unwrap(),
+            Some(&[0..1, 1..4][..])
+        );
+    }
+
+    #[test]
+    fn unknown_string_returns_none() {
+        let store = CorpusStoreBuilder::new().build();
+
+        assert!(store.is_empty());
+        assert_eq!(store.string(StringId::new(0)).unwrap(), None);
+        assert_eq!(store.byte_ranges(StringId::new(0)).unwrap(), None);
     }
 }

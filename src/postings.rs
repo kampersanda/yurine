@@ -91,4 +91,13 @@ mod tests {
         );
         assert_eq!(index.frequency(symbol), 3);
     }
+
+    #[test]
+    fn absent_symbol_has_no_postings() {
+        let index = PostingsIndexBuilder::new().build();
+        let absent = Symbol::new(7);
+
+        assert_eq!(index.postings(absent).collect::<Vec<_>>(), []);
+        assert_eq!(index.frequency(absent), 0);
+    }
 }

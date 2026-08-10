@@ -183,8 +183,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::RangeSearchParams;
+    use super::{RangeSearchParams, automatic_eta};
     use crate::costs::{Cost, EditCosts};
+    use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::search::{Match, SearchEngine};
     use crate::store::CorpusStoreBuilder;
@@ -298,5 +299,41 @@ mod tests {
             assert_eq!(substitution.join().unwrap()[0].distance, 0.4);
             assert_eq!(deletion.join().unwrap()[0].distance, 0.25);
         });
+    }
+
+    #[test]
+    fn parameters_expose_threshold_and_optional_eta() {
+        let threshold = Cost::new_const(0.75);
+        let eta = Cost::new_const(0.25);
+
+        let automatic = RangeSearchParams::new(threshold);
+        let explicit = automatic.with_eta(eta);
+
+        assert_eq!(automatic.threshold(), threshold);
+        assert_eq!(automatic.eta(), None);
+        assert_eq!(explicit.threshold(), threshold);
+        assert_eq!(explicit.eta(), Some(eta));
+    }
+
+    #[test]
+    fn automatic_eta_divides_threshold_by_query_length() {
+        assert_eq!(automatic_eta(Cost::new_const(0.75), 3).unwrap(), 0.25);
+        assert_eq!(automatic_eta(Cost::ONE, 0).unwrap(), Cost::ZERO);
+    }
+
+    #[test]
+    fn falls_back_to_exhaustive_search_when_no_threshold_subsequence_exists() {
+        let matches = engine()
+            .range_search("x", &RangeSearchParams::new(Cost::ONE))
+            .unwrap();
+
+        assert_eq!(matches, expected_matches(Cost::ONE));
+    }
+
+    #[test]
+    fn empty_query_reports_unavailable_threshold_subsequence() {
+        let result = engine().range_search("", &RangeSearchParams::new(Cost::ZERO));
+
+        assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
     }
 }

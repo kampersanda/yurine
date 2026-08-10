@@ -116,8 +116,29 @@ where
 #[cfg(test)]
 mod tests {
     use super::EncodedQuery;
+    use crate::costs::{Cost, EditCosts};
     use crate::types::Symbol;
     use crate::vocabulary::VocabularyBuilder;
+
+    struct CharacterCosts;
+
+    impl EditCosts<char> for CharacterCosts {
+        fn substitution(&self, from: &char, to: &char) -> Cost {
+            if from == to {
+                Cost::ZERO
+            } else {
+                Cost::new_const(0.25)
+            }
+        }
+
+        fn deletion(&self, _token: &char) -> Cost {
+            Cost::new_const(0.5)
+        }
+
+        fn insertion(&self, _token: &char) -> Cost {
+            Cost::new_const(0.75)
+        }
+    }
 
     #[test]
     fn query_only_tokens_receive_stable_distinct_symbols() {
@@ -131,5 +152,24 @@ mod tests {
             query.symbols(),
             [Symbol::new(1), Symbol::new(2), Symbol::new(1)]
         );
+    }
+
+    #[test]
+    fn encoded_costs_delegate_known_and_query_only_symbols_to_token_costs() {
+        let mut builder = VocabularyBuilder::new();
+        builder.insert('a');
+        let vocabulary = builder.build().unwrap();
+        let query = EncodedQuery::new(vec!['a', 'x'], &vocabulary).unwrap();
+        let encoded_costs = query.costs(&vocabulary, &CharacterCosts);
+        let known = Symbol::new(0);
+        let query_only = Symbol::new(1);
+
+        assert_eq!(encoded_costs.substitution(&known, &known), Cost::ZERO);
+        assert_eq!(
+            encoded_costs.substitution(&query_only, &known),
+            Cost::new_const(0.25)
+        );
+        assert_eq!(encoded_costs.deletion(&query_only), Cost::new_const(0.5));
+        assert_eq!(encoded_costs.insertion(&known), Cost::new_const(0.75));
     }
 }

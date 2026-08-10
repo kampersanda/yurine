@@ -185,4 +185,13 @@ mod tests {
         );
         assert_eq!(vocabulary.token(Symbol::UNKNOWN), None);
     }
+
+    #[test]
+    fn empty_builder_produces_an_empty_vocabulary() {
+        let vocabulary = VocabularyBuilder::<char>::new().build().unwrap();
+
+        assert!(vocabulary.is_empty());
+        assert_eq!(vocabulary.len(), 0);
+        assert_eq!(vocabulary.symbol(&'a'), Symbol::UNKNOWN);
+    }
 }

@@ -55,3 +55,83 @@ where
     }
     Ok(candidates)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::generate_candidates;
+    use super::neighborhood::SubstitutionNeighborhood;
+    use crate::costs::Cost;
+    use crate::costs::levenshtein::LevenshteinCosts;
+    use crate::errors::Error;
+    use crate::postings::PostingsIndexBuilder;
+    use crate::search::Candidate;
+    use crate::types::{Position, Posting, StringId, Symbol};
+
+    #[test]
+    fn generates_candidates_in_selected_position_and_posting_order() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let mut index = PostingsIndexBuilder::new();
+        index.add_posting(
+            first,
+            Posting {
+                string_id: StringId::new(1),
+                position: Position::new(2),
+            },
+        );
+        index.add_posting(
+            second,
+            Posting {
+                string_id: StringId::new(0),
+                position: Position::new(3),
+            },
+        );
+        let neighborhood = SubstitutionNeighborhood::new([first, second]).unwrap();
+
+        let candidates = generate_candidates(
+            &[first, second],
+            &[Position::new(1), Position::new(0)],
+            Cost::ZERO,
+            &index.build(),
+            &LevenshteinCosts,
+            &neighborhood,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candidates,
+            [
+                Candidate {
+                    string_id: StringId::new(0),
+                    data_position: Position::new(3),
+                    query_position: Position::new(1),
+                },
+                Candidate {
+                    string_id: StringId::new(1),
+                    data_position: Position::new(2),
+                    query_position: Position::new(0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_selected_position_outside_the_query() {
+        let result = generate_candidates(
+            &[Symbol::new(0)],
+            &[Position::new(1)],
+            Cost::ZERO,
+            &PostingsIndexBuilder::new().build(),
+            &LevenshteinCosts,
+            &SubstitutionNeighborhood::new([]).unwrap(),
+        );
+
+        assert_eq!(
+            result,
+            Err(Error::InvalidQueryPosition {
+                position: Position::new(1),
+                query_len: 1,
+            })
+        );
+    }
+}

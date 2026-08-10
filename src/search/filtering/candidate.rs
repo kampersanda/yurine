@@ -93,3 +93,86 @@ impl MinCandidateSelector {
         Ok(selected)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MinCandidateSelector;
+    use crate::costs::Cost;
+    use crate::costs::levenshtein::LevenshteinCosts;
+    use crate::errors::Error;
+    use crate::postings::PostingsIndexBuilder;
+    use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
+    use crate::types::{Position, Posting, StringId, Symbol};
+
+    fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
+        for position in 0..count {
+            builder.add_posting(
+                symbol,
+                Posting {
+                    string_id: StringId::new(0),
+                    position: Position::new(position),
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn selects_the_query_position_with_fewer_candidates() {
+        let common = Symbol::new(0);
+        let rare = Symbol::new(1);
+        let mut index = PostingsIndexBuilder::new();
+        add_occurrences(&mut index, common, 3);
+        add_occurrences(&mut index, rare, 1);
+        let neighborhood = SubstitutionNeighborhood::new([common, rare]).unwrap();
+
+        let selected = MinCandidateSelector
+            .select(
+                &[common, rare],
+                Cost::new_const(0.5),
+                Cost::ZERO,
+                &index.build(),
+                &LevenshteinCosts,
+                &neighborhood,
+            )
+            .unwrap();
+
+        assert_eq!(selected, [Position::new(1)]);
+    }
+
+    #[test]
+    fn selects_enough_positions_to_exceed_the_inclusive_threshold() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let neighborhood = SubstitutionNeighborhood::new([first, second]).unwrap();
+
+        let selected = MinCandidateSelector
+            .select(
+                &[first, second],
+                Cost::ONE,
+                Cost::ZERO,
+                &PostingsIndexBuilder::new().build(),
+                &LevenshteinCosts,
+                &neighborhood,
+            )
+            .unwrap();
+
+        assert_eq!(selected, [Position::new(0), Position::new(1)]);
+    }
+
+    #[test]
+    fn reports_when_total_contribution_cannot_exceed_threshold() {
+        let symbol = Symbol::new(0);
+        let neighborhood = SubstitutionNeighborhood::new([symbol]).unwrap();
+
+        let result = MinCandidateSelector.select(
+            &[symbol],
+            Cost::ONE,
+            Cost::ZERO,
+            &PostingsIndexBuilder::new().build(),
+            &LevenshteinCosts,
+            &neighborhood,
+        );
+
+        assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
+    }
+}
