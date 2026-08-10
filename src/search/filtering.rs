@@ -11,7 +11,7 @@ use crate::search::Candidate;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::Position;
 
-/// Generates `(string, data position, query position)` candidate anchors.
+/// Generates candidate anchors.
 ///
 /// Candidates are returned in selected-position, neighborhood, and postings
 /// order. Exact duplicate triples are removed while preserving their first

@@ -1,7 +1,5 @@
 //! Basic types for Yurine.
 
-pub mod costs;
-
 use std::fmt::Display;
 
 use crate::errors::{Error, Result};
@@ -74,6 +72,7 @@ impl Display for Position {
     }
 }
 
+/// A posting in the corpus, consisting of a string identifier and a symbol position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Posting {
     pub string_id: StringId,
