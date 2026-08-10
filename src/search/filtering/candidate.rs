@@ -23,7 +23,7 @@ impl MinCandidateSelector {
         neighborhood: &SubstitutionNeighborhood,
     ) -> Result<Vec<Position>>
     where
-        Costs: EditCosts,
+        Costs: EditCosts<Symbol>,
     {
         let threshold = threshold.next_up()?;
         struct Item {

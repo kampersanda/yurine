@@ -27,7 +27,7 @@ pub(super) fn generate_candidates<Costs>(
     neighborhood: &SubstitutionNeighborhood,
 ) -> Result<Vec<Candidate>>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();

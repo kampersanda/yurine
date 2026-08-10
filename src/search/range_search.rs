@@ -60,7 +60,7 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
 
 impl<Costs> SearchEngine<Costs>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     /// Finds non-empty substrings satisfying the configured range search.
     ///
@@ -139,7 +139,7 @@ fn verify_exhaustively<Costs>(
     costs: &Costs,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     // Smith-Waterman verification uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification

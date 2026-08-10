@@ -1,7 +1,6 @@
 //! Levenshtein edit costs.
 
 use super::{Cost, EditCosts};
-use crate::types::Symbol;
 
 /// Unit costs for the Levenshtein distance.
 #[derive(Debug, Clone, Copy, Default)]
@@ -14,16 +13,19 @@ impl LevenshteinCosts {
     }
 }
 
-impl EditCosts for LevenshteinCosts {
-    fn substitution(&self, from: Symbol, to: Symbol) -> Cost {
+impl<Token> EditCosts<Token> for LevenshteinCosts
+where
+    Token: Eq,
+{
+    fn substitution(&self, from: &Token, to: &Token) -> Cost {
         if from == to { Cost::ZERO } else { Cost::ONE }
     }
 
-    fn deletion(&self, _symbol: Symbol) -> Cost {
+    fn deletion(&self, _token: &Token) -> Cost {
         Cost::ONE
     }
 
-    fn insertion(&self, _symbol: Symbol) -> Cost {
+    fn insertion(&self, _token: &Token) -> Cost {
         Cost::ONE
     }
 }
@@ -32,24 +34,23 @@ impl EditCosts for LevenshteinCosts {
 mod tests {
     use super::LevenshteinCosts;
     use crate::costs::{Cost, EditCosts};
-    use crate::types::Symbol;
 
     #[test]
-    fn substitution_is_zero_for_equal_symbols_and_one_otherwise() {
+    fn substitution_is_zero_for_equal_tokens_and_one_otherwise() {
         let costs = LevenshteinCosts::new();
-        let first = Symbol::new(0);
-        let second = Symbol::new(1);
+        let tokyo = String::from("東京");
+        let another_tokyo = String::from("東京");
+        let kyoto = String::from("京都");
 
-        assert_eq!(costs.substitution(first, first), Cost::ZERO);
-        assert_eq!(costs.substitution(first, second), Cost::ONE);
+        assert_eq!(costs.substitution(&tokyo, &another_tokyo), Cost::ZERO);
+        assert_eq!(costs.substitution(&tokyo, &kyoto), Cost::ONE);
     }
 
     #[test]
     fn deletion_and_insertion_have_unit_cost() {
         let costs = LevenshteinCosts::new();
-        let symbol = Symbol::new(0);
 
-        assert_eq!(costs.deletion(symbol), Cost::ONE);
-        assert_eq!(costs.insertion(symbol), Cost::ONE);
+        assert_eq!(costs.deletion(&'a'), Cost::ONE);
+        assert_eq!(costs.insertion(&'a'), Cost::ONE);
     }
 }

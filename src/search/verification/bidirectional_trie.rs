@@ -21,7 +21,7 @@ struct TrieNode {
 impl TrieNode {
     fn root<Costs>(query: &[Symbol], costs: &Costs) -> Self
     where
-        Costs: EditCosts,
+        Costs: EditCosts<Symbol>,
     {
         Self {
             column: root_column(query, costs),
@@ -63,7 +63,7 @@ fn cached_prefix_distances<Costs, Data>(
     costs: &Costs,
 ) -> Vec<f32>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
     Data: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
@@ -116,7 +116,7 @@ pub(super) fn verify<Costs>(
     costs: &Costs,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts,
+    Costs: EditCosts<Symbol>,
 {
     let threshold = threshold.next_up()?;
     for candidate in candidates {
@@ -138,7 +138,7 @@ where
         let query_position = candidate.query_position.as_usize();
         let data_position = candidate.data_position.as_usize();
         let anchor_cost = costs
-            .substitution(query[query_position], data[data_position])
+            .substitution(&query[query_position], &data[data_position])
             .get();
         if anchor_cost >= threshold {
             continue;
