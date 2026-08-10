@@ -33,18 +33,18 @@ impl Display for Symbol {
     }
 }
 
-/// Assigns stable, consecutive symbols to distinct tokens.
+/// Builds a [`Vocabulary`] by assigning stable, consecutive symbols to tokens.
 #[derive(Debug, Clone)]
-pub struct Vocabulary<Token> {
+pub struct VocabularyBuilder<Token> {
     tokens: Vec<Token>,
     symbols: HashMap<Token, Symbol>,
 }
 
-impl<Token> Vocabulary<Token>
+impl<Token> VocabularyBuilder<Token>
 where
     Token: Clone + Eq + Hash,
 {
-    /// Creates an empty vocabulary.
+    /// Creates an empty vocabulary builder.
     pub fn new() -> Self {
         Self {
             tokens: Vec::new(),
@@ -57,22 +57,11 @@ where
         if let Some(&symbol) = self.symbols.get(&token) {
             return Ok(symbol);
         }
-
         let value = u32::try_from(self.tokens.len()).map_err(|_| Error::SymbolOverflow)?;
         let symbol = Symbol::new(value);
         self.tokens.push(token.clone());
         self.symbols.insert(token, symbol);
         Ok(symbol)
-    }
-
-    /// Returns the symbol assigned to `token`.
-    pub fn symbol(&self, token: &Token) -> Option<Symbol> {
-        self.symbols.get(token).copied()
-    }
-
-    /// Returns the token assigned to `symbol`.
-    pub fn token(&self, symbol: Symbol) -> Option<&Token> {
-        self.tokens.get(symbol.as_usize())
     }
 
     /// Inserts tokens as needed and returns their symbols in input order.
@@ -81,6 +70,45 @@ where
         I: IntoIterator<Item = Token>,
     {
         tokens.into_iter().map(|token| self.insert(token)).collect()
+    }
+
+    /// Finalizes this builder and returns a read-only vocabulary.
+    pub fn build(self) -> Vocabulary<Token> {
+        Vocabulary {
+            tokens: self.tokens,
+            symbols: self.symbols,
+        }
+    }
+}
+
+impl<Token> Default for VocabularyBuilder<Token>
+where
+    Token: Clone + Eq + Hash,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Read-only access to mappings between tokens and symbols.
+#[derive(Debug, Clone)]
+pub struct Vocabulary<Token> {
+    tokens: Vec<Token>,
+    symbols: HashMap<Token, Symbol>,
+}
+
+impl<Token> Vocabulary<Token>
+where
+    Token: Eq + Hash,
+{
+    /// Returns the symbol assigned to `token`.
+    pub fn symbol(&self, token: &Token) -> Option<Symbol> {
+        self.symbols.get(token).copied()
+    }
+
+    /// Returns the token assigned to `symbol`.
+    pub fn token(&self, symbol: Symbol) -> Option<&Token> {
+        self.tokens.get(symbol.as_usize())
     }
 
     /// Returns the number of distinct tokens.
@@ -94,33 +122,27 @@ where
     }
 }
 
-impl<Token> Default for Vocabulary<Token>
-where
-    Token: Clone + Eq + Hash,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Symbol, Vocabulary};
+    use super::{Symbol, VocabularyBuilder};
 
     #[test]
     fn insert_assigns_consecutive_symbols_and_reuses_existing_ones() {
-        let mut vocabulary = Vocabulary::new();
+        let mut builder = VocabularyBuilder::new();
 
-        assert_eq!(vocabulary.insert('b').unwrap(), Symbol::new(0));
-        assert_eq!(vocabulary.insert('a').unwrap(), Symbol::new(1));
-        assert_eq!(vocabulary.insert('b').unwrap(), Symbol::new(0));
+        assert_eq!(builder.insert('b').unwrap(), Symbol::new(0));
+        assert_eq!(builder.insert('a').unwrap(), Symbol::new(1));
+        assert_eq!(builder.insert('b').unwrap(), Symbol::new(0));
+
+        let vocabulary = builder.build();
         assert_eq!(vocabulary.len(), 2);
     }
 
     #[test]
     fn mappings_are_bidirectional() {
-        let mut vocabulary = Vocabulary::new();
-        let symbol = vocabulary.insert("東京").unwrap();
+        let mut builder = VocabularyBuilder::new();
+        let symbol = builder.insert("東京").unwrap();
+        let vocabulary = builder.build();
 
         assert_eq!(vocabulary.symbol(&"東京"), Some(symbol));
         assert_eq!(vocabulary.token(symbol), Some(&"東京"));
@@ -129,9 +151,9 @@ mod tests {
 
     #[test]
     fn encode_preserves_order_and_repeated_tokens() {
-        let mut vocabulary = Vocabulary::new();
+        let mut builder = VocabularyBuilder::new();
 
-        let symbols = vocabulary.encode(['a', 'b', 'a']).unwrap();
+        let symbols = builder.encode(['a', 'b', 'a']).unwrap();
 
         assert_eq!(symbols, [Symbol::new(0), Symbol::new(1), Symbol::new(0)]);
     }
