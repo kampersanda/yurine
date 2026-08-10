@@ -1,5 +1,6 @@
 //! Weighted edit-operation cost abstractions.
 
+pub mod custom;
 pub mod embedding;
 pub mod levenshtein;
 
