@@ -82,7 +82,8 @@ where
     /// verification instead of returning
     /// [`Error::ThresholdSubsequenceUnavailable`]. This occurs whenever the
     /// query's total filtering contribution is less than or equal to the
-    /// threshold. With unit costs, `threshold >= query.len()` is such a case.
+    /// threshold. With unit costs, `threshold >= tokenized_query.len()` is
+    /// such a case.
     ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query length `m` and
     /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` intervals.

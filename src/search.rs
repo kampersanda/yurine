@@ -7,7 +7,7 @@ use std::hash::Hash;
 use std::ops::Range;
 
 use crate::costs::{Cost, EditCosts};
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
 use crate::tokenization::Tokenizer;
@@ -57,6 +57,11 @@ where
     /// Creates a search engine from prebuilt token and symbol data.
     ///
     /// The index and store must use symbols assigned by `vocabulary`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownCorpusSymbol`] if the store contains a symbol
+    /// that is not present in `vocabulary`.
     pub fn new(
         tokenizer: T,
         vocabulary: Vocabulary<T::Token>,
@@ -64,6 +69,11 @@ where
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {
+        for symbol in store.alphabet() {
+            if vocabulary.token(*symbol).is_none() {
+                return Err(Error::UnknownCorpusSymbol(*symbol));
+            }
+        }
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
         Ok(Self {
             tokenizer,
@@ -73,5 +83,41 @@ where
             store,
             neighborhood,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SearchEngine;
+    use crate::costs::levenshtein::LevenshteinCosts;
+    use crate::errors::Error;
+    use crate::postings::PostingsIndexBuilder;
+    use crate::store::CorpusStoreBuilder;
+    use crate::tokenization::character::CharacterTokenizer;
+    use crate::types::Symbol;
+    use crate::vocabulary::VocabularyBuilder;
+
+    #[test]
+    fn rejects_corpus_symbol_absent_from_vocabulary() {
+        let mut vocabulary_builder = VocabularyBuilder::new();
+        vocabulary_builder.insert('a');
+        let vocabulary = vocabulary_builder.build().unwrap();
+        let unknown_symbol = Symbol::new(1);
+
+        let mut store_builder = CorpusStoreBuilder::new();
+        store_builder.add_string(vec![unknown_symbol]);
+
+        let result = SearchEngine::new(
+            CharacterTokenizer::new(),
+            vocabulary,
+            LevenshteinCosts::new(),
+            PostingsIndexBuilder::new().build(),
+            store_builder.build(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(Error::UnknownCorpusSymbol(symbol)) if symbol == unknown_symbol
+        ));
     }
 }

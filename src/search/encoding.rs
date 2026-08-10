@@ -8,8 +8,14 @@ use crate::errors::{Error, Result};
 use crate::types::Symbol;
 use crate::vocabulary::Vocabulary;
 
+/// A query represented in the corpus symbol space.
+///
+/// Known tokens use their vocabulary symbols. Query-only tokens use symbols
+/// starting at `vocabulary.len()` and exist only for this search call.
 pub(super) struct EncodedQuery<Token> {
     symbols: Vec<Symbol>,
+    // `unknown_tokens[i]` is represented by the temporary symbol whose raw
+    // value is `vocabulary.len() + i`.
     unknown_tokens: Vec<Token>,
 }
 
@@ -25,6 +31,9 @@ where
         for token in tokens {
             let symbol = vocabulary.symbol(&token);
             if symbol.is_unknown() {
+                // Reuse one temporary symbol for repeated occurrences so a
+                // query token keeps a stable identity throughout filtering
+                // and verification.
                 if let Some(symbol) = unknown_symbols.get(&token) {
                     symbols.push(*symbol);
                 } else {
@@ -65,6 +74,7 @@ where
     }
 }
 
+/// Adapts public token costs to the symbol costs used by search internals.
 pub(super) struct EncodedCosts<'a, Token, Costs> {
     vocabulary: &'a Vocabulary<Token>,
     unknown_tokens: &'a [Token],
@@ -76,6 +86,9 @@ where
     Token: Eq + Hash,
 {
     fn token(&self, symbol: &Symbol) -> &Token {
+        // SearchEngine validates that every corpus symbol belongs to the
+        // vocabulary. A symbol outside it is therefore query-local, and its
+        // offset identifies the corresponding entry in `unknown_tokens`.
         self.vocabulary
             .token(*symbol)
             .unwrap_or_else(|| &self.unknown_tokens[symbol.as_usize() - self.vocabulary.len()])
