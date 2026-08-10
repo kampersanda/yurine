@@ -21,10 +21,10 @@ impl CorpusStoreBuilder {
         }
     }
 
-    /// Adds a sequence to the corpus.
-    pub fn add_sequence(&mut self, sequence: Vec<Symbol>) {
-        self.alphabet.extend(sequence.iter().copied());
-        self.strings.push(sequence);
+    /// Adds a string to the corpus.
+    pub fn add_string(&mut self, string: Vec<Symbol>) {
+        self.alphabet.extend(string.iter().copied());
+        self.strings.push(string);
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
@@ -43,10 +43,10 @@ pub struct CorpusStore {
     alphabet: Vec<Symbol>,
 }
 
-/// Read access to indexed token sequences.
+/// Read access to indexed strings.
 impl CorpusStore {
-    /// Returns the sequence identified by `id`, or `None` when it is unknown.
-    pub fn sequence(&self, id: StringId) -> Result<Option<&[Symbol]>> {
+    /// Returns the string identified by `id`, or `None` when it is unknown.
+    pub fn string(&self, id: StringId) -> Result<Option<&[Symbol]>> {
         let index = id.as_usize();
         if index < self.strings.len() {
             Ok(Some(&self.strings[index]))
@@ -55,12 +55,12 @@ impl CorpusStore {
         }
     }
 
-    /// Returns the number of indexed sequences.
+    /// Returns the number of indexed strings.
     pub fn len(&self) -> usize {
         self.strings.len()
     }
 
-    /// Returns whether this store contains no sequences.
+    /// Returns whether this store contains no strings.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -77,13 +77,13 @@ mod tests {
     use crate::types::Symbol;
 
     #[test]
-    fn alphabet_is_unique_across_sequences() {
+    fn alphabet_is_unique_across_strings() {
         let first = Symbol::new(0);
         let second = Symbol::new(1);
         let third = Symbol::new(2);
         let mut builder = CorpusStoreBuilder::new();
-        builder.add_sequence(vec![second, first, second]);
-        builder.add_sequence(vec![first, third]);
+        builder.add_string(vec![second, first, second]);
+        builder.add_string(vec![first, third]);
 
         let store = builder.build();
 
