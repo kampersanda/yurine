@@ -1,5 +1,6 @@
 //! Weighted edit-operation cost abstractions.
 
+pub mod embedding;
 pub mod levenshtein;
 
 use std::cmp::Ordering;

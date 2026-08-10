@@ -30,6 +30,32 @@ pub enum Error {
     #[error("cost must be finite and non-negative, not {0}")]
     InvalidCost(f32),
 
+    /// An embedding store was created with zero dimensions.
+    #[error("embedding dimension must be greater than zero")]
+    ZeroEmbeddingDimension,
+
+    /// An embedding does not have the dimension required by its store.
+    #[error("embedding dimension must be {expected}, not {actual}")]
+    InvalidEmbeddingDimension {
+        /// The dimension configured for the store.
+        expected: usize,
+        /// The dimension of the supplied embedding.
+        actual: usize,
+    },
+
+    /// An embedding contains a value that is infinite or not a number.
+    #[error("embedding value at index {index} must be finite, not {value}")]
+    InvalidEmbeddingValue {
+        /// The zero-based index of the invalid value.
+        index: usize,
+        /// The invalid value.
+        value: f32,
+    },
+
+    /// An embedding has zero L2 norm and cannot be normalized.
+    #[error("embedding must have a non-zero L2 norm")]
+    ZeroNormEmbedding,
+
     /// A search threshold was the largest representable cost.
     #[error("search threshold must be less than f32::MAX, not {0}")]
     InvalidThreshold(f32),
