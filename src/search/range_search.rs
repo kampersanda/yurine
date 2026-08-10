@@ -183,12 +183,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{RangeSearchParams, automatic_eta};
+    use std::num::NonZeroUsize;
+
+    use super::{RangeSearchParams, automatic_eta, verify_exhaustively};
+    use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
+    use crate::search::SearchEngineBuilder;
+    use crate::search::encoding::EncodedQuery;
     use crate::search::{Match, SearchEngine};
     use crate::store::CorpusStoreBuilder;
+    use crate::tokenization::Tokenizer;
     use crate::tokenization::character::CharacterTokenizer;
     use crate::types::{Position, Posting, StringId};
     use crate::vocabulary::VocabularyBuilder;
@@ -335,5 +341,49 @@ mod tests {
         let result = engine().range_search("", &RangeSearchParams::new(Cost::ZERO));
 
         assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
+    }
+
+    #[test]
+    fn embedding_filter_and_verify_matches_exhaustive_verification() {
+        let mut embeddings = EmbeddingStore::new(NonZeroUsize::new(2).unwrap());
+        embeddings.insert('x', vec![0.8, 0.6]).unwrap();
+        embeddings.insert('y', vec![0.6, 0.8]).unwrap();
+        embeddings.insert('a', vec![1.0, 0.0]).unwrap();
+        embeddings.insert('b', vec![0.0, 1.0]).unwrap();
+        embeddings.insert('c', vec![-1.0, 0.0]).unwrap();
+
+        let mut builder = SearchEngineBuilder::new(
+            CharacterTokenizer::new(),
+            CosineEmbeddingCosts::new(embeddings),
+        );
+        builder.add_string("ab").unwrap();
+        builder.add_string("ba").unwrap();
+        builder.add_string("ac").unwrap();
+        let engine = builder.build().unwrap();
+        let threshold = Cost::new_const(0.5);
+        let eta = Cost::new_const(0.25);
+
+        let filtered = engine
+            .range_search("xy", &RangeSearchParams::new(threshold).with_eta(eta))
+            .unwrap();
+
+        let query = EncodedQuery::new(
+            engine
+                .tokenizer
+                .tokenize("xy")
+                .into_iter()
+                .map(|token| token.value)
+                .collect(),
+            &engine.vocabulary,
+        )
+        .unwrap();
+        let costs = query.costs(&engine.vocabulary, &engine.costs);
+        let exhaustive =
+            verify_exhaustively(query.symbols(), threshold, &engine.store, &costs).unwrap();
+
+        assert_eq!(filtered, exhaustive);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].string_id, StringId::new(0));
+        assert_eq!(filtered[0].token_range, Position::new(0)..Position::new(2));
     }
 }
