@@ -3,10 +3,10 @@
 pub mod bidirectional_trie;
 pub mod smith_waterman;
 
-use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
+use crate::store::CorpusStore;
 
 /// Verifies filtering candidates against an inclusive distance threshold.
 ///

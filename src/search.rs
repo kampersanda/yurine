@@ -5,7 +5,7 @@ mod verification;
 use std::hash::Hash;
 use std::ops::Range;
 
-use crate::corpus::CorpusStore;
+use crate::store::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::Result;
 use crate::postings::PostingsIndex;

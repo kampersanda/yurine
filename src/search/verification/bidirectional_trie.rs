@@ -4,10 +4,10 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use super::{Verifier, add_distance, root_column, step_dp, validated_candidate_data};
-use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
+use crate::store::CorpusStore;
 use crate::types::{Position, StringId};
 
 /// Local verification with query-position-specific forward and backward tries.

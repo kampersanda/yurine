@@ -3,10 +3,10 @@
 use std::collections::BTreeSet;
 
 use super::{Verifier, add_distance, validated_candidate_data};
-use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
+use crate::store::CorpusStore;
 use crate::types::{Position, StringId};
 
 /// Exact Smith-Waterman-based verification that preserves every start position.

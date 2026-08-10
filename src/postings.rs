@@ -1,4 +1,4 @@
-//! Postings-index abstractions used during filtering.
+//! Postings index mapping symbols to their occurrences in the corpus.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -6,6 +6,7 @@ use std::hash::Hash;
 use crate::errors::Result;
 use crate::types::Posting;
 
+/// Postings index mapping symbols to their occurrences in the corpus.
 pub struct PostingsIndex<Symbol> {
     postings: HashMap<Symbol, Vec<Posting>>,
 }
@@ -14,6 +15,7 @@ impl<Symbol> PostingsIndex<Symbol>
 where
     Symbol: Eq + Hash,
 {
+    /// Creates a new postings index.
     pub fn new() -> Self {
         Self {
             postings: HashMap::new(),

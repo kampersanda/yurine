@@ -2,7 +2,6 @@
 
 use std::hash::Hash;
 
-use crate::corpus::CorpusStore;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
@@ -12,6 +11,7 @@ use crate::search::verification::Verifier;
 use crate::search::verification::bidirectional_trie::BidirectionalTrieVerifier;
 use crate::search::verification::smith_waterman::SmithWatermanVerifier;
 use crate::search::{Candidate, Match};
+use crate::store::CorpusStore;
 use crate::types::{Position, StringId};
 
 /// Parameters for threshold range search.
