@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::errors::Result;
 use crate::types::Posting;
 
 /// Postings index mapping symbols to their occurrences in the corpus.
@@ -15,7 +14,32 @@ impl<Symbol> PostingsIndex<Symbol>
 where
     Symbol: Eq + Hash,
 {
-    /// Creates a new postings index.
+    /// Returns indexed occurrences in `(StringId, Position)` order.
+    ///
+    /// The iterator does not emit duplicates.
+    pub fn postings(&self, symbol: &Symbol) -> impl Iterator<Item = Posting> + '_ {
+        self.postings.get(symbol).into_iter().flatten().copied()
+    }
+
+    /// Returns the total frequency of `symbol` in the corpus.
+    pub fn frequency(&self, symbol: &Symbol) -> usize {
+        self.postings
+            .get(symbol)
+            .map_or(0, |postings| postings.len())
+    }
+}
+
+/// Builds a postings index from symbols and their occurrences.
+#[derive(Debug, Default)]
+pub struct PostingsIndexBuilder<Symbol> {
+    postings: HashMap<Symbol, Vec<Posting>>,
+}
+
+impl<Symbol> PostingsIndexBuilder<Symbol>
+where
+    Symbol: Eq + Hash,
+{
+    /// Creates a new postings index builder.
     pub fn new() -> Self {
         Self {
             postings: HashMap::new(),
@@ -27,29 +51,50 @@ where
         self.postings.entry(symbol).or_default().push(posting);
     }
 
-    /// Visits indexed occurrences in `(StringId, Position)` order.
-    ///
-    /// Implementations must not emit duplicates. A visitor keeps the
-    /// in-memory implementation allocation-free while allowing a disk-backed
-    /// implementation to decode a fallible cursor incrementally.
-    pub fn visit_postings(
-        &self,
-        symbol: &Symbol,
-        visitor: &mut dyn FnMut(Posting) -> Result<()>,
-    ) -> Result<()> {
-        if let Some(postings) = self.postings.get(symbol) {
-            for posting in postings {
-                visitor(*posting)?;
-            }
+    /// Builds an index whose postings are ordered and contain no duplicates.
+    pub fn build(mut self) -> PostingsIndex<Symbol> {
+        for postings in self.postings.values_mut() {
+            postings.sort_unstable_by_key(|posting| (posting.string_id, posting.position));
+            postings.dedup();
         }
-        Ok(())
+        PostingsIndex {
+            postings: self.postings,
+        }
     }
+}
 
-    /// Returns the total frequency of `symbol` in the corpus.
-    pub fn frequency(&self, symbol: &Symbol) -> Result<usize> {
-        Ok(self
-            .postings
-            .get(symbol)
-            .map_or(0, |postings| postings.len()))
+#[cfg(test)]
+mod tests {
+    use super::PostingsIndexBuilder;
+    use crate::types::{Position, Posting, StringId};
+
+    #[test]
+    fn build_orders_and_deduplicates_postings() {
+        let first = Posting {
+            string_id: StringId::new(0),
+            position: Position::new(2),
+        };
+        let second = Posting {
+            string_id: StringId::new(1),
+            position: Position::new(0),
+        };
+        let third = Posting {
+            string_id: StringId::new(1),
+            position: Position::new(1),
+        };
+
+        let mut builder = PostingsIndexBuilder::new();
+        builder.add_posting('a', third);
+        builder.add_posting('a', first);
+        builder.add_posting('a', second);
+        builder.add_posting('a', first);
+
+        let index = builder.build();
+
+        assert_eq!(
+            index.postings(&'a').collect::<Vec<_>>(),
+            [first, second, third]
+        );
+        assert_eq!(index.frequency(&'a'), 3);
     }
 }

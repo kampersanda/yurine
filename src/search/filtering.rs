@@ -43,7 +43,7 @@ where
                     query_len: query.len(),
                 })?;
         for neighbor in neighborhood.neighbors(query_symbol, eta, costs) {
-            index.visit_postings(&neighbor, &mut |posting| {
+            for posting in index.postings(&neighbor) {
                 let candidate = Candidate {
                     string_id: posting.string_id,
                     data_position: posting.position,
@@ -52,8 +52,7 @@ where
                 if seen.insert(candidate) {
                     candidates.push(candidate);
                 }
-                Ok(())
-            })?;
+            }
         }
     }
     Ok(candidates)
