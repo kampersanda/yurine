@@ -183,26 +183,14 @@ where
 mod tests {
     use std::num::NonZeroUsize;
 
+    use approx::assert_abs_diff_eq;
+
     use super::{CosineEmbeddingCosts, EmbeddingStore};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
 
     fn nonzero(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
-    }
-
-    fn assert_slice_approx_eq(actual: &[f32], expected: &[f32]) {
-        assert_eq!(actual.len(), expected.len());
-        for (actual, expected) in actual.iter().zip(expected) {
-            assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
-        }
-    }
-
-    fn assert_cost_approx_eq(actual: Cost, expected: f32) {
-        assert!(
-            (actual.get() - expected).abs() < 1e-6,
-            "{actual} != {expected}"
-        );
     }
 
     #[test]
@@ -214,7 +202,7 @@ mod tests {
 
         assert!(store.insert('a', vec![3.0, 4.0]).unwrap().is_none());
 
-        assert_slice_approx_eq(store.get(&'a').unwrap(), &[0.6, 0.8]);
+        assert_abs_diff_eq!(store.get(&'a').unwrap(), [0.6, 0.8].as_slice());
         assert_eq!(store.get(&'b'), None);
         assert_eq!(store.len(), 1);
         assert!(!store.is_empty());
@@ -230,8 +218,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_slice_approx_eq(&previous, &[0.6, 0.8]);
-        assert_slice_approx_eq(store.get("東京").unwrap(), &[0.0, 1.0]);
+        assert_abs_diff_eq!(&*previous, [0.6, 0.8].as_slice());
+        assert_abs_diff_eq!(store.get("東京").unwrap(), [0.0, 1.0].as_slice());
         assert_eq!(store.len(), 1);
     }
 
@@ -280,7 +268,7 @@ mod tests {
         store.insert('a', vec![f32::MAX, f32::MAX]).unwrap();
 
         let expected = 1.0 / 2.0_f32.sqrt();
-        assert_slice_approx_eq(store.get(&'a').unwrap(), &[expected, expected]);
+        assert_abs_diff_eq!(store.get(&'a').unwrap(), [expected, expected].as_slice());
     }
 
     #[test]
@@ -314,10 +302,10 @@ mod tests {
         store.insert('n', vec![-1.0, 0.0]).unwrap();
         let costs = CosineEmbeddingCosts::new(store);
 
-        assert_cost_approx_eq(costs.substitution(&'a', &'p'), 0.0);
-        assert_cost_approx_eq(costs.substitution(&'a', &'s'), 0.4);
-        assert_cost_approx_eq(costs.substitution(&'a', &'o'), 1.0);
-        assert_cost_approx_eq(costs.substitution(&'a', &'n'), 1.0);
+        assert_abs_diff_eq!(costs.substitution(&'a', &'p').get(), 0.0);
+        assert_abs_diff_eq!(costs.substitution(&'a', &'s').get(), 0.4);
+        assert_abs_diff_eq!(costs.substitution(&'a', &'o').get(), 1.0);
+        assert_abs_diff_eq!(costs.substitution(&'a', &'n').get(), 1.0);
     }
 
     #[test]
