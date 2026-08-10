@@ -27,22 +27,11 @@ where
         self.postings.entry(symbol).or_default().push(posting);
     }
 
-    /// Visits indexed occurrences in `(StringId, Position)` order.
+    /// Returns indexed occurrences in `(StringId, Position)` order.
     ///
-    /// Implementations must not emit duplicates. A visitor keeps the
-    /// in-memory implementation allocation-free while allowing a disk-backed
-    /// implementation to decode a fallible cursor incrementally.
-    pub fn visit_postings(
-        &self,
-        symbol: &Symbol,
-        visitor: &mut dyn FnMut(Posting) -> Result<()>,
-    ) -> Result<()> {
-        if let Some(postings) = self.postings.get(symbol) {
-            for posting in postings {
-                visitor(*posting)?;
-            }
-        }
-        Ok(())
+    /// The iterator does not emit duplicates.
+    pub fn postings(&self, symbol: &Symbol) -> impl Iterator<Item = Posting> + '_ {
+        self.postings.get(symbol).into_iter().flatten().copied()
     }
 
     /// Returns the total frequency of `symbol` in the corpus.
