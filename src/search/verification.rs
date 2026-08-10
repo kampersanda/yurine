@@ -9,17 +9,19 @@ use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::Symbol;
 
-/// Verifies filtering candidates against an inclusive distance threshold.
-///
-/// Verification takes `&self`, so one verifier can serve concurrent searches.
-/// Implementations must keep any working state local to a single call.
-pub trait Verifier {
+/// Verification algorithm used to check filtering candidates.
+pub(in crate::search) enum Verifier {
+    BidirectionalTrie,
+    SmithWaterman,
+}
+
+impl Verifier {
     /// Returns exactly the non-empty substrings whose distance is at most
     /// `threshold`.
     ///
     /// Each interval must occur exactly once. Results must be ordered by
     /// string ID, then range start, then range end.
-    fn verify<Costs>(
+    pub(in crate::search) fn verify<Costs>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
@@ -28,7 +30,17 @@ pub trait Verifier {
         costs: &Costs,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts;
+        Costs: EditCosts,
+    {
+        match self {
+            Self::BidirectionalTrie => {
+                bidirectional_trie::verify(query, candidates, corpus, threshold, costs)
+            }
+            Self::SmithWaterman => {
+                smith_waterman::verify(query, candidates, corpus, threshold, costs)
+            }
+        }
+    }
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.

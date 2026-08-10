@@ -6,8 +6,6 @@ use crate::search::SearchEngine;
 use crate::search::filtering::candidate::MinCandidateSelector;
 use crate::search::filtering::generate_candidates;
 use crate::search::verification::Verifier;
-use crate::search::verification::bidirectional_trie::BidirectionalTrieVerifier;
-use crate::search::verification::smith_waterman::SmithWatermanVerifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::{Position, StringId, Symbol};
@@ -124,13 +122,7 @@ where
             &self.costs,
             &self.neighborhood,
         )?;
-        BidirectionalTrieVerifier::new().verify(
-            query,
-            &candidates,
-            &self.store,
-            threshold,
-            &self.costs,
-        )
+        Verifier::BidirectionalTrie.verify(query, &candidates, &self.store, threshold, &self.costs)
     }
 }
 
@@ -149,7 +141,7 @@ fn verify_exhaustively<Costs>(
 where
     Costs: EditCosts,
 {
-    // SmithWatermanVerifier uses candidates only to select data strings. One
+    // Smith-Waterman verification uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification
     // without relying on the filtering guarantee that was unavailable.
     let mut candidates = Vec::new();
@@ -166,5 +158,5 @@ where
             });
         }
     }
-    SmithWatermanVerifier.verify(query, &candidates, corpus, threshold, costs)
+    Verifier::SmithWaterman.verify(query, &candidates, corpus, threshold, costs)
 }

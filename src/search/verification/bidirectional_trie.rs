@@ -2,19 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use super::{Verifier, add_distance, root_column, step_dp, validated_candidate_data};
+use super::{add_distance, root_column, step_dp, validated_candidate_data};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::{Position, StringId, Symbol};
-
-/// Local verification with query-position-specific forward and backward tries.
-///
-/// The verifier itself is stateless; all caches live for a single
-/// verification call.
-#[derive(Debug, Clone, Copy, Default)]
-pub(in crate::search) struct BidirectionalTrieVerifier;
 
 struct TrieNode {
     // `column` is the WED state after consuming the edge labels from the root
@@ -115,119 +108,109 @@ where
     distances
 }
 
-impl BidirectionalTrieVerifier {
-    /// Creates a verifier. Its caches are populated per verification call.
-    pub(in crate::search) const fn new() -> Self {
-        Self
+pub(super) fn verify<Costs>(
+    query: &[Symbol],
+    candidates: &[Candidate],
+    corpus: &CorpusStore,
+    threshold: Cost,
+    costs: &Costs,
+) -> Result<Vec<Match>>
+where
+    Costs: EditCosts,
+{
+    let threshold = threshold.next_up()?;
+    for candidate in candidates {
+        validated_candidate_data(query, candidate, corpus)?;
     }
-}
 
-impl Verifier for BidirectionalTrieVerifier {
-    fn verify<Costs>(
-        &self,
-        query: &[Symbol],
-        candidates: &[Candidate],
-        corpus: &CorpusStore,
-        threshold: Cost,
-        costs: &Costs,
-    ) -> Result<Vec<Match>>
-    where
-        Costs: EditCosts,
-    {
-        let threshold = threshold.next_up()?;
-        for candidate in candidates {
-            validated_candidate_data(query, candidate, corpus)?;
+    // Both caches are call-local deliberately: a DP column depends on this
+    // query and cost policy, so sharing it across calls would be unsound.
+    let mut forest = TrieForest::default();
+    let mut directional_queries = BTreeMap::<usize, DirectionalQueries>::new();
+    let mut intervals = BTreeMap::<(StringId, usize, usize), f32>::new();
+
+    for candidate in candidates {
+        // Candidates were validated before cache construction, so an
+        // error cannot leave misleading partial statistics behind.
+        let data = corpus
+            .sequence(candidate.string_id)?
+            .ok_or(Error::UnknownString(candidate.string_id))?;
+        let query_position = candidate.query_position.as_usize();
+        let data_position = candidate.data_position.as_usize();
+        let anchor_cost = costs
+            .substitution(query[query_position], data[data_position])
+            .get();
+        if anchor_cost >= threshold {
+            continue;
         }
 
-        // Both caches are call-local deliberately: a DP column depends on this
-        // query and cost policy, so sharing it across calls would be unsound.
-        let mut forest = TrieForest::default();
-        let mut directional_queries = BTreeMap::<usize, DirectionalQueries>::new();
-        let mut intervals = BTreeMap::<(StringId, usize, usize), f32>::new();
+        let budget = threshold - anchor_cost;
+        // Building these reference vectors is O(|Q|), so memoize them per
+        // query position instead of repeating the allocation per candidate.
+        let directional_query = directional_queries
+            .entry(query_position)
+            .or_insert_with(|| DirectionalQueries::new(query, query_position));
 
-        for candidate in candidates {
-            // Candidates were validated before cache construction, so an
-            // error cannot leave misleading partial statistics behind.
-            let data = corpus
-                .sequence(candidate.string_id)?
-                .ok_or(Error::UnknownString(candidate.string_id))?;
-            let query_position = candidate.query_position.as_usize();
-            let data_position = candidate.data_position.as_usize();
-            let anchor_cost = costs
-                .substitution(query[query_position], data[data_position])
-                .get();
-            if anchor_cost >= threshold {
-                continue;
+        let backward_root = match forest.backward.entry(query_position) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(TrieNode::root(&directional_query.backward, costs))
             }
+        };
+        let backward = cached_prefix_distances(
+            &directional_query.backward,
+            // Distance from the anchor increases while indices decrease,
+            // hence the data prefix must be visited in reverse as well.
+            data[..data_position].iter().rev().copied(),
+            budget,
+            backward_root,
+            costs,
+        );
 
-            let budget = threshold - anchor_cost;
-            // Building these reference vectors is O(|Q|), so memoize them per
-            // query position instead of repeating the allocation per candidate.
-            let directional_query = directional_queries
-                .entry(query_position)
-                .or_insert_with(|| DirectionalQueries::new(query, query_position));
+        let forward_root = match forest.forward.entry(query_position) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(TrieNode::root(&directional_query.forward, costs))
+            }
+        };
+        let forward = cached_prefix_distances(
+            &directional_query.forward,
+            data[data_position + 1..].iter().copied(),
+            budget,
+            forward_root,
+            costs,
+        );
 
-            let backward_root = match forest.backward.entry(query_position) {
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(TrieNode::root(&directional_query.backward, costs))
-                }
-            };
-            let backward = cached_prefix_distances(
-                &directional_query.backward,
-                // Distance from the anchor increases while indices decrease,
-                // hence the data prefix must be visited in reverse as well.
-                data[..data_position].iter().rev().copied(),
-                budget,
-                backward_root,
-                costs,
-            );
-
-            let forward_root = match forest.forward.entry(query_position) {
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(TrieNode::root(&directional_query.forward, costs))
-                }
-            };
-            let forward = cached_prefix_distances(
-                &directional_query.forward,
-                data[data_position + 1..].iter().copied(),
-                budget,
-                forward_root,
-                costs,
-            );
-
-            for (backward_len, backward_distance) in backward.iter().copied().enumerate() {
-                for (forward_len, forward_distance) in forward.iter().copied().enumerate() {
-                    // The two directional edit sequences meet at the forced
-                    // anchor substitution, so their costs add independently.
-                    let distance = add_distance(
-                        add_distance(anchor_cost, backward_distance),
-                        forward_distance,
-                    );
-                    if distance < threshold {
-                        let start = data_position - backward_len;
-                        let end = data_position + forward_len + 1;
-                        intervals
-                            .entry((candidate.string_id, start, end))
-                            .and_modify(|stored| *stored = (*stored).min(distance))
-                            .or_insert(distance);
-                    }
+        for (backward_len, backward_distance) in backward.iter().copied().enumerate() {
+            for (forward_len, forward_distance) in forward.iter().copied().enumerate() {
+                // The two directional edit sequences meet at the forced
+                // anchor substitution, so their costs add independently.
+                let distance = add_distance(
+                    add_distance(anchor_cost, backward_distance),
+                    forward_distance,
+                );
+                if distance < threshold {
+                    let start = data_position - backward_len;
+                    let end = data_position + forward_len + 1;
+                    intervals
+                        .entry((candidate.string_id, start, end))
+                        .and_modify(|stored| *stored = (*stored).min(distance))
+                        .or_insert(distance);
                 }
             }
         }
+    }
 
-        let matches = intervals
-            .into_iter()
-            .map(|((string_id, start, end), distance)| {
-                Ok(Match {
-                    string_id,
-                    range: Position::from_usize(start)?..Position::from_usize(end)?,
-                    distance: Cost::new(distance)?,
-                })
+    let matches = intervals
+        .into_iter()
+        .map(|((string_id, start, end), distance)| {
+            Ok(Match {
+                string_id,
+                range: Position::from_usize(start)?..Position::from_usize(end)?,
+                distance: Cost::new(distance)?,
             })
-            .collect::<Result<Vec<_>>>()?;
+        })
+        .collect::<Result<Vec<_>>>()?;
 
-        Ok(matches)
-    }
+    Ok(matches)
 }
