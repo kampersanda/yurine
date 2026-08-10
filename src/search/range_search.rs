@@ -62,11 +62,11 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
     }
 }
 
-impl<T, Costs> SearchEngine<T, Costs>
+impl<T, C> SearchEngine<T, C>
 where
     T: Tokenizer,
     T::Token: Clone + Eq + Hash,
-    Costs: EditCosts<T::Token>,
+    C: EditCosts<T::Token>,
 {
     /// Finds non-empty substrings satisfying the configured range search.
     ///
@@ -103,15 +103,15 @@ where
         self.search_all(query.symbols(), threshold, eta, &costs)
     }
 
-    fn search_all<SymbolCosts>(
+    fn search_all<S>(
         &self,
         query: &[Symbol],
         threshold: Cost,
         eta: Cost,
-        costs: &SymbolCosts,
+        costs: &S,
     ) -> Result<Vec<Match>>
     where
-        SymbolCosts: EditCosts<Symbol>,
+        S: EditCosts<Symbol>,
     {
         let selected = match MinCandidateSelector.select(
             query,
@@ -145,14 +145,14 @@ where
 /// when the selector cannot construct a complete threshold subsequence for a
 /// non-empty query. It is slower and can return more results than the normal
 /// filter-and-verify path, but is guaranteed to be correct.
-fn verify_exhaustively<Costs>(
+fn verify_exhaustively<C>(
     query: &[Symbol],
     threshold: Cost,
     corpus: &CorpusStore,
-    costs: &Costs,
+    costs: &C,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     // Smith-Waterman verification uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification

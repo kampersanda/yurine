@@ -21,16 +21,16 @@ impl Verifier {
     ///
     /// Each interval must occur exactly once. Results must be ordered by
     /// string ID, then range start, then range end.
-    pub(in crate::search) fn verify<Costs>(
+    pub(in crate::search) fn verify<C>(
         &self,
         query: &[Symbol],
         candidates: &[Candidate],
         corpus: &CorpusStore,
         threshold: Cost,
-        costs: &Costs,
+        costs: &C,
     ) -> Result<Vec<Match>>
     where
-        Costs: EditCosts<Symbol>,
+        C: EditCosts<Symbol>,
     {
         match self {
             Self::BidirectionalTrie => {
@@ -94,9 +94,9 @@ fn add_distance(left: f32, right: f32) -> f32 {
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
-fn root_column<Costs>(query: &[Symbol], costs: &Costs) -> Vec<f32>
+fn root_column<C>(query: &[Symbol], costs: &C) -> Vec<f32>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     // `column[r]` is wed(query[..r], empty). Reaching the empty data prefix
     // requires deleting every symbol in the query prefix.
@@ -112,14 +112,9 @@ where
 }
 
 /// Advances a weighted-edit-distance column by one data symbol.
-fn step_dp<Costs>(
-    query: &[Symbol],
-    data_symbol: Symbol,
-    previous: &[f32],
-    costs: &Costs,
-) -> Vec<f32>
+fn step_dp<C>(query: &[Symbol], data_symbol: Symbol, previous: &[f32], costs: &C) -> Vec<f32>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     debug_assert_eq!(previous.len(), query.len() + 1);
 

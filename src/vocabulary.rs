@@ -9,14 +9,14 @@ use crate::types::Symbol;
 
 /// Collects token frequencies for building a [`Vocabulary`].
 #[derive(Debug, Clone)]
-pub struct VocabularyBuilder<Token> {
-    tokens: Vec<Token>,
-    frequencies: HashMap<Token, usize>,
+pub struct VocabularyBuilder<T> {
+    tokens: Vec<T>,
+    frequencies: HashMap<T, usize>,
 }
 
-impl<Token> VocabularyBuilder<Token>
+impl<T> VocabularyBuilder<T>
 where
-    Token: Clone + Eq + Hash,
+    T: Clone + Eq + Hash,
 {
     /// Creates an empty vocabulary builder.
     pub fn new() -> Self {
@@ -27,7 +27,7 @@ where
     }
 
     /// Records one occurrence of `token`.
-    pub fn insert(&mut self, token: Token) {
+    pub fn insert(&mut self, token: T) {
         if let Some(frequency) = self.frequencies.get_mut(&token) {
             *frequency += 1;
         } else {
@@ -39,7 +39,7 @@ where
     /// Records every token from `tokens`.
     pub fn insert_all<I>(&mut self, tokens: I)
     where
-        I: IntoIterator<Item = Token>,
+        I: IntoIterator<Item = T>,
     {
         for token in tokens {
             self.insert(token);
@@ -49,7 +49,7 @@ where
     /// Assigns consecutive symbols by descending token frequency.
     ///
     /// Tokens with the same frequency retain their first-seen order.
-    pub fn build(self) -> Result<Vocabulary<Token>> {
+    pub fn build(self) -> Result<Vocabulary<T>> {
         let mut tokens = self.tokens;
         tokens.sort_by_key(|token| Reverse(self.frequencies[token]));
 
@@ -62,9 +62,9 @@ where
     }
 }
 
-impl<Token> Default for VocabularyBuilder<Token>
+impl<T> Default for VocabularyBuilder<T>
 where
-    Token: Clone + Eq + Hash,
+    T: Clone + Eq + Hash,
 {
     fn default() -> Self {
         Self::new()
@@ -73,22 +73,22 @@ where
 
 /// Read-only access to mappings between tokens and symbols.
 #[derive(Debug, Clone)]
-pub struct Vocabulary<Token> {
-    tokens: Vec<Token>,
-    symbols: HashMap<Token, Symbol>,
+pub struct Vocabulary<T> {
+    tokens: Vec<T>,
+    symbols: HashMap<T, Symbol>,
 }
 
-impl<Token> Vocabulary<Token>
+impl<T> Vocabulary<T>
 where
-    Token: Eq + Hash,
+    T: Eq + Hash,
 {
     /// Returns the symbol assigned to `token`, or [`Symbol::UNKNOWN`].
-    pub fn symbol(&self, token: &Token) -> Symbol {
+    pub fn symbol(&self, token: &T) -> Symbol {
         self.symbols.get(token).copied().unwrap_or(Symbol::UNKNOWN)
     }
 
     /// Returns the token assigned to `symbol`.
-    pub fn token(&self, symbol: Symbol) -> Option<&Token> {
+    pub fn token(&self, symbol: Symbol) -> Option<&T> {
         if symbol.is_unknown() {
             None
         } else {
@@ -101,7 +101,7 @@ where
     /// Tokens absent from this vocabulary are mapped to [`Symbol::UNKNOWN`].
     pub fn encode<I>(&self, tokens: I) -> Vec<Symbol>
     where
-        I: IntoIterator<Item = Token>,
+        I: IntoIterator<Item = T>,
     {
         tokens
             .into_iter()

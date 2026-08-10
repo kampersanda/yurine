@@ -21,15 +21,15 @@ use crate::types::{Position, StringId, Symbol};
 /// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
 /// data positions, and query positions are validated before verification.
-pub(super) fn verify<Costs>(
+pub(super) fn verify<C>(
     query: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
     threshold: Cost,
-    costs: &Costs,
+    costs: &C,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     let threshold = threshold.next_up()?;
     let string_ids = validated_candidate_strings(query, candidates, corpus)?;
@@ -62,16 +62,16 @@ fn validated_candidate_strings(
 
 /// Enumerates every non-empty substring of `data` whose distance from `query` is
 /// strictly less than `threshold`. Each match is pushed to `matches`.
-fn enumerate_matches<Costs>(
+fn enumerate_matches<C>(
     query: &[Symbol],
     data: &[Symbol],
     string_id: StringId,
     threshold: Cost,
-    costs: &Costs,
+    costs: &C,
     matches: &mut Vec<Match>,
 ) -> Result<()>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     // The two DP columns are reused across all O(n^2) cells of one data
     // string; only their contents are rewritten below.

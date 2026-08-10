@@ -19,9 +19,9 @@ struct TrieNode {
 }
 
 impl TrieNode {
-    fn root<Costs>(query: &[Symbol], costs: &Costs) -> Self
+    fn root<C>(query: &[Symbol], costs: &C) -> Self
     where
-        Costs: EditCosts<Symbol>,
+        C: EditCosts<Symbol>,
     {
         Self {
             column: root_column(query, costs),
@@ -55,16 +55,16 @@ impl DirectionalQueries {
     }
 }
 
-fn cached_prefix_distances<Costs, Data>(
+fn cached_prefix_distances<C, I>(
     query: &[Symbol],
-    data: Data,
+    data: I,
     budget: f32,
     root: &mut TrieNode,
-    costs: &Costs,
+    costs: &C,
 ) -> Vec<f32>
 where
-    Costs: EditCosts<Symbol>,
-    Data: IntoIterator<Item = Symbol>,
+    C: EditCosts<Symbol>,
+    I: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
     // Index zero denotes the empty data prefix. It must be retained so an
@@ -108,15 +108,15 @@ where
     distances
 }
 
-pub(super) fn verify<Costs>(
+pub(super) fn verify<C>(
     query: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
     threshold: Cost,
-    costs: &Costs,
+    costs: &C,
 ) -> Result<Vec<Match>>
 where
-    Costs: EditCosts<Symbol>,
+    C: EditCosts<Symbol>,
 {
     let threshold = threshold.next_up()?;
     for candidate in candidates {

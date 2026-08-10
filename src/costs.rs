@@ -11,17 +11,17 @@ use crate::errors::{Error, Result};
 ///
 /// The search direction is always from the query to a data substring. Thus,
 /// deletion consumes a query token and insertion consumes a data token.
-pub trait EditCosts<Token> {
+pub trait EditCosts<T> {
     /// Returns the cost of replacing `from` with `to`.
     ///
     /// If `from` and `to` are the same token, this must return zero.
-    fn substitution(&self, from: &Token, to: &Token) -> Cost;
+    fn substitution(&self, from: &T, to: &T) -> Cost;
 
     /// Returns the cost of deleting a query token.
-    fn deletion(&self, token: &Token) -> Cost;
+    fn deletion(&self, token: &T) -> Cost;
 
     /// Returns the cost of inserting a data token.
-    fn insertion(&self, token: &Token) -> Cost;
+    fn insertion(&self, token: &T) -> Cost;
 }
 
 /// A finite, non-negative, single-precision edit cost or search threshold.

@@ -12,18 +12,18 @@ use crate::vocabulary::Vocabulary;
 ///
 /// Known tokens use their vocabulary symbols. Query-only tokens use symbols
 /// starting at `vocabulary.len()` and exist only for this search call.
-pub(super) struct EncodedQuery<Token> {
+pub(super) struct EncodedQuery<T> {
     symbols: Vec<Symbol>,
     // `unknown_tokens[i]` is represented by the temporary symbol whose raw
     // value is `vocabulary.len() + i`.
-    unknown_tokens: Vec<Token>,
+    unknown_tokens: Vec<T>,
 }
 
-impl<Token> EncodedQuery<Token>
+impl<T> EncodedQuery<T>
 where
-    Token: Clone + Eq + Hash,
+    T: Clone + Eq + Hash,
 {
-    pub(super) fn new(tokens: Vec<Token>, vocabulary: &Vocabulary<Token>) -> Result<Self> {
+    pub(super) fn new(tokens: Vec<T>, vocabulary: &Vocabulary<T>) -> Result<Self> {
         let mut symbols = Vec::with_capacity(tokens.len());
         let mut unknown_tokens = Vec::new();
         let mut unknown_symbols = HashMap::new();
@@ -61,11 +61,11 @@ where
         &self.symbols
     }
 
-    pub(super) fn costs<'a, Costs>(
+    pub(super) fn costs<'a, C>(
         &'a self,
-        vocabulary: &'a Vocabulary<Token>,
-        costs: &'a Costs,
-    ) -> EncodedCosts<'a, Token, Costs> {
+        vocabulary: &'a Vocabulary<T>,
+        costs: &'a C,
+    ) -> EncodedCosts<'a, T, C> {
         EncodedCosts {
             vocabulary,
             unknown_tokens: &self.unknown_tokens,
@@ -75,17 +75,17 @@ where
 }
 
 /// Adapts public token costs to the symbol costs used by search internals.
-pub(super) struct EncodedCosts<'a, Token, Costs> {
-    vocabulary: &'a Vocabulary<Token>,
-    unknown_tokens: &'a [Token],
-    costs: &'a Costs,
+pub(super) struct EncodedCosts<'a, T, C> {
+    vocabulary: &'a Vocabulary<T>,
+    unknown_tokens: &'a [T],
+    costs: &'a C,
 }
 
-impl<Token, Costs> EncodedCosts<'_, Token, Costs>
+impl<T, C> EncodedCosts<'_, T, C>
 where
-    Token: Eq + Hash,
+    T: Eq + Hash,
 {
-    fn token(&self, symbol: &Symbol) -> &Token {
+    fn token(&self, symbol: &Symbol) -> &T {
         // SearchEngine validates that every corpus symbol belongs to the
         // vocabulary. A symbol outside it is therefore query-local, and its
         // offset identifies the corresponding entry in `unknown_tokens`.
@@ -95,10 +95,10 @@ where
     }
 }
 
-impl<Token, Costs> EditCosts<Symbol> for EncodedCosts<'_, Token, Costs>
+impl<T, C> EditCosts<Symbol> for EncodedCosts<'_, T, C>
 where
-    Token: Eq + Hash,
-    Costs: EditCosts<Token>,
+    T: Eq + Hash,
+    C: EditCosts<T>,
 {
     fn substitution(&self, from: &Symbol, to: &Symbol) -> Cost {
         self.costs.substitution(self.token(from), self.token(to))
