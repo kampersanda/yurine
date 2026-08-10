@@ -96,7 +96,7 @@ where
         for query_symbol in query {
             let deletion = add_distance(
                 previous.last().copied().unwrap_or(0.0),
-                costs.deletion(query_symbol).get(),
+                costs.deletion(*query_symbol).get(),
             );
             previous.push(deletion);
         }
@@ -107,7 +107,7 @@ where
             current.clear();
             current.push(add_distance(
                 previous[0],
-                costs.insertion(data_symbol).get(),
+                costs.insertion(*data_symbol).get(),
             ));
 
             for (query_index, query_symbol) in query.iter().enumerate() {
@@ -117,13 +117,13 @@ where
                 // insertion consumes only the data symbol.
                 let substitution = add_distance(
                     previous[query_index],
-                    costs.substitution(query_symbol, data_symbol).get(),
+                    costs.substitution(*query_symbol, *data_symbol).get(),
                 );
                 let deletion =
-                    add_distance(current[query_index], costs.deletion(query_symbol).get());
+                    add_distance(current[query_index], costs.deletion(*query_symbol).get());
                 let insertion = add_distance(
                     previous[query_index + 1],
-                    costs.insertion(data_symbol).get(),
+                    costs.insertion(*data_symbol).get(),
                 );
                 current.push(substitution.min(deletion).min(insertion));
             }

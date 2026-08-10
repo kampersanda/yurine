@@ -39,25 +39,26 @@ impl SubstitutionNeighborhood {
     ///
     /// The returned symbols must be unique. The supplied edit-cost policy is
     /// the same policy that verification uses.
-    pub fn neighbors<Costs>(&self, symbol: &Symbol, eta: Cost, costs: &Costs) -> Vec<Symbol>
+    pub fn neighbors<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Vec<Symbol>
     where
         Costs: EditCosts,
     {
         self.alphabet
             .iter()
-            .filter(|candidate| costs.substitution(symbol, candidate) <= eta)
             .copied()
+            .filter(|candidate| costs.substitution(symbol, *candidate) <= eta)
             .collect()
     }
 
     /// Returns the minimum cost of deleting `symbol` or substituting it with a
     /// symbol outside its neighborhood.
-    pub fn minimum_outside_cost<Costs>(&self, symbol: &Symbol, eta: Cost, costs: &Costs) -> Cost
+    pub fn minimum_outside_cost<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Cost
     where
         Costs: EditCosts,
     {
         self.alphabet
             .iter()
+            .copied()
             .map(|candidate| costs.substitution(symbol, candidate))
             .filter(|substitution| *substitution > eta)
             .fold(costs.deletion(symbol), Cost::min)

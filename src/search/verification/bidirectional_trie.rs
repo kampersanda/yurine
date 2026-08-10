@@ -26,7 +26,7 @@ struct TrieNode {
 }
 
 impl TrieNode {
-    fn root<Costs>(query: &[&Symbol], costs: &Costs) -> Self
+    fn root<Costs>(query: &[Symbol], costs: &Costs) -> Self
     where
         Costs: EditCosts,
     {
@@ -46,24 +46,24 @@ struct TrieForest {
     forward: BTreeMap<usize, TrieNode>,
 }
 
-struct DirectionalQueries<'query> {
+struct DirectionalQueries {
     // The backward data iterator is also reversed below. Reversing both sides
     // preserves wed(query, data), including asymmetric insertion/deletion.
-    backward: Vec<&'query Symbol>,
-    forward: Vec<&'query Symbol>,
+    backward: Vec<Symbol>,
+    forward: Vec<Symbol>,
 }
 
-impl<'query> DirectionalQueries<'query> {
-    fn new(query: &'query [Symbol], query_position: usize) -> Self {
+impl DirectionalQueries {
+    fn new(query: &[Symbol], query_position: usize) -> Self {
         Self {
-            backward: query[..query_position].iter().rev().collect(),
-            forward: query[query_position + 1..].iter().collect(),
+            backward: query[..query_position].iter().rev().copied().collect(),
+            forward: query[query_position + 1..].to_vec(),
         }
     }
 }
 
-fn cached_prefix_distances<'data, Costs, Data>(
-    query: &[&Symbol],
+fn cached_prefix_distances<Costs, Data>(
+    query: &[Symbol],
     data: Data,
     budget: f32,
     root: &mut TrieNode,
@@ -71,7 +71,7 @@ fn cached_prefix_distances<'data, Costs, Data>(
 ) -> Vec<f32>
 where
     Costs: EditCosts,
-    Data: IntoIterator<Item = &'data Symbol>,
+    Data: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
     // Index zero denotes the empty data prefix. It must be retained so an
@@ -85,14 +85,14 @@ where
         let child_index = node
             .children
             .iter()
-            .position(|(symbol, _)| symbol == data_symbol);
+            .position(|(symbol, _)| *symbol == data_symbol);
 
         let index = match child_index {
             Some(index) => index,
             None => {
                 let column = step_dp(query, data_symbol, &node.column, costs);
                 node.children.push((
-                    *data_symbol,
+                    data_symbol,
                     TrieNode {
                         column,
                         children: Vec::new(),
@@ -154,7 +154,7 @@ impl Verifier for BidirectionalTrieVerifier {
             let query_position = candidate.query_position.as_usize();
             let data_position = candidate.data_position.as_usize();
             let anchor_cost = costs
-                .substitution(&query[query_position], &data[data_position])
+                .substitution(query[query_position], data[data_position])
                 .get();
             if anchor_cost >= threshold {
                 continue;
@@ -177,7 +177,7 @@ impl Verifier for BidirectionalTrieVerifier {
                 &directional_query.backward,
                 // Distance from the anchor increases while indices decrease,
                 // hence the data prefix must be visited in reverse as well.
-                data[..data_position].iter().rev(),
+                data[..data_position].iter().rev().copied(),
                 budget,
                 backward_root,
                 costs,
@@ -191,7 +191,7 @@ impl Verifier for BidirectionalTrieVerifier {
             };
             let forward = cached_prefix_distances(
                 &directional_query.forward,
-                data[data_position + 1..].iter(),
+                data[data_position + 1..].iter().copied(),
                 budget,
                 forward_root,
                 costs,

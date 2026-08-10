@@ -82,7 +82,7 @@ fn add_distance(left: f32, right: f32) -> f32 {
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
-fn root_column<Costs>(query: &[&Symbol], costs: &Costs) -> Vec<f32>
+fn root_column<Costs>(query: &[Symbol], costs: &Costs) -> Vec<f32>
 where
     Costs: EditCosts,
 {
@@ -93,7 +93,7 @@ where
     for query_symbol in query {
         column.push(add_distance(
             column.last().copied().unwrap_or(0.0),
-            costs.deletion(query_symbol).get(),
+            costs.deletion(*query_symbol).get(),
         ));
     }
     column
@@ -101,8 +101,8 @@ where
 
 /// Advances a weighted-edit-distance column by one data symbol.
 fn step_dp<Costs>(
-    query: &[&Symbol],
-    data_symbol: &Symbol,
+    query: &[Symbol],
+    data_symbol: Symbol,
     previous: &[f32],
     costs: &Costs,
 ) -> Vec<f32>
@@ -125,13 +125,13 @@ where
         // wed(query, data prefix).
         let substitution = add_distance(
             previous[query_index],
-            costs.substitution(query_symbol, data_symbol).get(),
+            costs.substitution(*query_symbol, data_symbol).get(),
         );
         let insertion = add_distance(
             previous[query_index + 1],
             costs.insertion(data_symbol).get(),
         );
-        let deletion = add_distance(current[query_index], costs.deletion(query_symbol).get());
+        let deletion = add_distance(current[query_index], costs.deletion(*query_symbol).get());
         current.push(substitution.min(insertion).min(deletion));
     }
     current

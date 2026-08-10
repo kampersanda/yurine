@@ -40,8 +40,8 @@ where
                     position: *selected_position,
                     query_len: query.len(),
                 })?;
-        for neighbor in neighborhood.neighbors(query_symbol, eta, costs) {
-            for posting in index.postings(&neighbor) {
+        for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
+            for posting in index.postings(neighbor) {
                 let candidate = Candidate {
                     string_id: posting.string_id,
                     data_position: posting.position,

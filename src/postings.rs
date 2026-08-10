@@ -13,14 +13,14 @@ impl PostingsIndex {
     /// Returns indexed occurrences in `(StringId, Position)` order.
     ///
     /// The iterator does not emit duplicates.
-    pub fn postings(&self, symbol: &Symbol) -> impl Iterator<Item = Posting> + '_ {
-        self.postings.get(symbol).into_iter().flatten().copied()
+    pub fn postings(&self, symbol: Symbol) -> impl Iterator<Item = Posting> + '_ {
+        self.postings.get(&symbol).into_iter().flatten().copied()
     }
 
     /// Returns the total frequency of `symbol` in the corpus.
-    pub fn frequency(&self, symbol: &Symbol) -> usize {
+    pub fn frequency(&self, symbol: Symbol) -> usize {
         self.postings
-            .get(symbol)
+            .get(&symbol)
             .map_or(0, |postings| postings.len())
     }
 }
@@ -86,9 +86,9 @@ mod tests {
         let index = builder.build();
 
         assert_eq!(
-            index.postings(&symbol).collect::<Vec<_>>(),
+            index.postings(symbol).collect::<Vec<_>>(),
             [first, second, third]
         );
-        assert_eq!(index.frequency(&symbol), 3);
+        assert_eq!(index.frequency(symbol), 3);
     }
 }

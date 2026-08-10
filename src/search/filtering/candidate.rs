@@ -35,12 +35,12 @@ impl MinCandidateSelector {
 
         let mut items = Vec::with_capacity(query.len());
         for symbol in query {
-            let contribution = neighborhood.minimum_outside_cost(symbol, eta, costs).get();
+            let contribution = neighborhood.minimum_outside_cost(*symbol, eta, costs).get();
 
             let mut candidate_count = 0usize;
-            for neighbor in neighborhood.neighbors(symbol, eta, costs) {
+            for neighbor in neighborhood.neighbors(*symbol, eta, costs) {
                 candidate_count = candidate_count
-                    .checked_add(index.frequency(&neighbor))
+                    .checked_add(index.frequency(neighbor))
                     .ok_or(Error::ThresholdSubsequenceUnavailable)?;
             }
 
