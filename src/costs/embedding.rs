@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 
+use super::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 
 /// Stores fixed-dimensional, L2-normalized embeddings by token.
@@ -99,11 +100,99 @@ where
     }
 }
 
+/// Edit costs derived from cosine distances between static token embeddings.
+///
+/// Substitution between equal tokens always costs zero. For different tokens
+/// with embeddings, the cost is `maximum_substitution * clamp(1 - cosine, 0,
+/// 1)`. If either embedding is absent, the configured missing-embedding cost
+/// is used instead. Deletion and insertion use configurable constant costs.
+#[derive(Debug, Clone)]
+pub struct CosineEmbeddingCosts<T> {
+    embeddings: EmbeddingStore<T>,
+    deletion: Cost,
+    insertion: Cost,
+    missing_substitution: Cost,
+    maximum_substitution: Cost,
+}
+
+impl<T> CosineEmbeddingCosts<T> {
+    /// Creates cosine embedding costs with unit operation costs.
+    pub fn new(embeddings: EmbeddingStore<T>) -> Self {
+        Self {
+            embeddings,
+            deletion: Cost::ONE,
+            insertion: Cost::ONE,
+            missing_substitution: Cost::ONE,
+            maximum_substitution: Cost::ONE,
+        }
+    }
+
+    /// Uses `cost` for deletion.
+    pub fn with_deletion_cost(mut self, cost: Cost) -> Self {
+        self.deletion = cost;
+        self
+    }
+
+    /// Uses `cost` for insertion.
+    pub fn with_insertion_cost(mut self, cost: Cost) -> Self {
+        self.insertion = cost;
+        self
+    }
+
+    /// Uses `cost` when either token lacks an embedding.
+    pub fn with_missing_substitution_cost(mut self, cost: Cost) -> Self {
+        self.missing_substitution = cost;
+        self
+    }
+
+    /// Scales cosine distances by `cost` for substitution.
+    pub fn with_maximum_substitution_cost(mut self, cost: Cost) -> Self {
+        self.maximum_substitution = cost;
+        self
+    }
+
+    /// Returns the static embeddings used by this cost policy.
+    pub const fn embeddings(&self) -> &EmbeddingStore<T> {
+        &self.embeddings
+    }
+}
+
+impl<T> EditCosts<T> for CosineEmbeddingCosts<T>
+where
+    T: Eq + Hash,
+{
+    fn substitution(&self, from: &T, to: &T) -> Cost {
+        if from == to {
+            return Cost::ZERO;
+        }
+
+        let (Some(from), Some(to)) = (self.embeddings.get(from), self.embeddings.get(to)) else {
+            return self.missing_substitution;
+        };
+        let similarity: f64 = from
+            .iter()
+            .zip(to)
+            .map(|(from, to)| f64::from(*from) * f64::from(*to))
+            .sum();
+        let distance = (1.0 - similarity).clamp(0.0, 1.0) as f32;
+        Cost::new_const(self.maximum_substitution.get() * distance)
+    }
+
+    fn deletion(&self, _token: &T) -> Cost {
+        self.deletion
+    }
+
+    fn insertion(&self, _token: &T) -> Cost {
+        self.insertion
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
 
-    use super::EmbeddingStore;
+    use super::{CosineEmbeddingCosts, EmbeddingStore};
+    use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
 
     fn nonzero(value: usize) -> NonZeroUsize {
@@ -115,6 +204,13 @@ mod tests {
         for (actual, expected) in actual.iter().zip(expected) {
             assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
         }
+    }
+
+    fn assert_cost_approx_eq(actual: Cost, expected: f32) {
+        assert!(
+            (actual.get() - expected).abs() < 1e-6,
+            "{actual} != {expected}"
+        );
     }
 
     #[test]
@@ -193,5 +289,74 @@ mod tests {
 
         let expected = 1.0 / 2.0_f32.sqrt();
         assert_slice_approx_eq(store.get(&'a').unwrap(), &[expected, expected]);
+    }
+
+    #[test]
+    fn cosine_costs_use_unit_defaults() {
+        let mut store = EmbeddingStore::new(nonzero(2));
+        store.insert('a', vec![1.0, 0.0]).unwrap();
+        store.insert('b', vec![0.0, 1.0]).unwrap();
+        let costs = CosineEmbeddingCosts::new(store);
+
+        assert_eq!(costs.substitution(&'a', &'b'), Cost::ONE);
+        assert_eq!(costs.substitution(&'a', &'x'), Cost::ONE);
+        assert_eq!(costs.deletion(&'a'), Cost::ONE);
+        assert_eq!(costs.insertion(&'a'), Cost::ONE);
+    }
+
+    #[test]
+    fn equal_tokens_cost_zero_even_without_an_embedding() {
+        let costs = CosineEmbeddingCosts::new(EmbeddingStore::<char>::new(nonzero(2)))
+            .with_missing_substitution_cost(Cost::new_const(0.75));
+
+        assert_eq!(costs.substitution(&'x', &'x'), Cost::ZERO);
+    }
+
+    #[test]
+    fn cosine_distance_controls_substitution_cost() {
+        let mut store = EmbeddingStore::new(nonzero(2));
+        store.insert('a', vec![1.0, 0.0]).unwrap();
+        store.insert('p', vec![2.0, 0.0]).unwrap();
+        store.insert('s', vec![0.6, 0.8]).unwrap();
+        store.insert('o', vec![0.0, 1.0]).unwrap();
+        store.insert('n', vec![-1.0, 0.0]).unwrap();
+        let costs =
+            CosineEmbeddingCosts::new(store).with_maximum_substitution_cost(Cost::new_const(2.0));
+
+        assert_cost_approx_eq(costs.substitution(&'a', &'p'), 0.0);
+        assert_cost_approx_eq(costs.substitution(&'a', &'s'), 0.8);
+        assert_cost_approx_eq(costs.substitution(&'a', &'o'), 2.0);
+        assert_cost_approx_eq(costs.substitution(&'a', &'n'), 2.0);
+    }
+
+    #[test]
+    fn missing_embedding_cost_applies_if_either_embedding_is_absent() {
+        let mut store = EmbeddingStore::new(nonzero(2));
+        store.insert('a', vec![1.0, 0.0]).unwrap();
+        let costs =
+            CosineEmbeddingCosts::new(store).with_missing_substitution_cost(Cost::new_const(0.25));
+
+        assert_eq!(costs.substitution(&'a', &'x'), Cost::new_const(0.25));
+        assert_eq!(costs.substitution(&'x', &'y'), Cost::new_const(0.25));
+    }
+
+    #[test]
+    fn configures_deletion_and_insertion_independently() {
+        let costs = CosineEmbeddingCosts::new(EmbeddingStore::<char>::new(nonzero(2)))
+            .with_deletion_cost(Cost::new_const(0.25))
+            .with_insertion_cost(Cost::new_const(0.75));
+
+        assert_eq!(costs.deletion(&'a'), Cost::new_const(0.25));
+        assert_eq!(costs.insertion(&'a'), Cost::new_const(0.75));
+    }
+
+    #[test]
+    fn exposes_its_embedding_store() {
+        let mut store = EmbeddingStore::new(nonzero(2));
+        store.insert('a', vec![1.0, 0.0]).unwrap();
+        let costs = CosineEmbeddingCosts::new(store);
+
+        assert_eq!(costs.embeddings().dimension(), nonzero(2));
+        assert_eq!(costs.embeddings().len(), 1);
     }
 }
