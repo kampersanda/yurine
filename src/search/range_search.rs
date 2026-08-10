@@ -185,7 +185,7 @@ where
 mod tests {
     use std::num::NonZeroUsize;
 
-    use super::{RangeSearchParams, automatic_eta, verify_exhaustively};
+    use super::{MinCandidateSelector, RangeSearchParams, automatic_eta, verify_exhaustively};
     use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
@@ -363,10 +363,6 @@ mod tests {
         let threshold = Cost::new_const(0.5);
         let eta = Cost::new_const(0.25);
 
-        let filtered = engine
-            .range_search("xy", &RangeSearchParams::new(threshold).with_eta(eta))
-            .unwrap();
-
         let query = EncodedQuery::new(
             engine
                 .tokenizer
@@ -378,6 +374,22 @@ mod tests {
         )
         .unwrap();
         let costs = query.costs(&engine.vocabulary, &engine.costs);
+        assert!(
+            MinCandidateSelector
+                .select(
+                    query.symbols(),
+                    threshold,
+                    eta,
+                    &engine.index,
+                    &costs,
+                    &engine.neighborhood,
+                )
+                .is_ok()
+        );
+
+        let filtered = engine
+            .range_search("xy", &RangeSearchParams::new(threshold).with_eta(eta))
+            .unwrap();
         let exhaustive =
             verify_exhaustively(query.symbols(), threshold, &engine.store, &costs).unwrap();
 
