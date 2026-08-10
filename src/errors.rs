@@ -1,6 +1,6 @@
 //! Error types.
 
-use crate::types::{Position, StringId};
+use crate::types::{Position, StringId, Symbol};
 
 /// An error type for the library.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -17,6 +17,10 @@ pub enum Error {
     /// A vocabulary contains too many tokens for a `u32` symbol.
     #[error("symbol exceeds u32")]
     SymbolOverflow,
+
+    /// A corpus contains a symbol that is not present in its vocabulary.
+    #[error("corpus symbol {0} is not present in the vocabulary")]
+    UnknownCorpusSymbol(Symbol),
 
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]

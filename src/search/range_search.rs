@@ -1,13 +1,17 @@
 //! Fixed-threshold range search orchestration.
 
+use std::hash::Hash;
+
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
+use crate::search::encoding::EncodedQuery;
 use crate::search::filtering::candidate::MinCandidateSelector;
 use crate::search::filtering::generate_candidates;
 use crate::search::verification::Verifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
+use crate::tokenization::Tokenizer;
 use crate::types::{Position, StringId, Symbol};
 
 /// Parameters for threshold range search.
@@ -58,25 +62,28 @@ pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
     }
 }
 
-impl<Costs> SearchEngine<Costs>
+impl<T, Costs> SearchEngine<T, Costs>
 where
-    Costs: EditCosts<Symbol>,
+    T: Tokenizer,
+    T::Token: Clone + Eq + Hash,
+    Costs: EditCosts<T::Token>,
 {
     /// Finds non-empty substrings satisfying the configured range search.
     ///
     /// Results are ordered by string ID, then range start, then range end.
     ///
     /// When eta is not configured, it defaults to
-    /// `threshold / query.len()`. This favors constructing a threshold
-    /// subsequence for continuous substitution costs. An empty query uses eta
-    /// zero and retains the existing empty-query error behavior.
+    /// `threshold / tokenized_query.len()`. This favors constructing a
+    /// threshold subsequence for continuous substitution costs. An empty query
+    /// uses eta zero and retains the existing empty-query error behavior.
     ///
     /// If the selector cannot construct a complete threshold subsequence for
     /// a non-empty query, the engine falls back to exhaustive Smith-Waterman
     /// verification instead of returning
     /// [`Error::ThresholdSubsequenceUnavailable`]. This occurs whenever the
     /// query's total filtering contribution is less than or equal to the
-    /// threshold. With unit costs, `threshold >= query.len()` is such a case.
+    /// threshold. With unit costs, `threshold >= tokenized_query.len()` is
+    /// such a case.
     ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query length `m` and
     /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` intervals.
@@ -84,33 +91,39 @@ where
     /// than the normal filter-and-verify path.
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
-    pub fn range_search(&self, query: &[Symbol], params: &RangeSearchParams) -> Result<Vec<Match>> {
+    pub fn range_search(&self, query: &str, params: &RangeSearchParams) -> Result<Vec<Match>> {
+        let query = EncodedQuery::new(self.tokenizer.tokenize(query), &self.vocabulary)?;
+        let costs = query.costs(&self.vocabulary, &self.costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
         let eta = match params.eta {
             Some(eta) => eta,
-            None => automatic_eta(threshold, query.len())?,
+            None => automatic_eta(threshold, query.symbols().len())?,
         };
-        self.search_all(query, threshold, eta)
+        self.search_all(query.symbols(), threshold, eta, &costs)
     }
 
-    pub(super) fn search_all(
+    fn search_all<SymbolCosts>(
         &self,
         query: &[Symbol],
         threshold: Cost,
         eta: Cost,
-    ) -> Result<Vec<Match>> {
+        costs: &SymbolCosts,
+    ) -> Result<Vec<Match>>
+    where
+        SymbolCosts: EditCosts<Symbol>,
+    {
         let selected = match MinCandidateSelector.select(
             query,
             threshold,
             eta,
             &self.index,
-            &self.costs,
+            costs,
             &self.neighborhood,
         ) {
             Ok(selected) => selected,
             Err(Error::ThresholdSubsequenceUnavailable) if !query.is_empty() => {
-                return verify_exhaustively(query, threshold, &self.store, &self.costs);
+                return verify_exhaustively(query, threshold, &self.store, costs);
             }
             Err(error) => return Err(error),
         };
@@ -119,10 +132,10 @@ where
             &selected,
             eta,
             &self.index,
-            &self.costs,
+            costs,
             &self.neighborhood,
         )?;
-        Verifier::BidirectionalTrie.verify(query, &candidates, &self.store, threshold, &self.costs)
+        Verifier::BidirectionalTrie.verify(query, &candidates, &self.store, threshold, costs)
     }
 }
 
@@ -159,4 +172,122 @@ where
         }
     }
     Verifier::SmithWaterman.verify(query, &candidates, corpus, threshold, costs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RangeSearchParams;
+    use crate::costs::{Cost, EditCosts};
+    use crate::postings::PostingsIndexBuilder;
+    use crate::search::{Match, SearchEngine};
+    use crate::store::CorpusStoreBuilder;
+    use crate::tokenization::character::CharacterTokenizer;
+    use crate::types::{Position, Posting, StringId};
+    use crate::vocabulary::VocabularyBuilder;
+
+    struct CharacterCosts;
+
+    impl EditCosts<char> for CharacterCosts {
+        fn substitution(&self, from: &char, to: &char) -> Cost {
+            if from == to {
+                Cost::ZERO
+            } else if *from == 'y' && *to == 'a' {
+                Cost::new_const(0.4)
+            } else {
+                Cost::ONE
+            }
+        }
+
+        fn deletion(&self, token: &char) -> Cost {
+            if *token == 'x' {
+                Cost::new_const(0.25)
+            } else {
+                Cost::ONE
+            }
+        }
+
+        fn insertion(&self, _token: &char) -> Cost {
+            Cost::ONE
+        }
+    }
+
+    fn engine() -> SearchEngine<CharacterTokenizer, CharacterCosts> {
+        let mut vocabulary_builder = VocabularyBuilder::new();
+        vocabulary_builder.insert('a');
+        let vocabulary = vocabulary_builder.build().unwrap();
+        let symbol = vocabulary.symbol(&'a');
+
+        let mut index_builder = PostingsIndexBuilder::new();
+        for string_id in [StringId::new(0), StringId::new(1)] {
+            index_builder.add_posting(
+                symbol,
+                Posting {
+                    string_id,
+                    position: Position::new(0),
+                },
+            );
+        }
+
+        let mut store_builder = CorpusStoreBuilder::new();
+        store_builder.add_string(vec![symbol]);
+        store_builder.add_string(vec![symbol]);
+
+        SearchEngine::new(
+            CharacterTokenizer::new(),
+            vocabulary,
+            CharacterCosts,
+            index_builder.build(),
+            store_builder.build(),
+        )
+        .unwrap()
+    }
+
+    fn expected_matches(distance: Cost) -> Vec<Match> {
+        vec![
+            Match {
+                string_id: StringId::new(0),
+                range: Position::new(0)..Position::new(1),
+                distance,
+            },
+            Match {
+                string_id: StringId::new(1),
+                range: Position::new(0)..Position::new(1),
+                distance,
+            },
+        ]
+    }
+
+    #[test]
+    fn applies_substitution_cost_for_query_only_token() {
+        let matches = engine()
+            .range_search("y", &RangeSearchParams::new(Cost::new_const(0.4)))
+            .unwrap();
+
+        assert_eq!(matches, expected_matches(Cost::new_const(0.4)));
+    }
+
+    #[test]
+    fn applies_deletion_cost_for_query_only_token() {
+        let matches = engine()
+            .range_search("xa", &RangeSearchParams::new(Cost::new_const(0.25)))
+            .unwrap();
+
+        assert_eq!(matches, expected_matches(Cost::new_const(0.25)));
+    }
+
+    #[test]
+    fn searches_can_share_an_engine() {
+        let engine = engine();
+        let substitution_params = RangeSearchParams::new(Cost::new_const(0.4));
+        let deletion_params = RangeSearchParams::new(Cost::new_const(0.25));
+
+        std::thread::scope(|scope| {
+            let substitution =
+                scope.spawn(|| engine.range_search("y", &substitution_params).unwrap());
+            let deletion = scope.spawn(|| engine.range_search("xa", &deletion_params).unwrap());
+
+            assert_eq!(substitution.join().unwrap()[0].distance, 0.4);
+            assert_eq!(deletion.join().unwrap()[0].distance, 0.25);
+        });
+    }
 }
