@@ -7,7 +7,7 @@ use crate::costs::EditCosts;
 use crate::errors::Result;
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
-use crate::tokenization::Tokenizer;
+use crate::tokenization::{Tokenized, Tokenizer};
 use crate::types::{Position, Posting, StringId};
 use crate::vocabulary::VocabularyBuilder;
 
@@ -19,7 +19,7 @@ where
 {
     tokenizer: T,
     costs: C,
-    strings: Vec<Vec<T::Token>>,
+    strings: Vec<Vec<Tokenized<T::Token>>>,
 }
 
 impl<T, C> SearchEngineBuilder<T, C>
@@ -67,7 +67,7 @@ where
 
         let mut vocabulary_builder = VocabularyBuilder::new();
         for string in &strings {
-            vocabulary_builder.insert_all(string.iter().cloned());
+            vocabulary_builder.insert_all(string.iter().map(|token| token.value.clone()));
         }
         let vocabulary = vocabulary_builder.build()?;
 
@@ -75,7 +75,11 @@ where
         let mut store_builder = CorpusStoreBuilder::new();
         for (raw_string_id, string) in strings.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
-            let symbols = vocabulary.encode(string);
+            let (tokens, byte_ranges): (Vec<_>, Vec<_>) = string
+                .into_iter()
+                .map(|token| (token.value, token.byte_range))
+                .unzip();
+            let symbols = vocabulary.encode(tokens);
             for (raw_position, symbol) in symbols.iter().copied().enumerate() {
                 index_builder.add_posting(
                     symbol,
@@ -85,7 +89,7 @@ where
                     },
                 );
             }
-            store_builder.add_string(symbols);
+            store_builder.add_string(symbols, byte_ranges);
         }
 
         SearchEngine::from_parts(
@@ -105,8 +109,8 @@ mod tests {
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
     use crate::search::range_search::RangeSearchParams;
-    use crate::tokenization::Tokenizer;
     use crate::tokenization::character::CharacterTokenizer;
+    use crate::tokenization::{Tokenized, Tokenizer};
     use crate::types::{Position, StringId};
 
     #[test]
@@ -144,12 +148,14 @@ mod tests {
             [
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
+                    byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(3),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
+                    byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
             ]
@@ -173,16 +179,34 @@ mod tests {
             [
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
+                    byte_range: 0..2,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(1)..Position::new(3),
+                    token_range: Position::new(1)..Position::new(3),
+                    byte_range: 1..3,
                     distance: Cost::ZERO,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn returns_utf8_byte_range_in_original_string() {
+        let mut builder =
+            SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new());
+        builder.add_string("a東京b").unwrap();
+
+        let matches = builder
+            .build()
+            .unwrap()
+            .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
+            .unwrap();
+
+        assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));
+        assert_eq!(matches[0].byte_range, 1..7);
     }
 
     struct WholeStringTokenizer;
@@ -190,8 +214,8 @@ mod tests {
     impl Tokenizer for WholeStringTokenizer {
         type Token = String;
 
-        fn tokenize(&self, input: &str) -> Vec<Self::Token> {
-            vec![input.to_owned()]
+        fn tokenize(&self, input: &str) -> Vec<Tokenized<Self::Token>> {
+            vec![Tokenized::new(input.to_owned(), 0..input.len())]
         }
     }
 
@@ -206,6 +230,7 @@ mod tests {
             .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
-        assert_eq!(matches[0].range, Position::new(0)..Position::new(1));
+        assert_eq!(matches[0].token_range, Position::new(0)..Position::new(1));
+        assert_eq!(matches[0].byte_range, 0..6);
     }
 }

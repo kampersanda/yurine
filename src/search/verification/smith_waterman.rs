@@ -2,12 +2,12 @@
 
 use std::collections::BTreeSet;
 
-use super::{add_distance, validated_candidate_data};
+use super::{add_distance, create_match, validated_candidate_data};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId, Symbol};
+use crate::types::{StringId, Symbol};
 
 /// Exact Smith-Waterman-based verification that preserves every start position.
 ///
@@ -39,7 +39,15 @@ where
         let data = corpus
             .string(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
-        enumerate_matches(query, data, string_id, threshold, costs, &mut matches)?;
+        enumerate_matches(
+            query,
+            data,
+            corpus,
+            string_id,
+            threshold,
+            costs,
+            &mut matches,
+        )?;
     }
 
     Ok(matches)
@@ -65,6 +73,7 @@ fn validated_candidate_strings(
 fn enumerate_matches<C>(
     query: &[Symbol],
     data: &[Symbol],
+    corpus: &CorpusStore,
     string_id: StringId,
     threshold: Cost,
     costs: &C,
@@ -127,11 +136,13 @@ where
             // range. The internal threshold is the strict upper bound
             // immediately above the public inclusive threshold.
             if current[query.len()] < threshold {
-                matches.push(Match {
+                matches.push(create_match(
+                    corpus,
                     string_id,
-                    range: Position::from_usize(start)?..Position::from_usize(end + 1)?,
-                    distance: Cost::new(current[query.len()])?,
-                });
+                    start,
+                    end + 1,
+                    Cost::new(current[query.len()])?,
+                )?);
             }
             std::mem::swap(&mut previous, &mut current);
         }

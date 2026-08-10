@@ -1,6 +1,7 @@
 //! Storage abstractions for indexed strings.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use crate::errors::Result;
 use crate::types::{StringId, Symbol};
@@ -9,6 +10,7 @@ use crate::types::{StringId, Symbol};
 #[derive(Debug, Default)]
 pub struct CorpusStoreBuilder {
     strings: Vec<Vec<Symbol>>,
+    byte_ranges: Vec<Vec<Range<usize>>>,
     alphabet: HashSet<Symbol>,
 }
 
@@ -17,14 +19,17 @@ impl CorpusStoreBuilder {
     pub fn new() -> Self {
         Self {
             strings: Vec::new(),
+            byte_ranges: Vec::new(),
             alphabet: HashSet::new(),
         }
     }
 
-    /// Adds a string to the corpus.
-    pub fn add_string(&mut self, string: Vec<Symbol>) {
+    /// Adds a string and the original UTF-8 byte range of each symbol.
+    pub fn add_string(&mut self, string: Vec<Symbol>, byte_ranges: Vec<Range<usize>>) {
+        assert_eq!(string.len(), byte_ranges.len());
         self.alphabet.extend(string.iter().copied());
         self.strings.push(string);
+        self.byte_ranges.push(byte_ranges);
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
@@ -33,6 +38,7 @@ impl CorpusStoreBuilder {
         alphabet.sort_unstable();
         CorpusStore {
             strings: self.strings,
+            byte_ranges: self.byte_ranges,
             alphabet,
         }
     }
@@ -40,6 +46,7 @@ impl CorpusStoreBuilder {
 
 pub struct CorpusStore {
     strings: Vec<Vec<Symbol>>,
+    byte_ranges: Vec<Vec<Range<usize>>>,
     alphabet: Vec<Symbol>,
 }
 
@@ -50,6 +57,16 @@ impl CorpusStore {
         let index = id.as_usize();
         if index < self.strings.len() {
             Ok(Some(&self.strings[index]))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns the original byte range of each token in a string.
+    pub fn byte_ranges(&self, id: StringId) -> Result<Option<&[Range<usize>]>> {
+        let index = id.as_usize();
+        if index < self.byte_ranges.len() {
+            Ok(Some(&self.byte_ranges[index]))
         } else {
             Ok(None)
         }
@@ -82,8 +99,8 @@ mod tests {
         let second = Symbol::new(1);
         let third = Symbol::new(2);
         let mut builder = CorpusStoreBuilder::new();
-        builder.add_string(vec![second, first, second]);
-        builder.add_string(vec![first, third]);
+        builder.add_string(vec![second, first, second], vec![0..1, 1..2, 2..3]);
+        builder.add_string(vec![first, third], vec![0..1, 1..2]);
 
         let store = builder.build();
 

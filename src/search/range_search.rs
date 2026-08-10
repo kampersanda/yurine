@@ -92,7 +92,14 @@ where
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
     pub fn range_search(&self, query: &str, params: &RangeSearchParams) -> Result<Vec<Match>> {
-        let query = EncodedQuery::new(self.tokenizer.tokenize(query), &self.vocabulary)?;
+        let query = EncodedQuery::new(
+            self.tokenizer
+                .tokenize(query)
+                .into_iter()
+                .map(|token| token.value)
+                .collect(),
+            &self.vocabulary,
+        )?;
         let costs = query.costs(&self.vocabulary, &self.costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
@@ -229,8 +236,8 @@ mod tests {
         }
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder.add_string(vec![symbol]);
-        store_builder.add_string(vec![symbol]);
+        store_builder.add_string(vec![symbol], std::iter::once(0..1).collect());
+        store_builder.add_string(vec![symbol], std::iter::once(0..1).collect());
 
         SearchEngine::from_parts(
             CharacterTokenizer::new(),
@@ -246,12 +253,14 @@ mod tests {
         vec![
             Match {
                 string_id: StringId::new(0),
-                range: Position::new(0)..Position::new(1),
+                token_range: Position::new(0)..Position::new(1),
+                byte_range: 0..1,
                 distance,
             },
             Match {
                 string_id: StringId::new(1),
-                range: Position::new(0)..Position::new(1),
+                token_range: Position::new(0)..Position::new(1),
+                byte_range: 0..1,
                 distance,
             },
         ]

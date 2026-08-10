@@ -33,7 +33,12 @@ pub struct Match {
     /// The data string containing the match.
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
-    pub range: Range<Position>,
+    pub token_range: Range<Position>,
+    /// The matched zero-based, end-exclusive UTF-8 byte range in the original string.
+    ///
+    /// This range can be used to slice the string passed to
+    /// [`SearchEngineBuilder::add_string`].
+    pub byte_range: Range<usize>,
     /// The weighted edit distance from the query to the substring.
     pub distance: Cost,
 }
@@ -102,7 +107,7 @@ mod tests {
         let unknown_symbol = Symbol::new(1);
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder.add_string(vec![unknown_symbol]);
+        store_builder.add_string(vec![unknown_symbol], std::iter::once(0..1).collect());
 
         let result = SearchEngine::from_parts(
             CharacterTokenizer::new(),
