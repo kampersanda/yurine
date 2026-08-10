@@ -37,7 +37,7 @@ where
 
     for string_id in string_ids {
         let data = corpus
-            .sequence(string_id)?
+            .string(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
         enumerate_matches(query, data, string_id, threshold, costs, &mut matches)?;
     }

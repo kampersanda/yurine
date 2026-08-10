@@ -133,7 +133,7 @@ where
         // Candidates were validated before cache construction, so an
         // error cannot leave misleading partial statistics behind.
         let data = corpus
-            .sequence(candidate.string_id)?
+            .string(candidate.string_id)?
             .ok_or(Error::UnknownString(candidate.string_id))?;
         let query_position = candidate.query_position.as_usize();
         let data_position = candidate.data_position.as_usize();

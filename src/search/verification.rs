@@ -50,7 +50,7 @@ fn validated_candidate_data<'a>(
     corpus: &'a CorpusStore,
 ) -> Result<&'a [Symbol]> {
     let data = corpus
-        .sequence(candidate.string_id)?
+        .string(candidate.string_id)?
         .ok_or(Error::UnknownString(candidate.string_id))?;
     let data_slice = data;
     let data_position = candidate.data_position.as_usize();
@@ -176,7 +176,7 @@ mod tests {
     fn fixture() -> ([Symbol; 1], [Candidate; 1], CorpusStore) {
         let symbol = Symbol::new(0);
         let mut builder = CorpusStoreBuilder::new();
-        builder.add_sequence(vec![symbol, symbol]);
+        builder.add_string(vec![symbol, symbol]);
         let candidate = Candidate {
             string_id: StringId::new(0),
             data_position: Position::new(0),

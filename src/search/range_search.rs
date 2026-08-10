@@ -147,10 +147,10 @@ where
     let mut candidates = Vec::new();
     for raw_id in 0..corpus.len() {
         let string_id = StringId::from_usize(raw_id)?;
-        let sequence = corpus
-            .sequence(string_id)?
+        let string = corpus
+            .string(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
-        if !sequence.is_empty() {
+        if !string.is_empty() {
             candidates.push(Candidate {
                 string_id,
                 data_position: Position::new(0),
