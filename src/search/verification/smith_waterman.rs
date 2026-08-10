@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{Verifier, add_distance, validated_candidate_data};
+use super::{add_distance, validated_candidate_data};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
@@ -21,34 +21,28 @@ use crate::types::{Position, StringId, Symbol};
 /// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
 /// data positions, and query positions are validated before verification.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SmithWatermanVerifier;
+pub(super) fn verify<Costs>(
+    query: &[Symbol],
+    candidates: &[Candidate],
+    corpus: &CorpusStore,
+    threshold: Cost,
+    costs: &Costs,
+) -> Result<Vec<Match>>
+where
+    Costs: EditCosts,
+{
+    let threshold = threshold.next_up()?;
+    let string_ids = validated_candidate_strings(query, candidates, corpus)?;
+    let mut matches = Vec::new();
 
-impl Verifier for SmithWatermanVerifier {
-    fn verify<Costs>(
-        &self,
-        query: &[Symbol],
-        candidates: &[Candidate],
-        corpus: &CorpusStore,
-        threshold: Cost,
-        costs: &Costs,
-    ) -> Result<Vec<Match>>
-    where
-        Costs: EditCosts,
-    {
-        let threshold = threshold.next_up()?;
-        let string_ids = validated_candidate_strings(query, candidates, corpus)?;
-        let mut matches = Vec::new();
-
-        for string_id in string_ids {
-            let data = corpus
-                .sequence(string_id)?
-                .ok_or(Error::UnknownString(string_id))?;
-            enumerate_matches(query, data, string_id, threshold, costs, &mut matches)?;
-        }
-
-        Ok(matches)
+    for string_id in string_ids {
+        let data = corpus
+            .sequence(string_id)?
+            .ok_or(Error::UnknownString(string_id))?;
+        enumerate_matches(query, data, string_id, threshold, costs, &mut matches)?;
     }
+
+    Ok(matches)
 }
 
 /// Validates that every candidate's string ID is known and positions are within bounds.
