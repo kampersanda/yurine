@@ -148,3 +148,83 @@ where
     }
     current
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Verifier;
+    use crate::costs::{Cost, EditCosts};
+    use crate::search::{Candidate, Match};
+    use crate::store::{CorpusStore, CorpusStoreBuilder};
+    use crate::types::{Position, StringId, Symbol};
+
+    struct UnitCosts;
+
+    impl EditCosts for UnitCosts {
+        fn substitution(&self, from: Symbol, to: Symbol) -> Cost {
+            if from == to { Cost::ZERO } else { Cost::ONE }
+        }
+
+        fn deletion(&self, _symbol: Symbol) -> Cost {
+            Cost::ONE
+        }
+
+        fn insertion(&self, _symbol: Symbol) -> Cost {
+            Cost::ONE
+        }
+    }
+
+    fn fixture() -> ([Symbol; 1], [Candidate; 1], CorpusStore) {
+        let symbol = Symbol::new(0);
+        let mut builder = CorpusStoreBuilder::new();
+        builder.add_sequence(vec![symbol, symbol]);
+        let candidate = Candidate {
+            string_id: StringId::new(0),
+            data_position: Position::new(0),
+            query_position: Position::new(0),
+        };
+        ([symbol], [candidate], builder.build())
+    }
+
+    #[test]
+    fn bidirectional_trie_dispatches_to_anchor_local_verification() {
+        let (query, candidates, corpus) = fixture();
+
+        let matches = Verifier::BidirectionalTrie
+            .verify(&query, &candidates, &corpus, Cost::ZERO, &UnitCosts)
+            .unwrap();
+
+        assert_eq!(
+            matches,
+            [Match {
+                string_id: StringId::new(0),
+                range: Position::new(0)..Position::new(1),
+                distance: Cost::ZERO,
+            }]
+        );
+    }
+
+    #[test]
+    fn smith_waterman_dispatches_to_exhaustive_verification() {
+        let (query, candidates, corpus) = fixture();
+
+        let matches = Verifier::SmithWaterman
+            .verify(&query, &candidates, &corpus, Cost::ZERO, &UnitCosts)
+            .unwrap();
+
+        assert_eq!(
+            matches,
+            [
+                Match {
+                    string_id: StringId::new(0),
+                    range: Position::new(0)..Position::new(1),
+                    distance: Cost::ZERO,
+                },
+                Match {
+                    string_id: StringId::new(0),
+                    range: Position::new(1)..Position::new(2),
+                    distance: Cost::ZERO,
+                },
+            ]
+        );
+    }
+}
