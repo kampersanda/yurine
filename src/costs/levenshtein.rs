@@ -13,19 +13,19 @@ impl LevenshteinCosts {
     }
 }
 
-impl<Token> EditCosts<Token> for LevenshteinCosts
+impl<T> EditCosts<T> for LevenshteinCosts
 where
-    Token: Eq,
+    T: Eq,
 {
-    fn substitution(&self, from: &Token, to: &Token) -> Cost {
+    fn substitution(&self, from: &T, to: &T) -> Cost {
         if from == to { Cost::ZERO } else { Cost::ONE }
     }
 
-    fn deletion(&self, _token: &Token) -> Cost {
+    fn deletion(&self, _token: &T) -> Cost {
         Cost::ONE
     }
 
-    fn insertion(&self, _token: &Token) -> Cost {
+    fn insertion(&self, _token: &T) -> Cost {
         Cost::ONE
     }
 }

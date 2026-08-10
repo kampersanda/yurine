@@ -13,23 +13,23 @@ use crate::vocabulary::VocabularyBuilder;
 
 /// Builds a [`SearchEngine`] from strings in insertion order.
 #[derive(Debug)]
-pub struct SearchEngineBuilder<T, Costs>
+pub struct SearchEngineBuilder<T, C>
 where
     T: Tokenizer,
 {
     tokenizer: T,
-    costs: Costs,
+    costs: C,
     strings: Vec<Vec<T::Token>>,
 }
 
-impl<T, Costs> SearchEngineBuilder<T, Costs>
+impl<T, C> SearchEngineBuilder<T, C>
 where
     T: Tokenizer,
     T::Token: Clone + Eq + Hash,
-    Costs: EditCosts<T::Token>,
+    C: EditCosts<T::Token>,
 {
     /// Creates an empty builder.
-    pub fn new(tokenizer: T, costs: Costs) -> Self {
+    pub fn new(tokenizer: T, costs: C) -> Self {
         Self {
             tokenizer,
             costs,
@@ -58,7 +58,7 @@ where
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
     /// many distinct tokens.
-    pub fn build(self) -> Result<SearchEngine<T, Costs>> {
+    pub fn build(self) -> Result<SearchEngine<T, C>> {
         let Self {
             tokenizer,
             costs,

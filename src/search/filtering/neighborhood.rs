@@ -19,9 +19,9 @@ impl SubstitutionNeighborhood {
     ///
     /// Returns [`Error::DuplicateAlphabetSymbol`]
     /// if a symbol occurs more than once.
-    pub fn new<Alphabet>(alphabet: Alphabet) -> Result<Self>
+    pub fn new<I>(alphabet: I) -> Result<Self>
     where
-        Alphabet: IntoIterator<Item = Symbol>,
+        I: IntoIterator<Item = Symbol>,
     {
         let alphabet: Vec<_> = alphabet.into_iter().collect();
         {
@@ -39,9 +39,9 @@ impl SubstitutionNeighborhood {
     ///
     /// The returned symbols must be unique. The supplied edit-cost policy is
     /// the same policy that verification uses.
-    pub fn neighbors<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Vec<Symbol>
+    pub fn neighbors<C>(&self, symbol: Symbol, eta: Cost, costs: &C) -> Vec<Symbol>
     where
-        Costs: EditCosts<Symbol>,
+        C: EditCosts<Symbol>,
     {
         self.alphabet
             .iter()
@@ -52,9 +52,9 @@ impl SubstitutionNeighborhood {
 
     /// Returns the minimum cost of deleting `symbol` or substituting it with a
     /// symbol outside its neighborhood.
-    pub fn minimum_outside_cost<Costs>(&self, symbol: Symbol, eta: Cost, costs: &Costs) -> Cost
+    pub fn minimum_outside_cost<C>(&self, symbol: Symbol, eta: Cost, costs: &C) -> Cost
     where
-        Costs: EditCosts<Symbol>,
+        C: EditCosts<Symbol>,
     {
         self.alphabet
             .iter()

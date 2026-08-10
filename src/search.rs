@@ -41,28 +41,28 @@ pub struct Match {
 /// Coordinates threshold-subsequence filtering and exact verification.
 ///
 /// Create an engine with [`SearchEngineBuilder`].
-pub struct SearchEngine<T, Costs>
+pub struct SearchEngine<T, C>
 where
     T: Tokenizer,
 {
     tokenizer: T,
     vocabulary: Vocabulary<T::Token>,
-    costs: Costs,
+    costs: C,
     index: PostingsIndex,
     store: CorpusStore,
     neighborhood: SubstitutionNeighborhood,
 }
 
-impl<T, Costs> SearchEngine<T, Costs>
+impl<T, C> SearchEngine<T, C>
 where
     T: Tokenizer,
     T::Token: Clone + Eq + Hash,
-    Costs: EditCosts<T::Token>,
+    C: EditCosts<T::Token>,
 {
     pub(crate) fn from_parts(
         tokenizer: T,
         vocabulary: Vocabulary<T::Token>,
-        costs: Costs,
+        costs: C,
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {

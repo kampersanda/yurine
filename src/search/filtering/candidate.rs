@@ -13,17 +13,17 @@ pub struct MinCandidateSelector;
 impl MinCandidateSelector {
     /// Selects a subsequence complete for matches with distance at most
     /// `threshold`.
-    pub fn select<Costs>(
+    pub fn select<C>(
         &self,
         query: &[Symbol],
         threshold: Cost,
         eta: Cost,
         index: &PostingsIndex,
-        costs: &Costs,
+        costs: &C,
         neighborhood: &SubstitutionNeighborhood,
     ) -> Result<Vec<Position>>
     where
-        Costs: EditCosts<Symbol>,
+        C: EditCosts<Symbol>,
     {
         let threshold = threshold.next_up()?;
         struct Item {
