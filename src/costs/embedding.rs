@@ -103,16 +103,15 @@ where
 /// Edit costs derived from cosine distances between static token embeddings.
 ///
 /// Substitution between equal tokens always costs zero. For different tokens
-/// with embeddings, the cost is `maximum_substitution * clamp(1 - cosine, 0,
-/// 1)`. If either embedding is absent, the configured missing-embedding cost
-/// is used instead. Deletion and insertion use configurable constant costs.
+/// with embeddings, the cost is `clamp(1 - cosine, 0, 1)`. If either embedding
+/// is absent, the configured missing-embedding cost is used instead. Deletion
+/// and insertion use configurable constant costs.
 #[derive(Debug, Clone)]
 pub struct CosineEmbeddingCosts<T> {
     embeddings: EmbeddingStore<T>,
     deletion: Cost,
     insertion: Cost,
     missing_substitution: Cost,
-    maximum_substitution: Cost,
 }
 
 impl<T> CosineEmbeddingCosts<T> {
@@ -123,7 +122,6 @@ impl<T> CosineEmbeddingCosts<T> {
             deletion: Cost::ONE,
             insertion: Cost::ONE,
             missing_substitution: Cost::ONE,
-            maximum_substitution: Cost::ONE,
         }
     }
 
@@ -142,12 +140,6 @@ impl<T> CosineEmbeddingCosts<T> {
     /// Uses `cost` when either token lacks an embedding.
     pub fn with_missing_substitution_cost(mut self, cost: Cost) -> Self {
         self.missing_substitution = cost;
-        self
-    }
-
-    /// Scales cosine distances by `cost` for substitution.
-    pub fn with_maximum_substitution_cost(mut self, cost: Cost) -> Self {
-        self.maximum_substitution = cost;
         self
     }
 
@@ -175,7 +167,7 @@ where
             .map(|(from, to)| f64::from(*from) * f64::from(*to))
             .sum();
         let distance = (1.0 - similarity).clamp(0.0, 1.0) as f32;
-        Cost::new_const(self.maximum_substitution.get() * distance)
+        Cost::new_const(distance)
     }
 
     fn deletion(&self, _token: &T) -> Cost {
@@ -320,13 +312,12 @@ mod tests {
         store.insert('s', vec![0.6, 0.8]).unwrap();
         store.insert('o', vec![0.0, 1.0]).unwrap();
         store.insert('n', vec![-1.0, 0.0]).unwrap();
-        let costs =
-            CosineEmbeddingCosts::new(store).with_maximum_substitution_cost(Cost::new_const(2.0));
+        let costs = CosineEmbeddingCosts::new(store);
 
         assert_cost_approx_eq(costs.substitution(&'a', &'p'), 0.0);
-        assert_cost_approx_eq(costs.substitution(&'a', &'s'), 0.8);
-        assert_cost_approx_eq(costs.substitution(&'a', &'o'), 2.0);
-        assert_cost_approx_eq(costs.substitution(&'a', &'n'), 2.0);
+        assert_cost_approx_eq(costs.substitution(&'a', &'s'), 0.4);
+        assert_cost_approx_eq(costs.substitution(&'a', &'o'), 1.0);
+        assert_cost_approx_eq(costs.substitution(&'a', &'n'), 1.0);
     }
 
     #[test]
