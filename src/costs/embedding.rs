@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::num::NonZeroUsize;
 
 use crate::errors::{Error, Result};
 
@@ -13,7 +14,7 @@ use crate::errors::{Error, Result};
 /// store's configured dimension.
 #[derive(Debug, Clone)]
 pub struct EmbeddingStore<T> {
-    dimension: usize,
+    dimension: NonZeroUsize,
     embeddings: HashMap<T, Box<[f32]>>,
 }
 
@@ -22,18 +23,11 @@ where
     T: Eq + Hash,
 {
     /// Creates an empty store for embeddings of `dimension` elements.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::ZeroEmbeddingDimension`] if `dimension` is zero.
-    pub fn new(dimension: usize) -> Result<Self> {
-        if dimension == 0 {
-            return Err(Error::ZeroEmbeddingDimension);
-        }
-        Ok(Self {
+    pub fn new(dimension: NonZeroUsize) -> Self {
+        Self {
             dimension,
             embeddings: HashMap::new(),
-        })
+        }
     }
 
     /// Inserts and L2-normalizes an embedding for `token`.
@@ -52,9 +46,9 @@ where
         embedding: impl Into<Vec<f32>>,
     ) -> Result<Option<Box<[f32]>>> {
         let mut embedding = embedding.into();
-        if embedding.len() != self.dimension {
+        if embedding.len() != self.dimension.get() {
             return Err(Error::InvalidEmbeddingDimension {
-                expected: self.dimension,
+                expected: self.dimension.get(),
                 actual: embedding.len(),
             });
         }
@@ -90,7 +84,7 @@ where
     }
 
     /// Returns the required number of elements in every embedding.
-    pub const fn dimension(&self) -> usize {
+    pub const fn dimension(&self) -> NonZeroUsize {
         self.dimension
     }
 
@@ -107,8 +101,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use super::EmbeddingStore;
     use crate::errors::Error;
+
+    fn nonzero(value: usize) -> NonZeroUsize {
+        NonZeroUsize::new(value).unwrap()
+    }
 
     fn assert_slice_approx_eq(actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len());
@@ -118,17 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_dimension() {
-        assert!(matches!(
-            EmbeddingStore::<char>::new(0),
-            Err(Error::ZeroEmbeddingDimension)
-        ));
-    }
-
-    #[test]
     fn stores_normalized_embeddings_and_reports_metadata() {
-        let mut store = EmbeddingStore::new(2).unwrap();
-        assert_eq!(store.dimension(), 2);
+        let mut store = EmbeddingStore::new(nonzero(2));
+        assert_eq!(store.dimension(), nonzero(2));
         assert_eq!(store.len(), 0);
         assert!(store.is_empty());
 
@@ -142,7 +134,7 @@ mod tests {
 
     #[test]
     fn replacing_a_token_returns_its_previous_normalized_embedding() {
-        let mut store = EmbeddingStore::new(2).unwrap();
+        let mut store = EmbeddingStore::new(nonzero(2));
         store.insert("東京".to_owned(), vec![3.0, 4.0]).unwrap();
 
         let previous = store
@@ -157,7 +149,7 @@ mod tests {
 
     #[test]
     fn rejects_wrong_dimension_without_changing_the_store() {
-        let mut store = EmbeddingStore::new(2).unwrap();
+        let mut store = EmbeddingStore::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
 
         assert_eq!(
@@ -173,7 +165,7 @@ mod tests {
     #[test]
     fn rejects_each_non_finite_value() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut store = EmbeddingStore::new(2).unwrap();
+            let mut store = EmbeddingStore::new(nonzero(2));
             assert!(matches!(
                 store.insert('a', vec![1.0, value]),
                 Err(Error::InvalidEmbeddingValue { index: 1, value: actual })
@@ -185,7 +177,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_norm_embedding() {
-        let mut store = EmbeddingStore::new(2).unwrap();
+        let mut store = EmbeddingStore::new(nonzero(2));
 
         assert_eq!(
             store.insert('a', vec![0.0, -0.0]),
@@ -196,7 +188,7 @@ mod tests {
 
     #[test]
     fn normalizes_large_finite_values_without_overflow() {
-        let mut store = EmbeddingStore::new(2).unwrap();
+        let mut store = EmbeddingStore::new(nonzero(2));
         store.insert('a', vec![f32::MAX, f32::MAX]).unwrap();
 
         let expected = 1.0 / 2.0_f32.sqrt();

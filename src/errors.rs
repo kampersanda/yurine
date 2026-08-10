@@ -30,10 +30,6 @@ pub enum Error {
     #[error("cost must be finite and non-negative, not {0}")]
     InvalidCost(f32),
 
-    /// An embedding store was created with zero dimensions.
-    #[error("embedding dimension must be greater than zero")]
-    ZeroEmbeddingDimension,
-
     /// An embedding does not have the dimension required by its store.
     #[error("embedding dimension must be {expected}, not {actual}")]
     InvalidEmbeddingDimension {
