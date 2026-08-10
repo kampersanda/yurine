@@ -9,6 +9,7 @@ use super::{Cost, EditCosts};
 ///
 /// Each operation initially uses its default cost. Token-specific costs can be
 /// added or replaced with the setter methods.
+/// [`Default`] uses unit costs equivalent to the Levenshtein distance.
 #[derive(Debug, Clone)]
 pub struct CustomCosts<T> {
     default_substitution: Cost,
