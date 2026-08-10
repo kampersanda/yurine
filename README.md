@@ -23,6 +23,7 @@ fn main() -> Result<()> {
     let matches = engine.range_search("東京", &RangeSearchParams::new(Cost::ZERO))?;
 
     assert_eq!(matches[0].string_id, tokyo);
+    assert_eq!(matches[0].byte_range, 0..6);
     Ok(())
 }
 ```

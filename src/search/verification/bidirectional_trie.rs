@@ -2,12 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use super::{add_distance, root_column, step_dp, validated_candidate_data};
+use super::{add_distance, create_match, root_column, step_dp, validated_candidate_data};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId, Symbol};
+use crate::types::{StringId, Symbol};
 
 struct TrieNode {
     // `column` is the WED state after consuming the edge labels from the root
@@ -204,11 +204,7 @@ where
     let matches = intervals
         .into_iter()
         .map(|((string_id, start, end), distance)| {
-            Ok(Match {
-                string_id,
-                range: Position::from_usize(start)?..Position::from_usize(end)?,
-                distance: Cost::new(distance)?,
-            })
+            create_match(corpus, string_id, start, end, Cost::new(distance)?)
         })
         .collect::<Result<Vec<_>>>()?;
 

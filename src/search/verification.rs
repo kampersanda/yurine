@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::Symbol;
+use crate::types::{Position, StringId, Symbol};
 
 /// Verification algorithm used to check filtering candidates.
 pub(in crate::search) enum Verifier {
@@ -41,6 +41,24 @@ impl Verifier {
             }
         }
     }
+}
+
+fn create_match(
+    corpus: &CorpusStore,
+    string_id: StringId,
+    start: usize,
+    end: usize,
+    distance: Cost,
+) -> Result<Match> {
+    let byte_ranges = corpus
+        .byte_ranges(string_id)?
+        .ok_or(Error::UnknownString(string_id))?;
+    Ok(Match {
+        string_id,
+        range: Position::from_usize(start)?..Position::from_usize(end)?,
+        byte_range: byte_ranges[start].start..byte_ranges[end - 1].end,
+        distance,
+    })
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.
@@ -171,7 +189,7 @@ mod tests {
     fn fixture() -> ([Symbol; 1], [Candidate; 1], CorpusStore) {
         let symbol = Symbol::new(0);
         let mut builder = CorpusStoreBuilder::new();
-        builder.add_string(vec![symbol, symbol]);
+        builder.add_string(vec![symbol, symbol], vec![0..1, 1..2]);
         let candidate = Candidate {
             string_id: StringId::new(0),
             data_position: Position::new(0),
@@ -193,6 +211,7 @@ mod tests {
             [Match {
                 string_id: StringId::new(0),
                 range: Position::new(0)..Position::new(1),
+                byte_range: 0..1,
                 distance: Cost::ZERO,
             }]
         );
@@ -212,11 +231,13 @@ mod tests {
                 Match {
                     string_id: StringId::new(0),
                     range: Position::new(0)..Position::new(1),
+                    byte_range: 0..1,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(0),
                     range: Position::new(1)..Position::new(2),
+                    byte_range: 1..2,
                     distance: Cost::ZERO,
                 },
             ]
