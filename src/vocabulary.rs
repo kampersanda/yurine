@@ -1,16 +1,17 @@
 //! Bidirectional mappings between tokens and compact symbols.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 use crate::types::Symbol;
 
-/// Builds a [`Vocabulary`] by assigning stable, consecutive symbols to tokens.
+/// Collects token frequencies for building a [`Vocabulary`].
 #[derive(Debug, Clone)]
 pub struct VocabularyBuilder<Token> {
     tokens: Vec<Token>,
-    symbols: HashMap<Token, Symbol>,
+    frequencies: HashMap<Token, usize>,
 }
 
 impl<Token> VocabularyBuilder<Token>
@@ -21,35 +22,43 @@ where
     pub fn new() -> Self {
         Self {
             tokens: Vec::new(),
-            symbols: HashMap::new(),
+            frequencies: HashMap::new(),
         }
     }
 
-    /// Returns the existing symbol for `token`, or assigns the next symbol.
-    pub fn insert(&mut self, token: Token) -> Result<Symbol> {
-        if let Some(&symbol) = self.symbols.get(&token) {
-            return Ok(symbol);
+    /// Records one occurrence of `token`.
+    pub fn insert(&mut self, token: Token) {
+        if let Some(frequency) = self.frequencies.get_mut(&token) {
+            *frequency += 1;
+        } else {
+            self.tokens.push(token.clone());
+            self.frequencies.insert(token, 1);
         }
-        let symbol = Symbol::from_usize(self.tokens.len())?;
-        self.tokens.push(token.clone());
-        self.symbols.insert(token, symbol);
-        Ok(symbol)
     }
 
-    /// Inserts tokens as needed and returns their symbols in input order.
-    pub fn encode<I>(&mut self, tokens: I) -> Result<Vec<Symbol>>
+    /// Records every token from `tokens`.
+    pub fn insert_all<I>(&mut self, tokens: I)
     where
         I: IntoIterator<Item = Token>,
     {
-        tokens.into_iter().map(|token| self.insert(token)).collect()
+        for token in tokens {
+            self.insert(token);
+        }
     }
 
-    /// Finalizes this builder and returns a read-only vocabulary.
-    pub fn build(self) -> Vocabulary<Token> {
-        Vocabulary {
-            tokens: self.tokens,
-            symbols: self.symbols,
+    /// Assigns consecutive symbols by descending token frequency.
+    ///
+    /// Tokens with the same frequency retain their first-seen order.
+    pub fn build(self) -> Result<Vocabulary<Token>> {
+        let mut tokens = self.tokens;
+        tokens.sort_by_key(|token| Reverse(self.frequencies[token]));
+
+        let mut symbols = HashMap::with_capacity(tokens.len());
+        for (index, token) in tokens.iter().cloned().enumerate() {
+            symbols.insert(token, Symbol::from_usize(index)?);
         }
+
+        Ok(Vocabulary { tokens, symbols })
     }
 }
 
@@ -83,6 +92,17 @@ where
         self.tokens.get(symbol.as_usize())
     }
 
+    /// Converts known tokens to their symbols in input order.
+    pub fn encode<I>(&self, tokens: I) -> Result<Vec<Symbol>>
+    where
+        I: IntoIterator<Item = Token>,
+    {
+        tokens
+            .into_iter()
+            .map(|token| self.symbol(&token).ok_or(Error::UnknownToken))
+            .collect()
+    }
+
     /// Returns the number of distinct tokens.
     pub fn len(&self) -> usize {
         self.tokens.len()
@@ -97,25 +117,39 @@ where
 #[cfg(test)]
 mod tests {
     use super::VocabularyBuilder;
+    use crate::errors::Error;
     use crate::types::Symbol;
 
     #[test]
-    fn insert_assigns_consecutive_symbols_and_reuses_existing_ones() {
+    fn build_assigns_symbols_by_descending_frequency() {
         let mut builder = VocabularyBuilder::new();
 
-        assert_eq!(builder.insert('b').unwrap(), Symbol::new(0));
-        assert_eq!(builder.insert('a').unwrap(), Symbol::new(1));
-        assert_eq!(builder.insert('b').unwrap(), Symbol::new(0));
+        builder.insert('a');
+        builder.insert('b');
+        builder.insert('b');
 
-        let vocabulary = builder.build();
-        assert_eq!(vocabulary.len(), 2);
+        let vocabulary = builder.build().unwrap();
+        assert_eq!(vocabulary.symbol(&'b'), Some(Symbol::new(0)));
+        assert_eq!(vocabulary.symbol(&'a'), Some(Symbol::new(1)));
+    }
+
+    #[test]
+    fn equal_frequencies_preserve_first_seen_order() {
+        let mut builder = VocabularyBuilder::new();
+        builder.insert_all(['b', 'a']);
+
+        let vocabulary = builder.build().unwrap();
+
+        assert_eq!(vocabulary.symbol(&'b'), Some(Symbol::new(0)));
+        assert_eq!(vocabulary.symbol(&'a'), Some(Symbol::new(1)));
     }
 
     #[test]
     fn mappings_are_bidirectional() {
         let mut builder = VocabularyBuilder::new();
-        let symbol = builder.insert("東京").unwrap();
-        let vocabulary = builder.build();
+        builder.insert("東京");
+        let vocabulary = builder.build().unwrap();
+        let symbol = vocabulary.symbol(&"東京").unwrap();
 
         assert_eq!(vocabulary.symbol(&"東京"), Some(symbol));
         assert_eq!(vocabulary.token(symbol), Some(&"東京"));
@@ -125,9 +159,20 @@ mod tests {
     #[test]
     fn encode_preserves_order_and_repeated_tokens() {
         let mut builder = VocabularyBuilder::new();
+        builder.insert_all(['a', 'b', 'a']);
+        let vocabulary = builder.build().unwrap();
 
-        let symbols = builder.encode(['a', 'b', 'a']).unwrap();
+        let symbols = vocabulary.encode(['a', 'b', 'a']).unwrap();
 
         assert_eq!(symbols, [Symbol::new(0), Symbol::new(1), Symbol::new(0)]);
+    }
+
+    #[test]
+    fn encode_rejects_unknown_tokens() {
+        let mut builder = VocabularyBuilder::new();
+        builder.insert('a');
+        let vocabulary = builder.build().unwrap();
+
+        assert_eq!(vocabulary.encode(['b']), Err(Error::UnknownToken));
     }
 }

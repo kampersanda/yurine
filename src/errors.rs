@@ -18,6 +18,10 @@ pub enum Error {
     #[error("symbol exceeds u32")]
     SymbolOverflow,
 
+    /// A token is not present in the vocabulary used for encoding.
+    #[error("token is not present in vocabulary")]
+    UnknownToken,
+
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]
     PlatformSizeOverflow,
