@@ -55,7 +55,7 @@ fn create_match(
         .ok_or(Error::UnknownString(string_id))?;
     Ok(Match {
         string_id,
-        range: Position::from_usize(start)?..Position::from_usize(end)?,
+        token_range: Position::from_usize(start)?..Position::from_usize(end)?,
         byte_range: byte_ranges[start].start..byte_ranges[end - 1].end,
         distance,
     })
@@ -210,7 +210,7 @@ mod tests {
             matches,
             [Match {
                 string_id: StringId::new(0),
-                range: Position::new(0)..Position::new(1),
+                token_range: Position::new(0)..Position::new(1),
                 byte_range: 0..1,
                 distance: Cost::ZERO,
             }]
@@ -230,13 +230,13 @@ mod tests {
             [
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(0)..Position::new(1),
+                    token_range: Position::new(0)..Position::new(1),
                     byte_range: 0..1,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(1)..Position::new(2),
+                    token_range: Position::new(1)..Position::new(2),
                     byte_range: 1..2,
                     distance: Cost::ZERO,
                 },

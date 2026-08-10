@@ -253,13 +253,13 @@ mod tests {
         vec![
             Match {
                 string_id: StringId::new(0),
-                range: Position::new(0)..Position::new(1),
+                token_range: Position::new(0)..Position::new(1),
                 byte_range: 0..1,
                 distance,
             },
             Match {
                 string_id: StringId::new(1),
-                range: Position::new(0)..Position::new(1),
+                token_range: Position::new(0)..Position::new(1),
                 byte_range: 0..1,
                 distance,
             },

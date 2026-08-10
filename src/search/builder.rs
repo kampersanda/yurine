@@ -148,13 +148,13 @@ mod tests {
             [
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
                     byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(3),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
                     byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
@@ -179,13 +179,13 @@ mod tests {
             [
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(0)..Position::new(2),
+                    token_range: Position::new(0)..Position::new(2),
                     byte_range: 0..2,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(0),
-                    range: Position::new(1)..Position::new(3),
+                    token_range: Position::new(1)..Position::new(3),
                     byte_range: 1..3,
                     distance: Cost::ZERO,
                 },
@@ -205,7 +205,7 @@ mod tests {
             .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
-        assert_eq!(matches[0].range, Position::new(1)..Position::new(3));
+        assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));
         assert_eq!(matches[0].byte_range, 1..7);
     }
 
@@ -230,7 +230,7 @@ mod tests {
             .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
-        assert_eq!(matches[0].range, Position::new(0)..Position::new(1));
+        assert_eq!(matches[0].token_range, Position::new(0)..Position::new(1));
         assert_eq!(matches[0].byte_range, 0..6);
     }
 }

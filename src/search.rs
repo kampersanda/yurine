@@ -33,7 +33,7 @@ pub struct Match {
     /// The data string containing the match.
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
-    pub range: Range<Position>,
+    pub token_range: Range<Position>,
     /// The matched zero-based, end-exclusive UTF-8 byte range in the original string.
     ///
     /// This range can be used to slice the string passed to
