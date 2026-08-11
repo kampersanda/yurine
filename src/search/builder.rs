@@ -4,11 +4,11 @@ use std::hash::Hash;
 
 use super::SearchEngine;
 use crate::costs::EditCosts;
-use crate::errors::{Error, Result};
+use crate::errors::Result;
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
 use crate::tokenization::{Tokenized, Tokenizer};
-use crate::types::{Position, Posting, StringId};
+use crate::types::{ByteOffset, Position, Posting, StringId};
 use crate::vocabulary::VocabularyBuilder;
 
 /// Builds a [`SearchEngine`] from strings in insertion order.
@@ -107,9 +107,7 @@ where
 }
 
 fn validate_byte_length(length: usize) -> Result<()> {
-    u32::try_from(length)
-        .map(|_| ())
-        .map_err(|_| Error::ByteOffsetOverflow)
+    ByteOffset::from_usize(length).map(|_| ())
 }
 
 #[cfg(test)]

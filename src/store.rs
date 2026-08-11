@@ -97,7 +97,7 @@ impl CorpusStore {
         if index >= end {
             return Ok(None);
         }
-        self.byte_ranges[index].as_range().map(Some)
+        Ok(Some(self.byte_ranges[index].as_range()))
     }
 
     /// Returns the number of indexed strings.
