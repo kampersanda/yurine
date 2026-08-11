@@ -7,9 +7,10 @@ from typing import Literal
 
 from tap import Positional, Tap
 
-from yurine_tools.arguments import Normalization, run
+from yurine_tools.cli.common import run
 from yurine_tools.corpus import SudachiTokenizer, WhitespaceTokenizer, preprocess_lines
-from yurine_tools.embeddings import open_text_input, open_text_output
+from yurine_tools.options import Normalization
+from yurine_tools.text_io import open_text_input, open_text_output
 
 
 class PreprocessCorpusArgs(Tap):

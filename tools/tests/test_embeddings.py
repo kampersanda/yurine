@@ -7,10 +7,10 @@ from pydantic import BaseModel
 
 from yurine_tools.embeddings import (
     convert_word2vec_text,
-    open_text_input,
     write_cost_config,
 )
 from yurine_tools.schemas import ConversionStats, EmbeddingCostConfig, EmbeddingRecord
+from yurine_tools.text_io import open_text_input
 
 
 def test_generated_data_uses_pydantic_schemas() -> None:

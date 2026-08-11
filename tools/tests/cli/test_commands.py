@@ -1,7 +1,7 @@
 import pytest
 
-from yurine_tools.convert_embeddings import ConvertEmbeddingsArgs
-from yurine_tools.preprocess_corpus import PreprocessCorpusArgs
+from yurine_tools.cli.convert_embeddings import ConvertEmbeddingsArgs
+from yurine_tools.cli.preprocess_corpus import PreprocessCorpusArgs
 
 
 def test_chive_compatible_corpus_defaults() -> None:

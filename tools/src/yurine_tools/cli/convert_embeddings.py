@@ -6,13 +6,13 @@ import sys
 
 from tap import Positional, Tap
 
-from yurine_tools.arguments import Header, Normalization, require_nonnegative_finite, run
+from yurine_tools.cli.common import require_nonnegative_finite, run
 from yurine_tools.embeddings import (
     convert_word2vec_text,
-    open_text_input,
-    open_text_output,
     write_cost_config,
 )
+from yurine_tools.options import Header, Normalization
+from yurine_tools.text_io import open_text_input, open_text_output
 
 
 class ConvertEmbeddingsArgs(Tap):

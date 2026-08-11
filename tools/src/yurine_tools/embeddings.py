@@ -2,53 +2,20 @@
 
 from __future__ import annotations
 
-import bz2
-import gzip
-import lzma
 import math
 import os
-import sys
 import unicodedata
-from contextlib import nullcontext
 from itertools import chain
 from pathlib import Path
 from typing import TextIO
 
-from yurine_tools.arguments import Header, Normalization
+from yurine_tools.options import Header, Normalization
 from yurine_tools.schemas import (
     ConversionStats,
     EmbeddingCostConfig,
     EmbeddingRecord,
     EmbeddingSource,
 )
-
-
-def open_text_input(path: str):
-    """Open UTF-8 input, detecting supported compression from the suffix."""
-    if path == "-":
-        return nullcontext(sys.stdin)
-    if path.endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8")
-    if path.endswith(".bz2"):
-        return bz2.open(path, "rt", encoding="utf-8")
-    if path.endswith((".xz", ".lzma")):
-        return lzma.open(path, "rt", encoding="utf-8")
-    return open(path, encoding="utf-8")
-
-
-def open_text_output(path: str):
-    """Open UTF-8 output and create its parent directory when necessary."""
-    if path == "-":
-        return nullcontext(sys.stdout)
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if path.endswith(".gz"):
-        return gzip.open(path, "wt", encoding="utf-8", newline="\n")
-    if path.endswith(".bz2"):
-        return bz2.open(path, "wt", encoding="utf-8", newline="\n")
-    if path.endswith((".xz", ".lzma")):
-        return lzma.open(path, "wt", encoding="utf-8", newline="\n")
-    return open(path, "w", encoding="utf-8", newline="\n")
 
 
 def normalize_token(token: str, normalization: Normalization) -> str:

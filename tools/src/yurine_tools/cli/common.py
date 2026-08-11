@@ -1,15 +1,12 @@
-"""Shared typed CLI arguments, validation, and error handling."""
+"""Validation and error handling shared by command-line entry points."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Literal, TypeVar
+from typing import TypeVar
 
 from tap import Tap
-
-Normalization = Literal["none", "nfc", "nfkc", "nfkc-casefold"]
-Header = Literal["auto", "present", "absent"]
 
 Arguments = TypeVar("Arguments", bound=Tap)
 

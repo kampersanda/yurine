@@ -6,7 +6,7 @@ import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Protocol
 
-from yurine_tools.arguments import Normalization
+from yurine_tools.options import Normalization
 
 
 class Tokenizer(Protocol):

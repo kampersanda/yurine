@@ -98,3 +98,15 @@ $ uv run ruff check .
 $ uv run ty check
 $ uv run pytest
 ```
+
+The package separates command-line entry points from reusable processing code:
+
+```text
+src/yurine_tools/
+├── cli/           # Tap argument definitions and command runners
+├── corpus.py      # Corpus normalization and tokenization
+├── embeddings.py  # Streaming embedding conversion
+├── options.py     # Shared option types
+├── schemas.py     # Pydantic output schemas
+└── text_io.py     # Standard and compressed text I/O
+```

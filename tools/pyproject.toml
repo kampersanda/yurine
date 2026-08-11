@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [project.scripts]
-yurine-convert-embeddings = "yurine_tools.convert_embeddings:main"
-yurine-preprocess-corpus = "yurine_tools.preprocess_corpus:main"
+yurine-convert-embeddings = "yurine_tools.cli.convert_embeddings:main"
+yurine-preprocess-corpus = "yurine_tools.cli.preprocess_corpus:main"
 
 [dependency-groups]
 dev = [
