@@ -26,7 +26,7 @@ struct Options {
     corpus: Option<PathBuf>,
 
     /// Maximum edit distance.
-    #[arg(short, long, default_value = "0", value_parser = parse_cost)]
+    #[arg(short, long, default_value = "0", value_parser = parse_threshold)]
     threshold: Cost,
 
     /// Substitution-neighborhood radius; calculated automatically if omitted.
@@ -71,6 +71,15 @@ fn parse_cost(text: &str) -> Result<Cost, String> {
         .parse::<f32>()
         .map_err(|_| "must be a non-negative finite number".to_owned())?;
     Cost::new(value).map_err(|_| "must be a non-negative finite number".to_owned())
+}
+
+fn parse_threshold(text: &str) -> Result<Cost, String> {
+    let threshold = parse_cost(text)?;
+    if threshold == Cost::MAX {
+        Err("must be less than f32::MAX".to_owned())
+    } else {
+        Ok(threshold)
+    }
 }
 
 fn read_corpus(path: Option<&Path>) -> Result<Vec<String>> {
@@ -184,6 +193,18 @@ mod tests {
         assert!(Options::try_parse_from(["yurine", "--threshold", "-1", "query"]).is_err());
         assert!(Options::try_parse_from(["yurine", "--tokenizer", "bytes", "query"]).is_err());
         assert!(Options::try_parse_from(["yurine", "query", "first", "second"]).is_err());
+    }
+
+    #[test]
+    fn threshold_rejects_maximum_cost_but_eta_accepts_it() {
+        let maximum = Cost::MAX.to_string();
+
+        let error =
+            Options::try_parse_from(["yurine", "--threshold", &maximum, "query"]).unwrap_err();
+        assert!(error.to_string().contains("must be less than f32::MAX"));
+
+        let options = Options::try_parse_from(["yurine", "--eta", &maximum, "query"]).unwrap();
+        assert_eq!(options.eta, Some(Cost::MAX));
     }
 
     #[test]
