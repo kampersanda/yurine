@@ -57,7 +57,10 @@ def normalize_text(text: str, normalization: Normalization) -> str:
     if normalization == "nfkc":
         return unicodedata.normalize("NFKC", text)
     if normalization == "nfkc-casefold":
-        return unicodedata.normalize("NFKC", text.casefold())
+        # Normalize compatibility characters before case folding, then apply
+        # NFKC once more for the canonical NFKC_Casefold operation.
+        normalized = unicodedata.normalize("NFKC", text)
+        return unicodedata.normalize("NFKC", normalized.casefold())
     raise AssertionError(f"unknown normalization: {normalization}")
 
 

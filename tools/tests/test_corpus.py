@@ -16,6 +16,7 @@ def test_preserves_line_structure_and_normalizes_whitespace() -> None:
 
 def test_supports_unicode_normalization() -> None:
     assert normalize_text("ＡＢＣ", "nfkc-casefold") == "abc"
+    assert normalize_text("𝐀", "nfkc-casefold") == "a"
 
 
 def test_sudachi_normalized_form_matches_chive_preprocessing() -> None:

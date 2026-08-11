@@ -7,7 +7,7 @@ from typing import Literal
 
 from tap import Positional, Tap
 
-from yurine_tools.cli.common import run
+from yurine_tools.cli.common import require_distinct_file_paths, run
 from yurine_tools.corpus import SudachiTokenizer, WhitespaceTokenizer, preprocess_lines
 from yurine_tools.options import Normalization
 from yurine_tools.text_io import open_text_input, open_text_output
@@ -35,8 +35,18 @@ class PreprocessCorpusArgs(Tap):
 
     def process_args(self) -> None:
         """Reject Sudachi-only options when using generic tokenization."""
-        if self.tokenizer == "whitespace" and self.form != "normalized":
+        require_distinct_file_paths(
+            ("input", self.input, True),
+            ("output", self.output, True),
+        )
+        if self.tokenizer != "whitespace":
+            return
+        if self.mode != "B":
+            raise ValueError("--mode only applies to the Sudachi tokenizer")
+        if self.form != "normalized":
             raise ValueError("--form only applies to the Sudachi tokenizer")
+        if self.sudachi_config is not None:
+            raise ValueError("--sudachi-config only applies to the Sudachi tokenizer")
 
 
 def run_command(args: PreprocessCorpusArgs) -> None:

@@ -6,7 +6,11 @@ import sys
 
 from tap import Positional, Tap
 
-from yurine_tools.cli.common import require_nonnegative_finite, run
+from yurine_tools.cli.common import (
+    require_distinct_file_paths,
+    require_nonnegative_finite,
+    run,
+)
 from yurine_tools.embeddings import (
     convert_word2vec_text,
     write_cost_config,
@@ -49,6 +53,13 @@ class ConvertEmbeddingsArgs(Tap):
         require_nonnegative_finite(self.missing_substitution_cost, "missing substitution cost")
         require_nonnegative_finite(self.deletion_cost, "deletion cost")
         require_nonnegative_finite(self.insertion_cost, "insertion cost")
+        paths = [
+            ("input", self.input, True),
+            ("output", self.output, True),
+        ]
+        if self.cost_config is not None:
+            paths.append(("cost config", self.cost_config, False))
+        require_distinct_file_paths(*paths)
 
 
 def run_command(args: ConvertEmbeddingsArgs) -> None:

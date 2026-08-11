@@ -1,5 +1,6 @@
 import gzip
 import json
+import struct
 from io import StringIO
 
 import pytest
@@ -43,6 +44,28 @@ def test_infers_dimension_without_header_and_normalizes_tokens() -> None:
     assert json.loads(destination.getvalue().splitlines()[0])["token"] == "abc"
 
 
+def test_nfkc_casefold_normalizes_before_case_folding() -> None:
+    destination = StringIO()
+
+    convert_word2vec_text(
+        StringIO("𝐀 1\n"),
+        destination,
+        header="absent",
+        normalization="nfkc-casefold",
+    )
+
+    assert json.loads(destination.getvalue())["token"] == "a"
+
+
+def test_quantizes_embedding_values_to_f32() -> None:
+    destination = StringIO()
+
+    convert_word2vec_text(StringIO("token 0.1\n"), destination)
+
+    expected = struct.unpack("!f", struct.pack("!f", 0.1))[0]
+    assert json.loads(destination.getvalue())["embedding"] == [expected]
+
+
 def test_can_force_headerless_input_when_first_token_is_numeric() -> None:
     destination = StringIO()
 
@@ -63,11 +86,26 @@ def test_can_force_headerless_input_when_first_token_is_numeric() -> None:
         ("東京 1 0\n京都 1\n", "expected 2 dimensions"),
         ("東京 0 0\n", "zero norm"),
         ("東京 nan 0\n", "non-finite"),
+        ("東京 1e100 0\n", "outside the f32 range"),
+        ("東京 1e-100 0\n", "zero norm"),
+        ("東京 1 0\n東京 0 1\n", "duplicate token"),
+        ("Ａ 1 0\nA 0 1\n", "duplicate token"),
     ],
 )
 def test_rejects_invalid_embeddings(source: str, message: str) -> None:
+    normalization = "nfkc" if source.startswith("Ａ") else "none"
     with pytest.raises(ValueError, match=message):
-        convert_word2vec_text(StringIO(source), StringIO())
+        convert_word2vec_text(StringIO(source), StringIO(), normalization=normalization)
+
+
+def test_cost_schema_rejects_values_outside_f32_range() -> None:
+    with pytest.raises(ValueError, match="less than or equal"):
+        EmbeddingCostConfig(
+            embeddings={"path": "embeddings.jsonl"},
+            missing_substitution_cost=1e100,
+            deletion_cost=1,
+            insertion_cost=1,
+        )
 
 
 def test_reads_gzip_input(tmp_path) -> None:

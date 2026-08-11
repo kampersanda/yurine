@@ -1,8 +1,11 @@
 """Pydantic schemas for generated Yurine data and conversion metadata."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+F32_MAX = 3.4028234663852886e38
+Float32 = Annotated[float, Field(ge=-F32_MAX, le=F32_MAX)]
 
 
 class YurineModel(BaseModel):
@@ -22,7 +25,7 @@ class EmbeddingRecord(YurineModel):
     """One token and its vector in Yurine's JSON Lines format."""
 
     token: str = Field(min_length=1)
-    embedding: list[float] = Field(min_length=1)
+    embedding: list[Float32] = Field(min_length=1)
 
 
 class EmbeddingSource(YurineModel):
@@ -38,6 +41,6 @@ class EmbeddingCostConfig(YurineModel):
     version: Literal[1] = 1
     type: Literal["embedding"] = "embedding"
     embeddings: EmbeddingSource
-    missing_substitution_cost: float = Field(ge=0)
-    deletion_cost: float = Field(ge=0)
-    insertion_cost: float = Field(ge=0)
+    missing_substitution_cost: float = Field(ge=0, le=F32_MAX)
+    deletion_cost: float = Field(ge=0, le=F32_MAX)
+    insertion_cost: float = Field(ge=0, le=F32_MAX)

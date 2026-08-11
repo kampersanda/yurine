@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import struct
 import unicodedata
 from itertools import chain
 from pathlib import Path
@@ -27,8 +28,23 @@ def normalize_token(token: str, normalization: Normalization) -> str:
     if normalization == "nfkc":
         return unicodedata.normalize("NFKC", token)
     if normalization == "nfkc-casefold":
-        return unicodedata.normalize("NFKC", token.casefold())
+        # NFKC must run before case folding so compatibility characters such
+        # as mathematical bold capitals are folded to lowercase as expected.
+        normalized = unicodedata.normalize("NFKC", token)
+        return unicodedata.normalize("NFKC", normalized.casefold())
     raise AssertionError(f"unknown normalization: {normalization}")
+
+
+def _to_f32(value: float, line_number: int) -> float:
+    """Round a finite Python float to the representation Yurine reads."""
+    if not math.isfinite(value):
+        raise ValueError(f"line {line_number}: vector contains a non-finite value")
+    try:
+        return struct.unpack("!f", struct.pack("!f", value))[0]
+    except OverflowError as error:
+        raise ValueError(
+            f"line {line_number}: vector contains a value outside the f32 range"
+        ) from error
 
 
 def convert_word2vec_text(
@@ -69,6 +85,7 @@ def convert_word2vec_text(
         pending = [(first_line_number, first_parts)]
 
     records = 0
+    seen_tokens: set[str] = set()
     for line_number, parts in chain(pending, lines):
         if not isinstance(parts, list):
             parts = parts.split()
@@ -80,9 +97,10 @@ def convert_word2vec_text(
             raise ValueError(f"line {line_number}: token must be non-empty without whitespace")
 
         try:
-            embedding = [float(value) for value in parts[1:]]
+            parsed_embedding = [float(value) for value in parts[1:]]
         except ValueError as error:
             raise ValueError(f"line {line_number}: vector contains a non-number") from error
+        embedding = [_to_f32(value, line_number) for value in parsed_embedding]
 
         if dimension is None:
             dimension = len(embedding)
@@ -90,10 +108,11 @@ def convert_word2vec_text(
             raise ValueError(
                 f"line {line_number}: expected {dimension} dimensions, got {len(embedding)}"
             )
-        if not all(math.isfinite(value) for value in embedding):
-            raise ValueError(f"line {line_number}: vector contains a non-finite value")
         if not any(value != 0.0 for value in embedding):
             raise ValueError(f"line {line_number}: vector has zero norm")
+        if token in seen_tokens:
+            raise ValueError(f"line {line_number}: duplicate token {token!r}")
+        seen_tokens.add(token)
 
         record = EmbeddingRecord(token=token, embedding=embedding)
         destination.write(record.model_dump_json())
