@@ -112,8 +112,8 @@ struct MeasureOptions {
     #[arg(long, default_value = "0", value_parser = parse_cost)]
     threshold: Cost,
 
-    #[arg(long, default_value = "0", value_parser = parse_cost)]
-    eta: Cost,
+    #[arg(long, value_parser = parse_cost)]
+    eta: Option<Cost>,
 
     #[arg(long, default_value = "5")]
     warm_runs: NonZeroUsize,
@@ -151,6 +151,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let load_start = Instant::now();
     let contents = fs::read_to_string(&options.corpus)?;
     let corpus: Vec<_> = contents.lines().map(str::to_owned).collect();
+    let corpus_strings = corpus.len();
     let load_elapsed = load_start.elapsed();
     let load_heap_peak = heap_peak();
 
@@ -163,9 +164,14 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let engine = builder.build()?;
     let build_elapsed = build_start.elapsed();
     let build_heap_peak = heap_peak();
+    drop(corpus);
+    drop(contents);
     let peak_rss_after_build = peak_rss_bytes();
 
-    let params = RangeSearchParams::new(options.threshold).with_eta(options.eta);
+    let mut params = RangeSearchParams::new(options.threshold);
+    if let Some(eta) = options.eta {
+        params = params.with_eta(eta);
+    }
     let cold_heap_start = reset_heap_peak();
     let cold_start = Instant::now();
     let (cold_matches, metrics) = engine.range_search_with_metrics(&options.query, &params)?;
@@ -190,7 +196,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         "bytes",
     );
     metric("persistent_index_bytes", 0, "bytes");
-    metric("corpus_strings", corpus.len(), "count");
+    metric("corpus_strings", corpus_strings, "count");
     metric("corpus_load_elapsed", load_elapsed.as_nanos(), "ns");
     heap_metrics("corpus_load", load_heap_start, load_heap_peak);
     metric("build_elapsed", build_elapsed.as_nanos(), "ns");
@@ -209,26 +215,19 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     metric("cold_match_count", cold_matches.len(), "count");
     metric("warm_match_count", warm_matches, "count");
     metric(
+        "used_exhaustive_verification",
+        metrics.used_exhaustive_verification,
+        "bool",
+    );
+    metric(
         "selected_query_positions",
         metrics.selected_query_positions,
         "count",
     );
-    metric("raw_candidates", metrics.raw_candidates, "count");
-    metric("unique_candidates", metrics.unique_candidates, "count");
     metric(
-        "candidate_duplicate_rate",
-        metrics.duplicate_rate(),
-        "ratio",
-    );
-    metric(
-        "candidate_vec_payload_capacity",
-        metrics.candidate_vec_payload_bytes(),
-        "bytes",
-    );
-    metric(
-        "dedup_set_key_capacity",
-        metrics.dedup_set_key_capacity_bytes(),
-        "bytes",
+        "generated_candidates",
+        metrics.generated_candidates,
+        "count",
     );
     Ok(())
 }
@@ -324,7 +323,7 @@ mod tests {
 
         assert_eq!(options.query, DEFAULT_QUERY);
         assert_eq!(options.threshold, Cost::new_const(1.5));
-        assert_eq!(options.eta, Cost::new_const(0.25));
+        assert_eq!(options.eta, Some(Cost::new_const(0.25)));
         assert_eq!(options.warm_runs.get(), 3);
         assert!(
             Options::try_parse_from([
@@ -336,5 +335,18 @@ mod tests {
             ])
             .is_err()
         );
+
+        let automatic = Options::try_parse_from([
+            "yurine-baseline",
+            "measure",
+            "corpus.txt",
+            "--threshold",
+            "1",
+        ])
+        .unwrap();
+        let Command::Measure(automatic) = automatic.command else {
+            panic!("expected measure command");
+        };
+        assert_eq!(automatic.eta, None);
     }
 }

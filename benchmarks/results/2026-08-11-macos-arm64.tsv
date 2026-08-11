@@ -1,5 +1,6 @@
 # measured_at	2026-08-11T21:17:14+09:00
 # base_commit	48e3ed42cd1b2340c20d0e7270232e08f1276476
+# candidate_dedup	Vec + HashSet baseline before removal
 # host	aarch64-apple-darwin
 # kernel	Darwin 25.6.0 arm64
 # rustc	1.96.0 (ac68faa20 2026-05-25)

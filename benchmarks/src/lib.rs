@@ -24,6 +24,12 @@ impl Default for CorpusConfig {
 }
 
 pub fn write_corpus(mut output: impl Write, config: CorpusConfig) -> io::Result<()> {
+    if config.seed == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "seed must be non-zero",
+        ));
+    }
     if config.vocabulary == 0
         || config.vocabulary > 10_000
         || config.hot_vocabulary == 0
@@ -90,5 +96,18 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.iter().filter(|byte| **byte == b'\n').count(), 4);
         assert!(first.starts_with(b"t0000 t0001 t0002 t0003 "));
+    }
+
+    #[test]
+    fn rejects_zero_seed() {
+        let result = write_corpus(
+            Vec::new(),
+            CorpusConfig {
+                seed: 0,
+                ..CorpusConfig::default()
+            },
+        );
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     }
 }

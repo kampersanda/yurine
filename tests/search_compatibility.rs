@@ -1,4 +1,5 @@
 use yurine::costs::{Cost, EditCosts};
+use yurine::errors::Error;
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::tokenization::character::CharacterTokenizer;
@@ -79,7 +80,7 @@ fn range_search_result_contract_is_stable() {
 }
 
 #[test]
-fn overlapping_postings_report_candidate_deduplication_cost() {
+fn repeated_postings_report_candidate_count_without_deduplication() {
     let mut builder = SearchEngineBuilder::new(CharacterTokenizer::new(), CompatibilityCosts);
     for _ in 0..128 {
         builder.add_string("aaaaaaaa").unwrap();
@@ -91,9 +92,40 @@ fn overlapping_postings_report_candidate_deduplication_cost() {
         .unwrap();
 
     assert_eq!(metrics.selected_query_positions, 2);
-    assert_eq!(metrics.raw_candidates, 2 * 128 * 8);
-    assert_eq!(metrics.unique_candidates, metrics.raw_candidates);
-    assert_eq!(metrics.duplicate_rate(), 0.0);
-    assert!(metrics.candidate_vec_payload_bytes() > 0);
-    assert!(metrics.dedup_set_key_capacity_bytes() > 0);
+    assert_eq!(metrics.generated_candidates, 2 * 128 * 8);
+}
+
+#[test]
+fn exhaustive_fallback_result_contract_is_stable() {
+    let mut builder = SearchEngineBuilder::new(CharacterTokenizer::new(), CompatibilityCosts);
+    builder.add_string("a").unwrap();
+    builder.add_string("").unwrap();
+    let engine = builder.build().unwrap();
+
+    let (matches, metrics) = engine
+        .range_search_with_metrics("a", &RangeSearchParams::new(Cost::ONE))
+        .unwrap();
+
+    assert!(metrics.used_exhaustive_verification);
+    assert_eq!(
+        matches,
+        [yurine::search::Match {
+            string_id: StringId::new(0),
+            token_range: Position::new(0)..Position::new(1),
+            byte_range: 0..1,
+            distance: Cost::ZERO,
+        }]
+    );
+}
+
+#[test]
+fn empty_query_error_contract_is_stable() {
+    let mut builder = SearchEngineBuilder::new(CharacterTokenizer::new(), CompatibilityCosts);
+    builder.add_string("a").unwrap();
+    let engine = builder.build().unwrap();
+
+    assert_eq!(
+        engine.range_search("", &RangeSearchParams::new(Cost::ZERO)),
+        Err(Error::ThresholdSubsequenceUnavailable)
+    );
 }
