@@ -92,7 +92,9 @@ impl CorpusStore {
         let Some((start, end)) = self.string_bounds(id)? else {
             return Ok(None);
         };
-        let index = start + position.as_usize();
+        let Some(index) = start.checked_add(position.as_usize()) else {
+            return Ok(None);
+        };
         if index >= end {
             return Ok(None);
         }
@@ -116,9 +118,12 @@ impl CorpusStore {
 
     fn string_bounds(&self, id: StringId) -> Result<Option<(usize, usize)>> {
         let index = id.as_usize();
+        let Some(end_index) = index.checked_add(1) else {
+            return Ok(None);
+        };
         let (Some(&start), Some(&end)) = (
             self.string_offsets.get(index),
-            self.string_offsets.get(index + 1),
+            self.string_offsets.get(end_index),
         ) else {
             return Ok(None);
         };
