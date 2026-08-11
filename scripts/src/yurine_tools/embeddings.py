@@ -16,6 +16,8 @@ from itertools import chain
 from pathlib import Path
 from typing import TextIO
 
+from yurine_tools.arguments import Header, Normalization
+
 
 @dataclass(frozen=True)
 class ConversionStats:
@@ -53,21 +55,25 @@ def open_text_output(path: str):
     return open(path, "w", encoding="utf-8", newline="\n")
 
 
-def normalize_token(token: str, normalization: str) -> str:
+def normalize_token(token: str, normalization: Normalization) -> str:
     """Normalize a model token without changing it by default."""
     if normalization == "none":
         return token
+    if normalization == "nfc":
+        return unicodedata.normalize("NFC", token)
+    if normalization == "nfkc":
+        return unicodedata.normalize("NFKC", token)
     if normalization == "nfkc-casefold":
         return unicodedata.normalize("NFKC", token.casefold())
-    return unicodedata.normalize(normalization.upper(), token)
+    raise AssertionError(f"unknown normalization: {normalization}")
 
 
 def convert_word2vec_text(
     source: TextIO,
     destination: TextIO,
     *,
-    header: str = "auto",
-    normalization: str = "none",
+    header: Header = "auto",
+    normalization: Normalization = "none",
 ) -> ConversionStats:
     """Stream word2vec text records as Yurine-compatible JSON Lines.
 

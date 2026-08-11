@@ -84,3 +84,14 @@ $ cargo run -p yurine-cli -- \
 ```
 
 Run each feature command with `--help` for all options.
+
+## Development
+
+Run formatting checks, linting, type checking, and tests from `scripts/`:
+
+```console
+$ uv run ruff format --check .
+$ uv run ruff check .
+$ uv run ty check
+$ uv run pytest
+```

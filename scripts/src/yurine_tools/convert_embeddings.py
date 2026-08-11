@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import sys
-from typing import Literal
 
 from tap import Positional, Tap
 
-from yurine_tools.arguments import Normalization, require_nonnegative_finite, run
+from yurine_tools.arguments import Header, Normalization, require_nonnegative_finite, run
 from yurine_tools.embeddings import (
     convert_word2vec_text,
     open_text_input,
@@ -21,7 +20,7 @@ class ConvertEmbeddingsArgs(Tap):
 
     input: Positional[str]  # word2vec text file, compressed file, or '-' for stdin
     output: Positional[str]  # JSON Lines file, compressed file, or '-' for stdout
-    header: Literal["auto", "present", "absent"] = "auto"  # word2vec header handling
+    header: Header = "auto"  # word2vec header handling
     normalization: Normalization = "none"  # token normalization
     cost_config: str | None = None  # also write a Yurine embedding cost config
     missing_substitution_cost: float = 1.0  # cost when either token has no embedding

@@ -6,6 +6,8 @@ import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Protocol
 
+from yurine_tools.arguments import Normalization
+
 
 class Tokenizer(Protocol):
     """Minimal tokenizer interface used by the preprocessing pipeline."""
@@ -46,20 +48,24 @@ class SudachiTokenizer:
                 yield token
 
 
-def normalize_text(text: str, normalization: str) -> str:
+def normalize_text(text: str, normalization: Normalization) -> str:
     """Apply the explicitly selected Unicode normalization policy."""
     if normalization == "none":
         return text
+    if normalization == "nfc":
+        return unicodedata.normalize("NFC", text)
+    if normalization == "nfkc":
+        return unicodedata.normalize("NFKC", text)
     if normalization == "nfkc-casefold":
         return unicodedata.normalize("NFKC", text.casefold())
-    return unicodedata.normalize(normalization.upper(), text)
+    raise AssertionError(f"unknown normalization: {normalization}")
 
 
 def preprocess_lines(
     lines: Iterable[str],
     tokenizer: Tokenizer,
     *,
-    normalization: str = "none",
+    normalization: Normalization = "none",
 ) -> Iterator[str]:
     """Produce one whitespace-tokenized output line for every input line."""
     for line in lines:

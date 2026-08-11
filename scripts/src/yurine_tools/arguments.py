@@ -9,6 +9,7 @@ from typing import Literal, TypeVar
 from tap import Tap
 
 Normalization = Literal["none", "nfc", "nfkc", "nfkc-casefold"]
+Header = Literal["auto", "present", "absent"]
 
 Arguments = TypeVar("Arguments", bound=Tap)
 

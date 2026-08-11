@@ -18,6 +18,7 @@ yurine-preprocess-corpus = "yurine_tools.preprocess_corpus:main"
 dev = [
     "pytest>=8.3",
     "ruff>=0.11",
+    "ty==0.0.70",
 ]
 
 [build-system]
@@ -32,3 +33,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ty.src]
+include = ["src", "tests"]
