@@ -293,8 +293,12 @@ mod tests {
         }
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder.add_string(vec![symbol], std::iter::once(0..1).collect());
-        store_builder.add_string(vec![symbol], std::iter::once(0..1).collect());
+        store_builder
+            .add_string(vec![symbol], std::iter::once(0..1).collect())
+            .unwrap();
+        store_builder
+            .add_string(vec![symbol], std::iter::once(0..1).collect())
+            .unwrap();
 
         SearchEngine::from_parts(
             CharacterTokenizer::new(),

@@ -107,7 +107,9 @@ mod tests {
         let unknown_symbol = Symbol::new(1);
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder.add_string(vec![unknown_symbol], std::iter::once(0..1).collect());
+        store_builder
+            .add_string(vec![unknown_symbol], std::iter::once(0..1).collect())
+            .unwrap();
 
         let result = SearchEngine::from_parts(
             CharacterTokenizer::new(),
