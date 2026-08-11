@@ -48,7 +48,7 @@ where
     /// larger than `u32` bytes.
     pub fn add_string(&mut self, input: &str) -> Result<StringId> {
         let string_id = StringId::from_usize(self.strings.len())?;
-        validate_byte_length(input.len())?;
+        ByteOffset::from_usize(input.len())?;
         let tokens = self.tokenizer.tokenize(input);
         Position::from_usize(tokens.len())?;
         self.strings.push(tokens);
@@ -106,13 +106,9 @@ where
     }
 }
 
-fn validate_byte_length(length: usize) -> Result<()> {
-    ByteOffset::from_usize(length).map(|_| ())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{SearchEngineBuilder, validate_byte_length};
+    use super::SearchEngineBuilder;
     use crate::costs::Cost;
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
@@ -120,17 +116,6 @@ mod tests {
     use crate::tokenization::character::CharacterTokenizer;
     use crate::tokenization::{Tokenized, Tokenizer};
     use crate::types::{Position, StringId};
-
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    fn rejects_string_byte_lengths_larger_than_u32() {
-        let too_large = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
-
-        assert_eq!(
-            validate_byte_length(too_large),
-            Err(crate::errors::Error::ByteOffsetOverflow)
-        );
-    }
 
     #[test]
     fn builds_an_empty_corpus() {

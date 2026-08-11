@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use crate::errors::{Error, Result};
+use crate::errors::Result;
 use crate::types::{ByteRange, Position, StringId, Symbol};
 
 /// A builder for a [`CorpusStore`].
@@ -43,12 +43,7 @@ impl CorpusStoreBuilder {
             .into_iter()
             .map(ByteRange::try_from)
             .collect::<Result<Vec<_>>>()?;
-        let end = self
-            .symbols
-            .len()
-            .checked_add(string.len())
-            .and_then(|end| u64::try_from(end).ok())
-            .ok_or(Error::PlatformSizeOverflow)?;
+        let end = self.symbols.len() as u64 + string.len() as u64;
         self.alphabet.extend(string.iter().copied());
         self.symbols.extend(string);
         self.byte_ranges.extend(byte_ranges);
@@ -57,7 +52,10 @@ impl CorpusStoreBuilder {
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(self) -> CorpusStore {
+    pub fn build(mut self) -> CorpusStore {
+        self.symbols.shrink_to_fit();
+        self.string_offsets.shrink_to_fit();
+        self.byte_ranges.shrink_to_fit();
         let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
         alphabet.sort_unstable();
         CorpusStore {
@@ -87,13 +85,14 @@ impl CorpusStore {
     }
 
     /// Returns a token's original UTF-8 byte range by value.
+    ///
+    /// Returns `None` when the string ID is unknown or the position is outside
+    /// the string.
     pub fn byte_range(&self, id: StringId, position: Position) -> Result<Option<Range<usize>>> {
         let Some((start, end)) = self.string_bounds(id)? else {
             return Ok(None);
         };
-        let Some(index) = start.checked_add(position.as_usize()) else {
-            return Ok(None);
-        };
+        let index = start + position.as_usize();
         if index >= end {
             return Ok(None);
         }
@@ -117,19 +116,13 @@ impl CorpusStore {
 
     fn string_bounds(&self, id: StringId) -> Result<Option<(usize, usize)>> {
         let index = id.as_usize();
-        let Some(end_index) = index.checked_add(1) else {
-            return Ok(None);
-        };
         let (Some(&start), Some(&end)) = (
             self.string_offsets.get(index),
-            self.string_offsets.get(end_index),
+            self.string_offsets.get(index + 1),
         ) else {
             return Ok(None);
         };
-        Ok(Some((
-            usize::try_from(start).map_err(|_| Error::PlatformSizeOverflow)?,
-            usize::try_from(end).map_err(|_| Error::PlatformSizeOverflow)?,
-        )))
+        Ok(Some((start as usize, end as usize)))
     }
 }
 

@@ -249,6 +249,17 @@ mod tests {
         assert!(!Symbol::new(u32::MAX - 1).is_unknown());
     }
 
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn byte_offset_rejects_values_larger_than_u32() {
+        let too_large = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+
+        assert_eq!(
+            ByteOffset::from_usize(too_large),
+            Err(Error::ByteOffsetOverflow)
+        );
+    }
+
     #[test]
     fn storage_types_have_fixed_width_layouts() {
         assert_eq!(size_of::<StringId>(), 4);
