@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 pub mod character;
+pub mod whitespace;
 
 /// A token together with its location in the original UTF-8 string.
 #[derive(Debug, Clone, PartialEq, Eq)]
