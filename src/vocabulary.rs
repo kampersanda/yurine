@@ -118,6 +118,10 @@ where
     pub fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
+
+    pub(crate) fn tokens(&self) -> &[T] {
+        &self.tokens
+    }
 }
 
 #[cfg(test)]

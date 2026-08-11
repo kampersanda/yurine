@@ -193,10 +193,11 @@ mod tests {
 
     fn corpus(symbols: Vec<Symbol>) -> CorpusStore {
         let mut builder = CorpusStoreBuilder::new();
+        let original = "x".repeat(symbols.len());
         let byte_ranges = (0..symbols.len())
             .map(|position| position..position + 1)
             .collect();
-        builder.add_string(symbols, byte_ranges).unwrap();
+        builder.add_string(original, symbols, byte_ranges).unwrap();
         builder.build()
     }
 

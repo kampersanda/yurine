@@ -9,6 +9,8 @@ use crate::types::{ByteRange, Position, StringId, Symbol};
 /// A builder for a [`CorpusStore`].
 #[derive(Debug)]
 pub struct CorpusStoreBuilder {
+    strings: Vec<u8>,
+    string_byte_offsets: Vec<u64>,
     symbols: Vec<Symbol>,
     string_offsets: Vec<u64>,
     byte_ranges: Vec<ByteRange>,
@@ -25,6 +27,8 @@ impl CorpusStoreBuilder {
     /// Creates a new builder.
     pub fn new() -> Self {
         Self {
+            strings: Vec::new(),
+            string_byte_offsets: vec![0],
             symbols: Vec::new(),
             string_offsets: vec![0],
             byte_ranges: Vec::new(),
@@ -35,6 +39,7 @@ impl CorpusStoreBuilder {
     /// Adds a string and the original UTF-8 byte range of each symbol.
     pub fn add_string(
         &mut self,
+        original: String,
         string: Vec<Symbol>,
         byte_ranges: Vec<Range<usize>>,
     ) -> Result<()> {
@@ -44,6 +49,9 @@ impl CorpusStoreBuilder {
             .map(ByteRange::try_from)
             .collect::<Result<Vec<_>>>()?;
         let end = self.symbols.len() as u64 + string.len() as u64;
+        let byte_end = self.strings.len() as u64 + original.len() as u64;
+        self.strings.extend_from_slice(original.as_bytes());
+        self.string_byte_offsets.push(byte_end);
         self.alphabet.extend(string.iter().copied());
         self.symbols.extend(string);
         self.byte_ranges.extend(byte_ranges);
@@ -53,12 +61,16 @@ impl CorpusStoreBuilder {
 
     /// Finalizes the builder and returns a [`CorpusStore`].
     pub fn build(mut self) -> CorpusStore {
+        self.strings.shrink_to_fit();
+        self.string_byte_offsets.shrink_to_fit();
         self.symbols.shrink_to_fit();
         self.string_offsets.shrink_to_fit();
         self.byte_ranges.shrink_to_fit();
         let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
         alphabet.sort_unstable();
         CorpusStore {
+            strings: self.strings,
+            string_byte_offsets: self.string_byte_offsets,
             symbols: self.symbols,
             string_offsets: self.string_offsets,
             byte_ranges: self.byte_ranges,
@@ -68,6 +80,8 @@ impl CorpusStoreBuilder {
 }
 
 pub struct CorpusStore {
+    strings: Vec<u8>,
+    string_byte_offsets: Vec<u64>,
     symbols: Vec<Symbol>,
     string_offsets: Vec<u64>,
     byte_ranges: Vec<ByteRange>,
@@ -116,6 +130,26 @@ impl CorpusStore {
         &self.alphabet
     }
 
+    pub(crate) fn strings(&self) -> &[u8] {
+        &self.strings
+    }
+
+    pub(crate) fn string_byte_offsets(&self) -> &[u64] {
+        &self.string_byte_offsets
+    }
+
+    pub(crate) fn symbols(&self) -> &[Symbol] {
+        &self.symbols
+    }
+
+    pub(crate) fn string_offsets(&self) -> &[u64] {
+        &self.string_offsets
+    }
+
+    pub(crate) fn byte_ranges(&self) -> &[ByteRange] {
+        &self.byte_ranges
+    }
+
     fn string_bounds(&self, id: StringId) -> Result<Option<(usize, usize)>> {
         let index = id.as_usize();
         let Some(end_index) = index.checked_add(1) else {
@@ -144,10 +178,14 @@ mod tests {
         let third = Symbol::new(2);
         let mut builder = CorpusStoreBuilder::new();
         builder
-            .add_string(vec![second, first, second], vec![0..1, 1..2, 2..3])
+            .add_string(
+                "aba".to_owned(),
+                vec![second, first, second],
+                vec![0..1, 1..2, 2..3],
+            )
             .unwrap();
         builder
-            .add_string(vec![first, third], vec![0..1, 1..2])
+            .add_string("ac".to_owned(), vec![first, third], vec![0..1, 1..2])
             .unwrap();
 
         let store = builder.build();
@@ -161,7 +199,7 @@ mod tests {
         let second = Symbol::new(1);
         let mut builder = CorpusStoreBuilder::new();
         builder
-            .add_string(vec![first, second], vec![0..1, 1..4])
+            .add_string("aあ".to_owned(), vec![first, second], vec![0..1, 1..4])
             .unwrap();
         let store = builder.build();
 
@@ -191,17 +229,25 @@ mod tests {
         let second = Symbol::new(1);
         let mut builder = CorpusStoreBuilder::new();
         builder
-            .add_string(vec![first, second], vec![0..1, 1..2])
+            .add_string("ab".to_owned(), vec![first, second], vec![0..1, 1..2])
             .unwrap();
-        builder.add_string(Vec::new(), Vec::new()).unwrap();
         builder
-            .add_string(vec![second], std::iter::once(0..1).collect())
+            .add_string(String::new(), Vec::new(), Vec::new())
+            .unwrap();
+        builder
+            .add_string(
+                "b".to_owned(),
+                vec![second],
+                std::iter::once(0..1).collect(),
+            )
             .unwrap();
 
         let store = builder.build();
 
         assert_eq!(store.symbols, [first, second, second]);
         assert_eq!(store.string_offsets, [0, 2, 2, 3]);
+        assert_eq!(store.strings, b"abb");
+        assert_eq!(store.string_byte_offsets, [0, 2, 2, 3]);
         assert_eq!(store.byte_ranges.len(), 3);
         assert_eq!(store.string(StringId::new(1)).unwrap(), Some(&[][..]));
     }
@@ -214,6 +260,7 @@ mod tests {
 
         let error = builder
             .add_string(
+                String::new(),
                 vec![Symbol::new(0)],
                 std::iter::once(0..too_large).collect(),
             )

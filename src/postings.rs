@@ -22,6 +22,14 @@ impl PostingsIndex {
         self.posting_slice(symbol).len()
     }
 
+    pub(crate) fn raw_postings(&self) -> &[Posting] {
+        &self.postings
+    }
+
+    pub(crate) fn posting_offsets(&self) -> &[u64] {
+        &self.posting_offsets
+    }
+
     fn posting_slice(&self, symbol: Symbol) -> &[Posting] {
         if symbol.is_unknown() {
             return &[];

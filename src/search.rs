@@ -61,6 +61,15 @@ where
 impl<T, C> SearchEngine<T, C>
 where
     T: Tokenizer,
+{
+    pub(crate) fn index_parts(&self) -> (&Vocabulary<T::Token>, &PostingsIndex, &CorpusStore) {
+        (&self.vocabulary, &self.index, &self.store)
+    }
+}
+
+impl<T, C> SearchEngine<T, C>
+where
+    T: Tokenizer,
     T::Token: Clone + Eq + Hash,
     C: EditCosts<T::Token>,
 {
@@ -108,7 +117,11 @@ mod tests {
 
         let mut store_builder = CorpusStoreBuilder::new();
         store_builder
-            .add_string(vec![unknown_symbol], std::iter::once(0..1).collect())
+            .add_string(
+                "a".to_owned(),
+                vec![unknown_symbol],
+                std::iter::once(0..1).collect(),
+            )
             .unwrap();
 
         let result = SearchEngine::from_parts(

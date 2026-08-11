@@ -19,7 +19,7 @@ where
 {
     tokenizer: T,
     costs: C,
-    strings: Vec<Vec<Tokenized<T::Token>>>,
+    strings: Vec<(String, Vec<Tokenized<T::Token>>)>,
 }
 
 impl<T, C> SearchEngineBuilder<T, C>
@@ -51,7 +51,7 @@ where
         ByteOffset::from_usize(input.len())?;
         let tokens = self.tokenizer.tokenize(input);
         Position::from_usize(tokens.len())?;
-        self.strings.push(tokens);
+        self.strings.push((input.to_owned(), tokens));
         Ok(string_id)
     }
 
@@ -72,14 +72,14 @@ where
         } = self;
 
         let mut vocabulary_builder = VocabularyBuilder::new();
-        for string in &strings {
+        for (_, string) in &strings {
             vocabulary_builder.insert_all(string.iter().map(|token| token.value.clone()));
         }
         let vocabulary = vocabulary_builder.build()?;
 
         let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         let mut store_builder = CorpusStoreBuilder::new();
-        for (raw_string_id, string) in strings.into_iter().enumerate() {
+        for (raw_string_id, (original, string)) in strings.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
             let (tokens, byte_ranges): (Vec<_>, Vec<_>) = string
                 .into_iter()
@@ -95,7 +95,7 @@ where
                     },
                 )?;
             }
-            store_builder.add_string(symbols, byte_ranges)?;
+            store_builder.add_string(original, symbols, byte_ranges)?;
         }
 
         SearchEngine::from_parts(
