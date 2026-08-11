@@ -8,12 +8,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use csv::{Terminator, WriterBuilder};
 use yurine::costs::Cost;
-use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::search::{Match, SearchEngineBuilder};
 use yurine::tokenization::Tokenizer;
 use yurine::tokenization::character::CharacterTokenizer;
 use yurine::tokenization::whitespace::WhitespaceTokenizer;
+
+mod cost_config;
+
+use cost_config::RuntimeCosts;
 
 /// Search newline-delimited strings with edit distance using Yurine.
 #[derive(Debug, Parser, PartialEq)]
@@ -36,6 +39,10 @@ struct Options {
     /// Tokenization strategy.
     #[arg(long, value_enum, default_value_t = TokenizerKind::Character)]
     tokenizer: TokenizerKind,
+
+    /// JSON file describing the edit-cost policy.
+    #[arg(long)]
+    costs: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -98,16 +105,16 @@ fn read_lines(reader: impl BufRead) -> io::Result<Vec<String>> {
     reader.lines().collect()
 }
 
-fn search<T>(
-    corpus: &[String],
-    options: &Options,
-    tokenizer: T,
-) -> yurine::errors::Result<Vec<Match>>
+fn search<T>(corpus: &[String], options: &Options, tokenizer: T) -> Result<Vec<Match>>
 where
     T: Tokenizer,
     T::Token: Clone + Eq + Hash,
 {
-    let mut builder = SearchEngineBuilder::new(tokenizer, LevenshteinCosts::new());
+    let costs = match &options.costs {
+        Some(path) => cost_config::load(path, &tokenizer)?,
+        None => RuntimeCosts::levenshtein(),
+    };
+    let mut builder = SearchEngineBuilder::new(tokenizer, costs);
     for string in corpus {
         builder.add_string(string)?;
     }
@@ -116,7 +123,7 @@ where
     if let Some(eta) = options.eta {
         params = params.with_eta(eta);
     }
-    engine.range_search(&options.query, &params)
+    Ok(engine.range_search(&options.query, &params)?)
 }
 
 fn write_matches(output: impl Write, corpus: &[String], matches: &[Match]) -> csv::Result<()> {
@@ -143,8 +150,10 @@ fn write_matches(output: impl Write, corpus: &[String], matches: &[Match]) -> cs
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io::Cursor;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use clap::{CommandFactory, Parser};
     use yurine::costs::Cost;
@@ -154,6 +163,34 @@ mod tests {
     use yurine::types::{Position, StringId};
 
     use super::{Options, TokenizerKind, read_lines, search, write_matches};
+
+    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestDirectory {
+        path: PathBuf,
+    }
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("yurine-cli-search-{}-{id}", std::process::id()));
+            fs::create_dir(&path).unwrap();
+            Self { path }
+        }
+
+        fn write(&self, name: &str, contents: &str) -> PathBuf {
+            let path = self.path.join(name);
+            fs::write(&path, contents).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.path).unwrap();
+        }
+    }
 
     #[test]
     fn command_definition_is_valid() {
@@ -170,6 +207,8 @@ mod tests {
             "0.25",
             "--tokenizer",
             "whitespace",
+            "--costs",
+            "costs.json",
             "hello world",
             "corpus.txt",
         ])
@@ -183,6 +222,7 @@ mod tests {
                 threshold: Cost::new_const(1.5),
                 eta: Some(Cost::new_const(0.25)),
                 tokenizer: TokenizerKind::Whitespace,
+                costs: Some(PathBuf::from("costs.json")),
             }
         );
     }
@@ -222,6 +262,7 @@ mod tests {
             threshold: Cost::ZERO,
             eta: None,
             tokenizer: TokenizerKind::Character,
+            costs: None,
         };
 
         let matches = search(&corpus, &options, CharacterTokenizer::new()).unwrap();
@@ -239,11 +280,151 @@ mod tests {
             threshold: Cost::ZERO,
             eta: None,
             tokenizer: TokenizerKind::Whitespace,
+            costs: None,
         };
 
         let matches = search(&corpus, &options, WhitespaceTokenizer::new()).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..8);
+    }
+
+    #[test]
+    fn searches_with_character_embedding_costs() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "embeddings.jsonl",
+            concat!(
+                "{\"token\":\"x\",\"embedding\":[1.0,0.0]}\n",
+                "{\"token\":\"あ\",\"embedding\":[0.8,0.6]}\n"
+            ),
+        );
+        let config = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "embedding",
+                "embeddings": {"path": "embeddings.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let options = Options {
+            query: "x".to_owned(),
+            corpus: None,
+            threshold: Cost::new_const(0.25),
+            eta: Some(Cost::new_const(0.25)),
+            tokenizer: TokenizerKind::Character,
+            costs: Some(config),
+        };
+
+        let matches = search(&["あ".to_owned()], &options, CharacterTokenizer::new()).unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn searches_with_whitespace_embedding_costs() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "embeddings.jsonl",
+            concat!(
+                "{\"token\":\"colour\",\"embedding\":[1.0,0.0]}\n",
+                "{\"token\":\"color\",\"embedding\":[0.8,0.6]}\n"
+            ),
+        );
+        let config = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "embedding",
+                "embeddings": {"path": "embeddings.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let options = Options {
+            query: "colour".to_owned(),
+            corpus: None,
+            threshold: Cost::new_const(0.25),
+            eta: Some(Cost::new_const(0.25)),
+            tokenizer: TokenizerKind::Whitespace,
+            costs: Some(config),
+        };
+
+        let matches = search(
+            &["color palette".to_owned()],
+            &options,
+            WhitespaceTokenizer::new(),
+        )
+        .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].byte_range, 0..5);
+        assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn searches_with_character_custom_costs() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "rules.jsonl",
+            "{\"operation\":\"substitution\",\"from\":\"x\",\"to\":\"a\",\"cost\":0.25}\n",
+        );
+        let config = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "custom",
+                "rules": {"path": "rules.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let options = Options {
+            query: "x".to_owned(),
+            corpus: None,
+            threshold: Cost::new_const(0.25),
+            eta: Some(Cost::new_const(0.25)),
+            tokenizer: TokenizerKind::Character,
+            costs: Some(config),
+        };
+
+        let matches = search(&["a".to_owned()], &options, CharacterTokenizer::new()).unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].byte_range, 0..1);
+        assert_eq!(matches[0].distance, 0.25);
+    }
+
+    #[test]
+    fn searches_with_whitespace_custom_costs() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "rules.jsonl",
+            "{\"operation\":\"substitution\",\"from\":\"colour\",\"to\":\"color\",\"cost\":0.25}\n",
+        );
+        let config = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "custom",
+                "rules": {"path": "rules.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let options = Options {
+            query: "colour".to_owned(),
+            corpus: None,
+            threshold: Cost::new_const(0.25),
+            eta: Some(Cost::new_const(0.25)),
+            tokenizer: TokenizerKind::Whitespace,
+            costs: Some(config),
+        };
+
+        let matches = search(
+            &["color palette".to_owned()],
+            &options,
+            WhitespaceTokenizer::new(),
+        )
+        .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].byte_range, 0..5);
+        assert_eq!(matches[0].distance, 0.25);
     }
 
     #[test]
