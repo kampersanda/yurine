@@ -61,7 +61,9 @@ where
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
     /// many distinct tokens, or [`crate::errors::Error::ByteOffsetOverflow`]
-    /// if a token byte offset does not fit in `u32`.
+    /// if a token byte offset does not fit in `u32`. Returns
+    /// [`crate::errors::Error::UnknownCorpusSymbol`] if a corpus symbol is not
+    /// present in the vocabulary.
     pub fn build(self) -> Result<SearchEngine<T, C>> {
         let Self {
             tokenizer,
@@ -75,7 +77,7 @@ where
         }
         let vocabulary = vocabulary_builder.build()?;
 
-        let mut index_builder = PostingsIndexBuilder::new();
+        let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         let mut store_builder = CorpusStoreBuilder::new();
         for (raw_string_id, string) in strings.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
@@ -91,7 +93,7 @@ where
                         string_id,
                         position: Position::from_usize(raw_position)?,
                     },
-                );
+                )?;
             }
             store_builder.add_string(symbols, byte_ranges)?;
         }

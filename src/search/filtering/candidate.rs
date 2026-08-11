@@ -106,13 +106,15 @@ mod tests {
 
     fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
         for position in 0..count {
-            builder.add_posting(
-                symbol,
-                Posting {
-                    string_id: StringId::new(0),
-                    position: Position::new(position),
-                },
-            );
+            builder
+                .add_posting(
+                    symbol,
+                    Posting {
+                        string_id: StringId::new(0),
+                        position: Position::new(position),
+                    },
+                )
+                .unwrap();
         }
     }
 
@@ -120,7 +122,7 @@ mod tests {
     fn selects_the_query_position_with_fewer_candidates() {
         let common = Symbol::new(0);
         let rare = Symbol::new(1);
-        let mut index = PostingsIndexBuilder::new();
+        let mut index = PostingsIndexBuilder::new(2);
         add_occurrences(&mut index, common, 3);
         add_occurrences(&mut index, rare, 1);
         let neighborhood = SubstitutionNeighborhood::new([common, rare]).unwrap();
@@ -150,7 +152,7 @@ mod tests {
                 &[first, second],
                 Cost::ONE,
                 Cost::ZERO,
-                &PostingsIndexBuilder::new().build(),
+                &PostingsIndexBuilder::new(0).build(),
                 &LevenshteinCosts,
                 &neighborhood,
             )
@@ -168,7 +170,7 @@ mod tests {
             &[symbol],
             Cost::ONE,
             Cost::ZERO,
-            &PostingsIndexBuilder::new().build(),
+            &PostingsIndexBuilder::new(0).build(),
             &LevenshteinCosts,
             &neighborhood,
         );

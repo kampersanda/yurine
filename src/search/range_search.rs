@@ -281,15 +281,17 @@ mod tests {
         let vocabulary = vocabulary_builder.build().unwrap();
         let symbol = vocabulary.symbol(&'a');
 
-        let mut index_builder = PostingsIndexBuilder::new();
+        let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         for string_id in [StringId::new(0), StringId::new(1)] {
-            index_builder.add_posting(
-                symbol,
-                Posting {
-                    string_id,
-                    position: Position::new(0),
-                },
-            );
+            index_builder
+                .add_posting(
+                    symbol,
+                    Posting {
+                        string_id,
+                        position: Position::new(0),
+                    },
+                )
+                .unwrap();
         }
 
         let mut store_builder = CorpusStoreBuilder::new();
