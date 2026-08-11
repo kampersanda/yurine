@@ -4,7 +4,7 @@ use std::hash::Hash;
 
 use super::SearchEngine;
 use crate::costs::EditCosts;
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
 use crate::tokenization::{Tokenized, Tokenizer};
@@ -42,10 +42,13 @@ where
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::StringIdOverflow`] if the corpus has
-    /// too many strings, or [`crate::errors::Error::PositionOverflow`] if the
-    /// tokenized string is too long.
+    /// too many strings, [`crate::errors::Error::PositionOverflow`] if the
+    /// tokenized string is too long, or
+    /// [`crate::errors::Error::ByteOffsetOverflow`] if the UTF-8 string is
+    /// larger than `u32` bytes.
     pub fn add_string(&mut self, input: &str) -> Result<StringId> {
         let string_id = StringId::from_usize(self.strings.len())?;
+        validate_byte_length(input.len())?;
         let tokens = self.tokenizer.tokenize(input);
         Position::from_usize(tokens.len())?;
         self.strings.push(tokens);
@@ -57,7 +60,8 @@ where
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
-    /// many distinct tokens.
+    /// many distinct tokens, or [`crate::errors::Error::ByteOffsetOverflow`]
+    /// if a token byte offset does not fit in `u32`.
     pub fn build(self) -> Result<SearchEngine<T, C>> {
         let Self {
             tokenizer,
@@ -89,7 +93,7 @@ where
                     },
                 );
             }
-            store_builder.add_string(symbols, byte_ranges);
+            store_builder.add_string(symbols, byte_ranges)?;
         }
 
         SearchEngine::from_parts(
@@ -102,9 +106,15 @@ where
     }
 }
 
+fn validate_byte_length(length: usize) -> Result<()> {
+    u32::try_from(length)
+        .map(|_| ())
+        .map_err(|_| Error::ByteOffsetOverflow)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SearchEngineBuilder;
+    use super::{SearchEngineBuilder, validate_byte_length};
     use crate::costs::Cost;
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
@@ -112,6 +122,17 @@ mod tests {
     use crate::tokenization::character::CharacterTokenizer;
     use crate::tokenization::{Tokenized, Tokenizer};
     use crate::types::{Position, StringId};
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn rejects_string_byte_lengths_larger_than_u32() {
+        let too_large = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+
+        assert_eq!(
+            validate_byte_length(too_large),
+            Err(crate::errors::Error::ByteOffsetOverflow)
+        );
+    }
 
     #[test]
     fn builds_an_empty_corpus() {

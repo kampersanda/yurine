@@ -50,13 +50,18 @@ fn create_match(
     end: usize,
     distance: Cost,
 ) -> Result<Match> {
-    let byte_ranges = corpus
-        .byte_ranges(string_id)?
+    let start_position = Position::from_usize(start)?;
+    let end_position = Position::from_usize(end - 1)?;
+    let start_byte_range = corpus
+        .byte_range(string_id, start_position)?
+        .ok_or(Error::UnknownString(string_id))?;
+    let end_byte_range = corpus
+        .byte_range(string_id, end_position)?
         .ok_or(Error::UnknownString(string_id))?;
     Ok(Match {
         string_id,
-        token_range: Position::from_usize(start)?..Position::from_usize(end)?,
-        byte_range: byte_ranges[start].start..byte_ranges[end - 1].end,
+        token_range: start_position..Position::from_usize(end)?,
+        byte_range: start_byte_range.start..end_byte_range.end,
         distance,
     })
 }
@@ -191,7 +196,7 @@ mod tests {
         let byte_ranges = (0..symbols.len())
             .map(|position| position..position + 1)
             .collect();
-        builder.add_string(symbols, byte_ranges);
+        builder.add_string(symbols, byte_ranges).unwrap();
         builder.build()
     }
 

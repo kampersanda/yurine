@@ -14,6 +14,10 @@ pub enum Error {
     #[error("position exceeds u32")]
     PositionOverflow,
 
+    /// A UTF-8 byte offset in a single string is too large for `u32`.
+    #[error("byte offset exceeds u32")]
+    ByteOffsetOverflow,
+
     /// A vocabulary contains too many tokens for a `u32` symbol.
     #[error("symbol exceeds u32")]
     SymbolOverflow,

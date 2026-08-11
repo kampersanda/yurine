@@ -1,10 +1,12 @@
 //! Basic types for Yurine.
 
 use std::fmt::Display;
+use std::ops::Range;
 
 use crate::errors::{Error, Result};
 
 /// Identifies a string.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringId(u32);
 
@@ -39,6 +41,7 @@ impl Display for StringId {
 }
 
 /// A zero-based symbol position.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position(u32);
 
@@ -73,6 +76,7 @@ impl Display for Position {
 }
 
 /// A posting in the corpus, consisting of a string identifier and a symbol position.
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Posting {
     pub string_id: StringId,
@@ -82,6 +86,7 @@ pub struct Posting {
 /// Identifies a token in a vocabulary.
 ///
 /// A symbol is meaningful only together with the vocabulary that assigned it.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Symbol(u32);
 
@@ -126,9 +131,55 @@ impl Display for Symbol {
     }
 }
 
+/// A token's UTF-8 byte range relative to its original string.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteRange {
+    start: u32,
+    end: u32,
+}
+
+impl ByteRange {
+    /// Creates a byte range from fixed-width endpoints.
+    pub const fn new(start: u32, end: u32) -> Self {
+        Self { start, end }
+    }
+
+    /// Returns the inclusive start byte offset.
+    pub const fn start(self) -> u32 {
+        self.start
+    }
+
+    /// Returns the exclusive end byte offset.
+    pub const fn end(self) -> u32 {
+        self.end
+    }
+
+    /// Converts the fixed-width endpoints to platform-sized offsets.
+    pub fn as_range(self) -> Result<Range<usize>> {
+        Ok(
+            usize::try_from(self.start).map_err(|_| Error::PlatformSizeOverflow)?
+                ..usize::try_from(self.end).map_err(|_| Error::PlatformSizeOverflow)?,
+        )
+    }
+}
+
+impl TryFrom<Range<usize>> for ByteRange {
+    type Error = Error;
+
+    fn try_from(range: Range<usize>) -> Result<Self> {
+        Ok(Self {
+            start: u32::try_from(range.start).map_err(|_| Error::ByteOffsetOverflow)?,
+            end: u32::try_from(range.end).map_err(|_| Error::ByteOffsetOverflow)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Position, StringId, Symbol};
+    use std::mem::{align_of, size_of};
+
+    use super::{ByteRange, Position, Posting, StringId, Symbol};
     use crate::errors::Error;
 
     #[test]
@@ -156,5 +207,16 @@ mod tests {
         );
         assert!(Symbol::UNKNOWN.is_unknown());
         assert!(!Symbol::new(u32::MAX - 1).is_unknown());
+    }
+
+    #[test]
+    fn storage_types_have_fixed_width_layouts() {
+        assert_eq!(size_of::<StringId>(), 4);
+        assert_eq!(size_of::<Position>(), 4);
+        assert_eq!(size_of::<Symbol>(), 4);
+        assert_eq!(size_of::<Posting>(), 8);
+        assert_eq!(align_of::<Posting>(), 4);
+        assert_eq!(size_of::<ByteRange>(), 8);
+        assert_eq!(align_of::<ByteRange>(), 4);
     }
 }
