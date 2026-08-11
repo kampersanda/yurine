@@ -2,9 +2,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::BufWriter;
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use clap::{Args, Parser, Subcommand};
 use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::search::SearchEngineBuilder;
@@ -62,36 +65,78 @@ fn heap_peak() -> usize {
     PEAK_HEAP_BYTES.load(Ordering::Relaxed)
 }
 
+#[derive(Debug, Parser)]
+#[command(name = "yurine-baseline")]
+struct Options {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Generates a deterministic synthetic corpus.
+    Generate(GenerateOptions),
+    /// Measures in-memory construction and search.
+    Measure(MeasureOptions),
+}
+
+#[derive(Debug, Args)]
+struct GenerateOptions {
+    /// Output corpus path.
+    output: PathBuf,
+
+    #[arg(long, default_value_t = CorpusConfig::default().strings)]
+    strings: usize,
+
+    #[arg(long, default_value_t = CorpusConfig::default().tokens_per_string)]
+    tokens: usize,
+
+    #[arg(long, default_value_t = CorpusConfig::default().vocabulary)]
+    vocabulary: usize,
+
+    #[arg(long, default_value_t = CorpusConfig::default().hot_vocabulary)]
+    hot_vocabulary: usize,
+
+    #[arg(long, default_value_t = CorpusConfig::default().seed)]
+    seed: u64,
+}
+
+#[derive(Debug, Args)]
+struct MeasureOptions {
+    /// Input corpus path.
+    corpus: PathBuf,
+
+    #[arg(long, default_value = DEFAULT_QUERY)]
+    query: String,
+
+    #[arg(long, default_value = "0", value_parser = parse_cost)]
+    threshold: Cost,
+
+    #[arg(long, default_value = "0", value_parser = parse_cost)]
+    eta: Cost,
+
+    #[arg(long, default_value = "5")]
+    warm_runs: NonZeroUsize,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut arguments = std::env::args().skip(1);
-    match arguments.next().as_deref() {
-        Some("generate") => generate(arguments.collect()),
-        Some("measure") => measure(arguments.collect()),
-        _ => Err(usage().into()),
+    match Options::parse().command {
+        Command::Generate(options) => generate(options),
+        Command::Measure(options) => measure(options),
     }
 }
 
-fn generate(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
-    let output = arguments.first().ok_or_else(usage)?;
-    let mut config = CorpusConfig::default();
-    let mut index = 1;
-    while index < arguments.len() {
-        let option = &arguments[index];
-        let value = arguments.get(index + 1).ok_or_else(usage)?;
-        match option.as_str() {
-            "--strings" => config.strings = value.parse()?,
-            "--tokens" => config.tokens_per_string = value.parse()?,
-            "--vocabulary" => config.vocabulary = value.parse()?,
-            "--hot-vocabulary" => config.hot_vocabulary = value.parse()?,
-            "--seed" => config.seed = value.parse()?,
-            _ => return Err(format!("unknown option: {option}\n{}", usage()).into()),
-        }
-        index += 2;
-    }
-
-    let file = File::create(output)?;
+fn generate(options: GenerateOptions) -> Result<(), Box<dyn Error>> {
+    let config = CorpusConfig {
+        strings: options.strings,
+        tokens_per_string: options.tokens,
+        vocabulary: options.vocabulary,
+        hot_vocabulary: options.hot_vocabulary,
+        seed: options.seed,
+    };
+    let file = File::create(&options.output)?;
     write_corpus(BufWriter::new(file), config)?;
-    println!("generated\t{}\tbytes", fs::metadata(output)?.len());
+    println!("generated\t{}\tbytes", fs::metadata(options.output)?.len());
     println!("strings\t{}\tcount", config.strings);
     println!("tokens_per_string\t{}\tcount", config.tokens_per_string);
     println!("vocabulary\t{}\tcount", config.vocabulary);
@@ -100,32 +145,11 @@ fn generate(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn measure(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
-    let corpus_path = arguments.first().ok_or_else(usage)?;
-    let mut query = DEFAULT_QUERY.to_owned();
-    let mut threshold = Cost::ZERO;
-    let mut eta = Cost::ZERO;
-    let mut warm_runs = 5usize;
-    let mut index = 1;
-    while index < arguments.len() {
-        let option = &arguments[index];
-        let value = arguments.get(index + 1).ok_or_else(usage)?;
-        match option.as_str() {
-            "--query" => query = value.to_owned(),
-            "--threshold" => threshold = Cost::new(value.parse()?)?,
-            "--eta" => eta = Cost::new(value.parse()?)?,
-            "--warm-runs" => warm_runs = value.parse()?,
-            _ => return Err(format!("unknown option: {option}\n{}", usage()).into()),
-        }
-        index += 2;
-    }
-    if warm_runs == 0 {
-        return Err("--warm-runs must be greater than zero".into());
-    }
-
+fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
+    let warm_runs = options.warm_runs.get();
     let load_heap_start = reset_heap_peak();
     let load_start = Instant::now();
-    let contents = fs::read_to_string(corpus_path)?;
+    let contents = fs::read_to_string(&options.corpus)?;
     let corpus: Vec<_> = contents.lines().map(str::to_owned).collect();
     let load_elapsed = load_start.elapsed();
     let load_heap_peak = heap_peak();
@@ -141,10 +165,10 @@ fn measure(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
     let build_heap_peak = heap_peak();
     let peak_rss_after_build = peak_rss_bytes();
 
-    let params = RangeSearchParams::new(threshold).with_eta(eta);
+    let params = RangeSearchParams::new(options.threshold).with_eta(options.eta);
     let cold_heap_start = reset_heap_peak();
     let cold_start = Instant::now();
-    let (cold_matches, metrics) = engine.range_search_with_metrics(&query, &params)?;
+    let (cold_matches, metrics) = engine.range_search_with_metrics(&options.query, &params)?;
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
@@ -154,7 +178,7 @@ fn measure(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
     let mut warm_matches = 0usize;
     for _ in 0..warm_runs {
         let start = Instant::now();
-        warm_matches = engine.range_search(&query, &params)?.len();
+        warm_matches = engine.range_search(&options.query, &params)?.len();
         warm_elapsed += start.elapsed();
     }
     let warm_heap_peak = heap_peak();
@@ -162,7 +186,7 @@ fn measure(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
 
     metric(
         "source_corpus_bytes",
-        fs::metadata(corpus_path)?.len(),
+        fs::metadata(options.corpus)?.len(),
         "bytes",
     );
     metric("persistent_index_bytes", 0, "bytes");
@@ -209,6 +233,13 @@ fn measure(arguments: Vec<String>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn parse_cost(text: &str) -> Result<Cost, String> {
+    let value = text
+        .parse::<f32>()
+        .map_err(|_| "must be a non-negative finite number".to_owned())?;
+    Cost::new(value).map_err(|_| "must be a non-negative finite number".to_owned())
+}
+
 fn heap_metrics(phase: &str, start: usize, peak: usize) {
     metric(&format!("{phase}_heap_start"), start, "bytes");
     metric(&format!("{phase}_heap_peak"), peak, "bytes");
@@ -243,8 +274,67 @@ fn peak_rss_bytes() -> u64 {
     0
 }
 
-fn usage() -> String {
-    format!(
-        "usage:\n  yurine-baseline generate CORPUS [--strings N] [--tokens N] [--vocabulary N] [--hot-vocabulary N] [--seed N]\n  yurine-baseline measure CORPUS [--query QUERY] [--threshold COST] [--eta COST] [--warm-runs N]\n\ndefault query: {DEFAULT_QUERY}"
-    )
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser};
+
+    use super::{Command, Options};
+    use yurine::costs::Cost;
+    use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY};
+
+    #[test]
+    fn command_definition_is_valid() {
+        Options::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_generate_defaults() {
+        let options =
+            Options::try_parse_from(["yurine-baseline", "generate", "corpus.txt"]).unwrap();
+        let Command::Generate(options) = options.command else {
+            panic!("expected generate command");
+        };
+        let defaults = CorpusConfig::default();
+
+        assert_eq!(options.output.to_string_lossy(), "corpus.txt");
+        assert_eq!(options.strings, defaults.strings);
+        assert_eq!(options.tokens, defaults.tokens_per_string);
+        assert_eq!(options.vocabulary, defaults.vocabulary);
+        assert_eq!(options.hot_vocabulary, defaults.hot_vocabulary);
+        assert_eq!(options.seed, defaults.seed);
+    }
+
+    #[test]
+    fn parses_measure_options_and_rejects_zero_warm_runs() {
+        let options = Options::try_parse_from([
+            "yurine-baseline",
+            "measure",
+            "corpus.txt",
+            "--threshold",
+            "1.5",
+            "--eta",
+            "0.25",
+            "--warm-runs",
+            "3",
+        ])
+        .unwrap();
+        let Command::Measure(options) = options.command else {
+            panic!("expected measure command");
+        };
+
+        assert_eq!(options.query, DEFAULT_QUERY);
+        assert_eq!(options.threshold, Cost::new_const(1.5));
+        assert_eq!(options.eta, Cost::new_const(0.25));
+        assert_eq!(options.warm_runs.get(), 3);
+        assert!(
+            Options::try_parse_from([
+                "yurine-baseline",
+                "measure",
+                "corpus.txt",
+                "--warm-runs",
+                "0",
+            ])
+            .is_err()
+        );
+    }
 }
