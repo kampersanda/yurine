@@ -115,7 +115,7 @@ mod tests {
             CharacterTokenizer::new(),
             vocabulary,
             LevenshteinCosts::new(),
-            PostingsIndexBuilder::new().build(),
+            PostingsIndexBuilder::new(1).build(),
             store_builder.build(),
         );
 

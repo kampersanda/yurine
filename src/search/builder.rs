@@ -75,7 +75,7 @@ where
         }
         let vocabulary = vocabulary_builder.build()?;
 
-        let mut index_builder = PostingsIndexBuilder::new();
+        let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         let mut store_builder = CorpusStoreBuilder::new();
         for (raw_string_id, string) in strings.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
@@ -91,7 +91,7 @@ where
                         string_id,
                         position: Position::from_usize(raw_position)?,
                     },
-                );
+                )?;
             }
             store_builder.add_string(symbols, byte_ranges)?;
         }

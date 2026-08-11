@@ -69,21 +69,25 @@ mod tests {
     fn generates_candidates_in_selected_position_and_posting_order() {
         let first = Symbol::new(0);
         let second = Symbol::new(1);
-        let mut index = PostingsIndexBuilder::new();
-        index.add_posting(
-            first,
-            Posting {
-                string_id: StringId::new(1),
-                position: Position::new(2),
-            },
-        );
-        index.add_posting(
-            second,
-            Posting {
-                string_id: StringId::new(0),
-                position: Position::new(3),
-            },
-        );
+        let mut index = PostingsIndexBuilder::new(2);
+        index
+            .add_posting(
+                first,
+                Posting {
+                    string_id: StringId::new(1),
+                    position: Position::new(2),
+                },
+            )
+            .unwrap();
+        index
+            .add_posting(
+                second,
+                Posting {
+                    string_id: StringId::new(0),
+                    position: Position::new(3),
+                },
+            )
+            .unwrap();
         let neighborhood = SubstitutionNeighborhood::new([first, second]).unwrap();
 
         let candidates = generate_candidates(
@@ -119,7 +123,7 @@ mod tests {
             &[Symbol::new(0)],
             &[Position::new(1)],
             Cost::ZERO,
-            &PostingsIndexBuilder::new().build(),
+            &PostingsIndexBuilder::new(0).build(),
             &LevenshteinCosts,
             &SubstitutionNeighborhood::new([]).unwrap(),
         );
