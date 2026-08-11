@@ -1,3 +1,8 @@
+[workspace]
+members = ["cli"]
+default-members = [".", "cli"]
+resolver = "3"
+
 [package]
 name = "yurine"
 version = "0.1.0"
