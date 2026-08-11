@@ -4,27 +4,23 @@ from __future__ import annotations
 
 import bz2
 import gzip
-import json
 import lzma
 import math
 import os
 import sys
 import unicodedata
 from contextlib import nullcontext
-from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
 from typing import TextIO
 
 from yurine_tools.arguments import Header, Normalization
-
-
-@dataclass(frozen=True)
-class ConversionStats:
-    """Metadata reported after a successful embedding conversion."""
-
-    records: int
-    dimension: int
+from yurine_tools.schemas import (
+    ConversionStats,
+    EmbeddingCostConfig,
+    EmbeddingRecord,
+    EmbeddingSource,
+)
 
 
 def open_text_input(path: str):
@@ -132,13 +128,8 @@ def convert_word2vec_text(
         if not any(value != 0.0 for value in embedding):
             raise ValueError(f"line {line_number}: vector has zero norm")
 
-        json.dump(
-            {"token": token, "embedding": embedding},
-            destination,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-        )
+        record = EmbeddingRecord(token=token, embedding=embedding)
+        destination.write(record.model_dump_json())
         destination.write("\n")
         records += 1
 
@@ -170,14 +161,12 @@ def write_cost_config(
     relative_embeddings = os.path.relpath(
         Path(embeddings_path).resolve(), start=config_path.parent.resolve()
     )
-    config = {
-        "version": 1,
-        "type": "embedding",
-        "embeddings": {"path": relative_embeddings, "format": "jsonl"},
-        "missing_substitution_cost": missing_substitution_cost,
-        "deletion_cost": deletion_cost,
-        "insertion_cost": insertion_cost,
-    }
+    config = EmbeddingCostConfig(
+        embeddings=EmbeddingSource(path=relative_embeddings),
+        missing_substitution_cost=missing_substitution_cost,
+        deletion_cost=deletion_cost,
+        insertion_cost=insertion_cost,
+    )
     with config_path.open("w", encoding="utf-8", newline="\n") as destination:
-        json.dump(config, destination, ensure_ascii=False, indent=2)
+        destination.write(config.model_dump_json(indent=2))
         destination.write("\n")

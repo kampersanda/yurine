@@ -41,6 +41,9 @@ The generated records look like this:
 {"token":"東京","embedding":[0.1,0.2]}
 ```
 
+Embedding records and generated cost configurations are validated and
+serialized through Pydantic models before they are written.
+
 ## Preprocess a corpus or query
 
 The default settings use Sudachi mode B and `normalized_form`, which are useful

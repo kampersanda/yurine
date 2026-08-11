@@ -3,12 +3,20 @@ import json
 from io import StringIO
 
 import pytest
+from pydantic import BaseModel
 
 from yurine_tools.embeddings import (
     convert_word2vec_text,
     open_text_input,
     write_cost_config,
 )
+from yurine_tools.schemas import ConversionStats, EmbeddingCostConfig, EmbeddingRecord
+
+
+def test_generated_data_uses_pydantic_schemas() -> None:
+    assert issubclass(ConversionStats, BaseModel)
+    assert issubclass(EmbeddingRecord, BaseModel)
+    assert issubclass(EmbeddingCostConfig, BaseModel)
 
 
 def test_converts_word2vec_text_with_header() -> None:
