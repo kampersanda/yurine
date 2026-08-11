@@ -61,7 +61,9 @@ where
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
     /// many distinct tokens, or [`crate::errors::Error::ByteOffsetOverflow`]
-    /// if a token byte offset does not fit in `u32`.
+    /// if a token byte offset does not fit in `u32`. Returns
+    /// [`crate::errors::Error::UnknownCorpusSymbol`] if a corpus symbol is not
+    /// present in the vocabulary.
     pub fn build(self) -> Result<SearchEngine<T, C>> {
         let Self {
             tokenizer,

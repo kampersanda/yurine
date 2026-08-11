@@ -74,19 +74,19 @@ impl PostingsIndexBuilder {
         });
         self.postings.dedup();
 
-        let mut entries = self.postings.into_iter().peekable();
-        let mut postings = Vec::with_capacity(entries.len());
-        let mut posting_offsets = Vec::with_capacity(self.symbol_count + 1);
-        posting_offsets.push(0);
-        for raw_symbol in 0..self.symbol_count {
-            while entries
-                .peek()
-                .is_some_and(|(symbol, _)| symbol.as_usize() == raw_symbol)
-            {
-                postings.push(entries.next().unwrap().1);
-            }
-            posting_offsets.push(postings.len() as u64);
+        let mut posting_offsets = vec![0u64; self.symbol_count + 1];
+        for (symbol, _) in &self.postings {
+            posting_offsets[symbol.as_usize() + 1] += 1;
         }
+        for index in 0..self.symbol_count {
+            posting_offsets[index + 1] += posting_offsets[index];
+        }
+        let mut postings: Vec<_> = self
+            .postings
+            .into_iter()
+            .map(|(_, posting)| posting)
+            .collect();
+        // Collection can reuse the larger `(Symbol, Posting)` allocation.
         postings.shrink_to_fit();
 
         PostingsIndex {
@@ -151,6 +151,52 @@ mod tests {
         assert_eq!(index.frequency(Symbol::new(2)), 0);
         assert_eq!(index.frequency(Symbol::new(3)), 0);
         assert_eq!(index.frequency(Symbol::UNKNOWN), 0);
+    }
+
+    #[test]
+    fn groups_out_of_order_postings_by_symbol() {
+        let for_first = Posting {
+            string_id: StringId::new(0),
+            position: Position::new(1),
+        };
+        let for_second = Posting {
+            string_id: StringId::new(1),
+            position: Position::new(0),
+        };
+        let later_for_third = Posting {
+            string_id: StringId::new(2),
+            position: Position::new(2),
+        };
+        let earlier_for_third = Posting {
+            string_id: StringId::new(0),
+            position: Position::new(3),
+        };
+        let mut builder = PostingsIndexBuilder::new(3);
+
+        builder
+            .add_posting(Symbol::new(2), later_for_third)
+            .unwrap();
+        builder.add_posting(Symbol::new(0), for_first).unwrap();
+        builder
+            .add_posting(Symbol::new(2), earlier_for_third)
+            .unwrap();
+        builder.add_posting(Symbol::new(1), for_second).unwrap();
+
+        let index = builder.build();
+
+        assert_eq!(index.posting_offsets, [0, 1, 2, 4]);
+        assert_eq!(
+            index.postings(Symbol::new(0)).collect::<Vec<_>>(),
+            [for_first]
+        );
+        assert_eq!(
+            index.postings(Symbol::new(1)).collect::<Vec<_>>(),
+            [for_second]
+        );
+        assert_eq!(
+            index.postings(Symbol::new(2)).collect::<Vec<_>>(),
+            [earlier_for_third, later_for_third]
+        );
     }
 
     #[test]
