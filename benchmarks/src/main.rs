@@ -91,6 +91,7 @@ struct GenerateOptions {
     #[arg(long, default_value_t = CorpusConfig::default().tokens_per_string)]
     tokens: usize,
 
+    /// Vocabulary size (4..=10000).
     #[arg(long, default_value_t = CorpusConfig::default().vocabulary)]
     vocabulary: usize,
 
@@ -181,14 +182,17 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
+    let cold_match_count = cold_matches.len();
+    drop(cold_matches);
 
     let warm_heap_start = reset_heap_peak();
     let mut warm_elapsed = Duration::ZERO;
     let mut warm_matches = 0usize;
     for _ in 0..warm_runs {
         let start = Instant::now();
-        warm_matches = engine.range_search(&options.query, &params)?.len();
+        let matches = engine.range_search(&options.query, &params)?;
         warm_elapsed += start.elapsed();
+        warm_matches = matches.len();
     }
     let warm_heap_peak = heap_peak();
     let peak_rss_after_warm = peak_rss_bytes();
@@ -218,7 +222,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     );
     heap_metrics("warm_search", warm_heap_start, warm_heap_peak);
     metric("peak_rss_after_warm_search", peak_rss_after_warm, "bytes");
-    metric("cold_match_count", cold_matches.len(), "count");
+    metric("cold_match_count", cold_match_count, "count");
     metric("warm_match_count", warm_matches, "count");
     metric(
         "used_exhaustive_verification",

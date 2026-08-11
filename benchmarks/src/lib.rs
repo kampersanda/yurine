@@ -31,14 +31,14 @@ impl CorpusConfig {
                 "seed must be non-zero",
             ));
         }
-        if self.vocabulary == 0
+        if self.vocabulary < 4
             || self.vocabulary > 10_000
             || self.hot_vocabulary == 0
             || self.hot_vocabulary > self.vocabulary
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "vocabulary must be 1..=10000 and hot-vocabulary must be within it",
+                "vocabulary must be 4..=10000 and hot-vocabulary must be within it",
             ));
         }
         Ok(())
@@ -111,6 +111,20 @@ mod tests {
             Vec::new(),
             CorpusConfig {
                 seed: 0,
+                ..CorpusConfig::default()
+            },
+        );
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn rejects_vocabulary_smaller_than_fixed_query() {
+        let result = write_corpus(
+            Vec::new(),
+            CorpusConfig {
+                vocabulary: 3,
+                hot_vocabulary: 3,
                 ..CorpusConfig::default()
             },
         );
