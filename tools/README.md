@@ -6,7 +6,7 @@ embeddings and line-oriented corpora for the Yurine command-line interface.
 ## Setup
 
 ```console
-$ cd scripts
+$ cd tools
 $ uv sync
 ```
 
@@ -80,17 +80,17 @@ text is identical.
 ```console
 $ cargo run -p yurine-cli -- \
     --tokenizer whitespace \
-    --costs scripts/output/costs.json \
+    --costs tools/output/costs.json \
     --threshold 0.3 \
     '東京 都' \
-    scripts/output/corpus.txt
+    tools/output/corpus.txt
 ```
 
 Run each feature command with `--help` for all options.
 
 ## Development
 
-Run formatting checks, linting, type checking, and tests from `scripts/`:
+Run formatting checks, linting, type checking, and tests from `tools/`:
 
 ```console
 $ uv run ruff format --check .
