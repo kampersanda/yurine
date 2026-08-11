@@ -124,6 +124,8 @@ fn empty_query_error_contract_is_stable() {
     builder.add_string("a").unwrap();
     let engine = builder.build().unwrap();
 
+    // This intentionally fixes the current error variant. Replacing it with a
+    // dedicated empty-query error should be treated as an explicit API change.
     assert_eq!(
         engine.range_search("", &RangeSearchParams::new(Cost::ZERO)),
         Err(Error::ThresholdSubsequenceUnavailable)

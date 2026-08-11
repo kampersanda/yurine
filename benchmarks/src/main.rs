@@ -1,7 +1,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -134,8 +134,10 @@ fn generate(options: GenerateOptions) -> Result<(), Box<dyn Error>> {
         hot_vocabulary: options.hot_vocabulary,
         seed: options.seed,
     };
-    let file = File::create(&options.output)?;
-    write_corpus(BufWriter::new(file), config)?;
+    config.validate()?;
+    let mut writer = BufWriter::new(File::create(&options.output)?);
+    write_corpus(&mut writer, config)?;
+    writer.flush()?;
     println!("generated\t{}\tbytes", fs::metadata(options.output)?.len());
     println!("strings\t{}\tcount", config.strings);
     println!("tokens_per_string\t{}\tcount", config.tokens_per_string);
@@ -173,6 +175,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         params = params.with_eta(eta);
     }
     let cold_heap_start = reset_heap_peak();
+    let engine_resident_heap = cold_heap_start;
     let cold_start = Instant::now();
     let (cold_matches, metrics) = engine.range_search_with_metrics(&options.query, &params)?;
     let cold_elapsed = cold_start.elapsed();
@@ -195,6 +198,8 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         fs::metadata(options.corpus)?.len(),
         "bytes",
     );
+    // The in-memory baseline has no persistent index. Replace this when the
+    // persistent-index benchmark is added.
     metric("persistent_index_bytes", 0, "bytes");
     metric("corpus_strings", corpus_strings, "count");
     metric("corpus_load_elapsed", load_elapsed.as_nanos(), "ns");
@@ -202,6 +207,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     metric("build_elapsed", build_elapsed.as_nanos(), "ns");
     heap_metrics("build", build_heap_start, build_heap_peak);
     metric("peak_rss_after_build", peak_rss_after_build, "bytes");
+    metric("engine_resident_heap", engine_resident_heap, "bytes");
     metric("cold_search_elapsed", cold_elapsed.as_nanos(), "ns");
     heap_metrics("cold_search", cold_heap_start, cold_heap_peak);
     metric("peak_rss_after_cold_search", peak_rss_after_cold, "bytes");
@@ -216,7 +222,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     metric("warm_match_count", warm_matches, "count");
     metric(
         "used_exhaustive_verification",
-        metrics.used_exhaustive_verification,
+        u8::from(metrics.used_exhaustive_verification),
         "bool",
     );
     metric(
@@ -275,9 +281,11 @@ fn peak_rss_bytes() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use clap::{CommandFactory, Parser};
 
-    use super::{Command, Options};
+    use super::{Command, GenerateOptions, Options, generate};
     use yurine::costs::Cost;
     use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY};
 
@@ -348,5 +356,25 @@ mod tests {
             panic!("expected measure command");
         };
         assert_eq!(automatic.eta, None);
+    }
+
+    #[test]
+    fn invalid_config_does_not_truncate_existing_output() {
+        let output =
+            std::env::temp_dir().join(format!("yurine-invalid-config-{}.txt", std::process::id()));
+        fs::write(&output, "keep me").unwrap();
+
+        let result = generate(GenerateOptions {
+            output: output.clone(),
+            strings: 1,
+            tokens: 1,
+            vocabulary: 1,
+            hot_vocabulary: 1,
+            seed: 0,
+        });
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep me");
+        fs::remove_file(output).unwrap();
     }
 }

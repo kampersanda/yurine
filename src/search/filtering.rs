@@ -14,7 +14,9 @@ use crate::types::{Position, Symbol};
 /// order. For engines created by [`crate::search::SearchEngineBuilder`], they
 /// are unique because selected positions, neighborhood symbols, and each
 /// symbol's postings are unique, and postings for distinct symbols do not
-/// overlap.
+/// overlap. If a future index can generate duplicate anchors, verification
+/// still consolidates identical result intervals; duplicates would add work but
+/// would not change search results.
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
 /// outside `query`.

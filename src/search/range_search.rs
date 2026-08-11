@@ -30,8 +30,12 @@ pub struct RangeSearchMetrics {
     /// Whether filtering was unavailable and exhaustive verification was used.
     pub used_exhaustive_verification: bool,
     /// Number of query positions chosen for candidate generation.
+    ///
+    /// This is zero when exhaustive verification was used.
     pub selected_query_positions: usize,
     /// Number of candidate anchors generated from postings.
+    ///
+    /// This is zero when exhaustive verification was used.
     pub generated_candidates: usize,
 }
 

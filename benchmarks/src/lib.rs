@@ -23,23 +23,30 @@ impl Default for CorpusConfig {
     }
 }
 
+impl CorpusConfig {
+    pub fn validate(&self) -> io::Result<()> {
+        if self.seed == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seed must be non-zero",
+            ));
+        }
+        if self.vocabulary == 0
+            || self.vocabulary > 10_000
+            || self.hot_vocabulary == 0
+            || self.hot_vocabulary > self.vocabulary
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "vocabulary must be 1..=10000 and hot-vocabulary must be within it",
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub fn write_corpus(mut output: impl Write, config: CorpusConfig) -> io::Result<()> {
-    if config.seed == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "seed must be non-zero",
-        ));
-    }
-    if config.vocabulary == 0
-        || config.vocabulary > 10_000
-        || config.hot_vocabulary == 0
-        || config.hot_vocabulary > config.vocabulary
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "vocabulary must be 1..=10000 and hot-vocabulary must be within it",
-        ));
-    }
+    config.validate()?;
 
     let mut state = config.seed;
     for string_index in 0..config.strings {
