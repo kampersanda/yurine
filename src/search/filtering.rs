@@ -1,8 +1,6 @@
 pub mod candidate;
 pub mod neighborhood;
 
-use std::collections::HashSet;
-
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
@@ -13,8 +11,12 @@ use crate::types::{Position, Symbol};
 /// Generates candidate anchors.
 ///
 /// Candidates are returned in selected-position, neighborhood, and postings
-/// order. Exact duplicate triples are removed while preserving their first
-/// occurrence; anchors with different query positions remain distinct.
+/// order. For engines created by [`crate::search::SearchEngineBuilder`], they
+/// are unique because selected positions, neighborhood symbols, and each
+/// symbol's postings are unique, and postings for distinct symbols do not
+/// overlap. If a future index can generate duplicate anchors, verification
+/// still consolidates identical result intervals; duplicates would add work but
+/// would not change search results.
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
 /// outside `query`.
@@ -30,7 +32,6 @@ where
     C: EditCosts<Symbol>,
 {
     let mut candidates = Vec::new();
-    let mut seen = HashSet::new();
 
     for selected_position in selected {
         let query_symbol =
@@ -42,14 +43,11 @@ where
                 })?;
         for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
             for posting in index.postings(neighbor) {
-                let candidate = Candidate {
+                candidates.push(Candidate {
                     string_id: posting.string_id,
                     data_position: posting.position,
                     query_position: *selected_position,
-                };
-                if seen.insert(candidate) {
-                    candidates.push(candidate);
-                }
+                });
             }
         }
     }

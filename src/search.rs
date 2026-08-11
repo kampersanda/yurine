@@ -20,7 +20,7 @@ use filtering::neighborhood::SubstitutionNeighborhood;
 pub use builder::SearchEngineBuilder;
 
 /// A candidate match of a query in a string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Candidate {
     string_id: StringId,
     data_position: Position,

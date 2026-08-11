@@ -21,6 +21,24 @@ pub struct RangeSearchParams {
     eta: Option<Cost>,
 }
 
+/// Measurements from the filtering phase of one range search.
+///
+/// Counts are exposed so benchmark tooling can compare candidate generation
+/// across implementations without making elapsed time a test assertion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RangeSearchMetrics {
+    /// Whether filtering was unavailable and exhaustive verification was used.
+    pub used_exhaustive_verification: bool,
+    /// Number of query positions chosen for candidate generation.
+    ///
+    /// This is zero when exhaustive verification was used.
+    pub selected_query_positions: usize,
+    /// Number of candidate anchors generated from postings.
+    ///
+    /// This is zero when exhaustive verification was used.
+    pub generated_candidates: usize,
+}
+
 impl RangeSearchParams {
     /// Creates parameters with automatic eta.
     pub const fn new(threshold: Cost) -> Self {
@@ -92,6 +110,17 @@ where
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
     pub fn range_search(&self, query: &str, params: &RangeSearchParams) -> Result<Vec<Match>> {
+        self.range_search_with_metrics(query, params)
+            .map(|(matches, _)| matches)
+    }
+
+    /// Finds matches and returns filtering measurements for reproducible
+    /// performance comparisons.
+    pub fn range_search_with_metrics(
+        &self,
+        query: &str,
+        params: &RangeSearchParams,
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
         let query = EncodedQuery::new(
             self.tokenizer
                 .tokenize(query)
@@ -116,7 +145,7 @@ where
         threshold: Cost,
         eta: Cost,
         costs: &S,
-    ) -> Result<Vec<Match>>
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)>
     where
         S: EditCosts<Symbol>,
     {
@@ -130,7 +159,14 @@ where
         ) {
             Ok(selected) => selected,
             Err(Error::ThresholdSubsequenceUnavailable) if !query.is_empty() => {
-                return verify_exhaustively(query, threshold, &self.store, costs);
+                let matches = verify_exhaustively(query, threshold, &self.store, costs)?;
+                return Ok((
+                    matches,
+                    RangeSearchMetrics {
+                        used_exhaustive_verification: true,
+                        ..RangeSearchMetrics::default()
+                    },
+                ));
             }
             Err(error) => return Err(error),
         };
@@ -142,7 +178,21 @@ where
             costs,
             &self.neighborhood,
         )?;
-        Verifier::BidirectionalTrie.verify(query, &candidates, &self.store, threshold, costs)
+        let matches = Verifier::BidirectionalTrie.verify(
+            query,
+            &candidates,
+            &self.store,
+            threshold,
+            costs,
+        )?;
+        Ok((
+            matches,
+            RangeSearchMetrics {
+                used_exhaustive_verification: false,
+                selected_query_positions: selected.len(),
+                generated_candidates: candidates.len(),
+            },
+        ))
     }
 }
 

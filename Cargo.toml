@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli"]
+members = ["benchmarks", "cli"]
 default-members = [".", "cli"]
 resolver = "3"
 

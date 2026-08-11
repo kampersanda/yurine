@@ -2,6 +2,9 @@
 
 Fast and exact substring search under weighted edit distance
 
+The reproducible performance baseline and compatibility workload for the
+persistent-index work are documented in [`benchmarks/`](benchmarks/README.md).
+
 ```rust
 use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
