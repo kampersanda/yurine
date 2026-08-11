@@ -10,6 +10,14 @@ use crate::search::Candidate;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::{Position, Symbol};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct CandidateGenerationMetrics {
+    pub raw_candidates: usize,
+    pub unique_candidates: usize,
+    pub candidate_vec_capacity: usize,
+    pub dedup_set_capacity: usize,
+}
+
 /// Generates candidate anchors.
 ///
 /// Candidates are returned in selected-position, neighborhood, and postings
@@ -25,12 +33,13 @@ pub(super) fn generate_candidates<C>(
     index: &PostingsIndex,
     costs: &C,
     neighborhood: &SubstitutionNeighborhood,
-) -> Result<Vec<Candidate>>
+) -> Result<(Vec<Candidate>, CandidateGenerationMetrics)>
 where
     C: EditCosts<Symbol>,
 {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
+    let mut raw_candidates = 0usize;
 
     for selected_position in selected {
         let query_symbol =
@@ -42,6 +51,7 @@ where
                 })?;
         for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
             for posting in index.postings(neighbor) {
+                raw_candidates += 1;
                 let candidate = Candidate {
                     string_id: posting.string_id,
                     data_position: posting.position,
@@ -53,7 +63,13 @@ where
             }
         }
     }
-    Ok(candidates)
+    let metrics = CandidateGenerationMetrics {
+        raw_candidates,
+        unique_candidates: candidates.len(),
+        candidate_vec_capacity: candidates.capacity(),
+        dedup_set_capacity: seen.capacity(),
+    };
+    Ok((candidates, metrics))
 }
 
 #[cfg(test)]
@@ -88,7 +104,7 @@ mod tests {
         );
         let neighborhood = SubstitutionNeighborhood::new([first, second]).unwrap();
 
-        let candidates = generate_candidates(
+        let (candidates, metrics) = generate_candidates(
             &[first, second],
             &[Position::new(1), Position::new(0)],
             Cost::ZERO,
@@ -113,6 +129,8 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(metrics.raw_candidates, 2);
+        assert_eq!(metrics.unique_candidates, 2);
     }
 
     #[test]

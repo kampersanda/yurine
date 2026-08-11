@@ -21,6 +21,53 @@ pub struct RangeSearchParams {
     eta: Option<Cost>,
 }
 
+/// Measurements from the filtering phase of one range search.
+///
+/// Counts and capacities are exposed so benchmark tooling can compare candidate
+/// generation across implementations without making elapsed time a test
+/// assertion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RangeSearchMetrics {
+    /// Whether filtering was unavailable and exhaustive verification was used.
+    pub used_exhaustive_verification: bool,
+    /// Number of query positions chosen for candidate generation.
+    pub selected_query_positions: usize,
+    /// Number of postings visited before duplicate removal.
+    pub raw_candidates: usize,
+    /// Number of candidates retained after duplicate removal.
+    pub unique_candidates: usize,
+    /// Final `Vec` capacity, in candidate entries.
+    pub candidate_vec_capacity: usize,
+    /// Final `HashSet` capacity, in candidate entries.
+    pub dedup_set_capacity: usize,
+}
+
+impl RangeSearchMetrics {
+    /// Returns the fraction of visited postings removed as duplicate candidates.
+    pub fn duplicate_rate(&self) -> f64 {
+        if self.raw_candidates == 0 {
+            0.0
+        } else {
+            (self.raw_candidates - self.unique_candidates) as f64 / self.raw_candidates as f64
+        }
+    }
+
+    /// Returns the bytes addressable by the candidate `Vec` allocation.
+    pub fn candidate_vec_payload_bytes(&self) -> usize {
+        self.candidate_vec_capacity
+            .saturating_mul(std::mem::size_of::<Candidate>())
+    }
+
+    /// Returns the bytes occupied by candidate keys at the `HashSet` capacity.
+    ///
+    /// This excludes hash-table control bytes and allocator overhead. Process
+    /// heap and RSS measurements should be used for total memory comparisons.
+    pub fn dedup_set_key_capacity_bytes(&self) -> usize {
+        self.dedup_set_capacity
+            .saturating_mul(std::mem::size_of::<Candidate>())
+    }
+}
+
 impl RangeSearchParams {
     /// Creates parameters with automatic eta.
     pub const fn new(threshold: Cost) -> Self {
@@ -92,6 +139,17 @@ where
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
     pub fn range_search(&self, query: &str, params: &RangeSearchParams) -> Result<Vec<Match>> {
+        self.range_search_with_metrics(query, params)
+            .map(|(matches, _)| matches)
+    }
+
+    /// Finds matches and returns filtering measurements for reproducible
+    /// performance comparisons.
+    pub fn range_search_with_metrics(
+        &self,
+        query: &str,
+        params: &RangeSearchParams,
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
         let query = EncodedQuery::new(
             self.tokenizer
                 .tokenize(query)
@@ -116,7 +174,7 @@ where
         threshold: Cost,
         eta: Cost,
         costs: &S,
-    ) -> Result<Vec<Match>>
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)>
     where
         S: EditCosts<Symbol>,
     {
@@ -130,11 +188,18 @@ where
         ) {
             Ok(selected) => selected,
             Err(Error::ThresholdSubsequenceUnavailable) if !query.is_empty() => {
-                return verify_exhaustively(query, threshold, &self.store, costs);
+                let matches = verify_exhaustively(query, threshold, &self.store, costs)?;
+                return Ok((
+                    matches,
+                    RangeSearchMetrics {
+                        used_exhaustive_verification: true,
+                        ..RangeSearchMetrics::default()
+                    },
+                ));
             }
             Err(error) => return Err(error),
         };
-        let candidates = generate_candidates(
+        let (candidates, candidate_metrics) = generate_candidates(
             query,
             &selected,
             eta,
@@ -142,7 +207,24 @@ where
             costs,
             &self.neighborhood,
         )?;
-        Verifier::BidirectionalTrie.verify(query, &candidates, &self.store, threshold, costs)
+        let matches = Verifier::BidirectionalTrie.verify(
+            query,
+            &candidates,
+            &self.store,
+            threshold,
+            costs,
+        )?;
+        Ok((
+            matches,
+            RangeSearchMetrics {
+                used_exhaustive_verification: false,
+                selected_query_positions: selected.len(),
+                raw_candidates: candidate_metrics.raw_candidates,
+                unique_candidates: candidate_metrics.unique_candidates,
+                candidate_vec_capacity: candidate_metrics.candidate_vec_capacity,
+                dedup_set_capacity: candidate_metrics.dedup_set_capacity,
+            },
+        ))
     }
 }
 
