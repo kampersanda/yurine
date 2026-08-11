@@ -133,3 +133,12 @@ $ cargo run -p yurine-cli -- \
 ```
 
 Run `cargo run -p yurine-cli -- --help` for the complete command-line reference.
+
+## Preparing embedding-search data
+
+The uv project in [`tools/`](tools/) converts word2vec text embeddings to
+Yurine JSON Lines and normalizes and tokenizes corpora and queries. Its default
+Sudachi configuration is compatible with chiVe v1.3, while its input
+normalization, token form, split mode, and whitespace tokenizer can be selected
+for other embedding models. See [`tools/README.md`](tools/README.md) for
+setup and usage.

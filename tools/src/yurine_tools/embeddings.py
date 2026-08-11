@@ -1,0 +1,158 @@
+"""Streaming conversion utilities for static word embedding files."""
+
+from __future__ import annotations
+
+import math
+import os
+import struct
+import unicodedata
+from itertools import chain
+from pathlib import Path
+from typing import TextIO
+
+from yurine_tools.options import Header, Normalization
+from yurine_tools.schemas import (
+    ConversionStats,
+    EmbeddingCostConfig,
+    EmbeddingRecord,
+    EmbeddingSource,
+)
+
+
+def normalize_token(token: str, normalization: Normalization) -> str:
+    """Normalize a model token without changing it by default."""
+    if normalization == "none":
+        return token
+    if normalization == "nfc":
+        return unicodedata.normalize("NFC", token)
+    if normalization == "nfkc":
+        return unicodedata.normalize("NFKC", token)
+    if normalization == "nfkc-casefold":
+        # NFKC must run before case folding so compatibility characters such
+        # as mathematical bold capitals are folded to lowercase as expected.
+        normalized = unicodedata.normalize("NFKC", token)
+        return unicodedata.normalize("NFKC", normalized.casefold())
+    raise AssertionError(f"unknown normalization: {normalization}")
+
+
+def _to_f32(value: float, line_number: int) -> float:
+    """Round a finite Python float to the representation Yurine reads."""
+    if not math.isfinite(value):
+        raise ValueError(f"line {line_number}: vector contains a non-finite value")
+    try:
+        return struct.unpack("!f", struct.pack("!f", value))[0]
+    except OverflowError as error:
+        raise ValueError(
+            f"line {line_number}: vector contains a value outside the f32 range"
+        ) from error
+
+
+def convert_word2vec_text(
+    source: TextIO,
+    destination: TextIO,
+    *,
+    header: Header = "auto",
+    normalization: Normalization = "none",
+) -> ConversionStats:
+    """Stream word2vec text records as Yurine-compatible JSON Lines.
+
+    Header presence can be forced for ambiguous headerless one-dimensional
+    models. All records are checked against the declared or inferred vector
+    dimension before they are written.
+    """
+    lines = enumerate(source, start=1)
+    try:
+        first_line_number, first_line = next(lines)
+    except StopIteration as error:
+        raise ValueError("embedding file is empty") from error
+
+    expected_count: int | None = None
+    dimension: int | None = None
+    first_parts = first_line.split()
+    has_header = header == "present" or (
+        header == "auto" and len(first_parts) == 2 and all(part.isdigit() for part in first_parts)
+    )
+    if has_header:
+        if len(first_parts) != 2 or not all(part.isdigit() for part in first_parts):
+            raise ValueError("line 1: expected a word2vec header with record and dimension counts")
+        expected_count, dimension = map(int, first_parts)
+        if expected_count == 0 or dimension == 0:
+            raise ValueError("word2vec header values must be positive")
+        pending = []
+    else:
+        # The first line is a vector record when no header was detected, so it
+        # must be replayed before consuming the remaining iterator.
+        pending = [(first_line_number, first_parts)]
+
+    records = 0
+    seen_tokens: set[str] = set()
+    for line_number, parts in chain(pending, lines):
+        if not isinstance(parts, list):
+            parts = parts.split()
+        if len(parts) < 2:
+            raise ValueError(f"line {line_number}: expected a token and vector")
+
+        token = normalize_token(parts[0], normalization)
+        if not token or any(character.isspace() for character in token):
+            raise ValueError(f"line {line_number}: token must be non-empty without whitespace")
+
+        try:
+            parsed_embedding = [float(value) for value in parts[1:]]
+        except ValueError as error:
+            raise ValueError(f"line {line_number}: vector contains a non-number") from error
+        embedding = [_to_f32(value, line_number) for value in parsed_embedding]
+
+        if dimension is None:
+            dimension = len(embedding)
+        if len(embedding) != dimension:
+            raise ValueError(
+                f"line {line_number}: expected {dimension} dimensions, got {len(embedding)}"
+            )
+        if not any(value != 0.0 for value in embedding):
+            raise ValueError(f"line {line_number}: vector has zero norm")
+        if token in seen_tokens:
+            raise ValueError(f"line {line_number}: duplicate token {token!r}")
+        seen_tokens.add(token)
+
+        record = EmbeddingRecord(token=token, embedding=embedding)
+        destination.write(record.model_dump_json())
+        destination.write("\n")
+        records += 1
+
+    if dimension is None:
+        raise ValueError("embedding file has a header but no records")
+    if expected_count is not None and records != expected_count:
+        raise ValueError(f"header declares {expected_count} records, but found {records}")
+    return ConversionStats(records=records, dimension=dimension)
+
+
+def write_cost_config(
+    path: str,
+    embeddings_path: str,
+    *,
+    missing_substitution_cost: float,
+    deletion_cost: float,
+    insertion_cost: float,
+) -> None:
+    """Write a Yurine cost configuration referring to converted embeddings."""
+    if embeddings_path == "-":
+        raise ValueError("cannot create a cost config for embeddings written to standard output")
+    if embeddings_path.endswith((".gz", ".bz2", ".xz", ".lzma")):
+        raise ValueError("Yurine requires an uncompressed embedding file in a cost config")
+
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    # Yurine resolves embedding paths from the configuration directory, not
+    # from the process working directory.
+    relative_embeddings = os.path.relpath(
+        Path(embeddings_path).resolve(), start=config_path.parent.resolve()
+    )
+    config = EmbeddingCostConfig(
+        embeddings=EmbeddingSource(path=relative_embeddings),
+        missing_substitution_cost=missing_substitution_cost,
+        deletion_cost=deletion_cost,
+        insertion_cost=insertion_cost,
+    )
+    with config_path.open("w", encoding="utf-8", newline="\n") as destination:
+        destination.write(config.model_dump_json(indent=2))
+        destination.write("\n")

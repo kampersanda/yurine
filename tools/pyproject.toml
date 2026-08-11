@@ -1,0 +1,39 @@
+[project]
+name = "yurine-tools"
+version = "0.1.0"
+description = "Data preparation tools for Yurine embedding search"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "pydantic>=2.12,<3",
+    "sudachidict-core==20240109",
+    "sudachipy==0.6.8",
+    "typed-argument-parser>=1.10.1,<2",
+]
+
+[project.scripts]
+yurine-convert-embeddings = "yurine_tools.cli.convert_embeddings:main"
+yurine-preprocess-corpus = "yurine_tools.cli.preprocess_corpus:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.11",
+    "ty==0.0.70",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ty.src]
+include = ["src", "tests"]
