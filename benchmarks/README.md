@@ -2,7 +2,9 @@
 
 This package provides the reproducible workload used to compare the in-memory
 implementation with the persistent index work tracked by issue #24. Measurements
-are observations, not CI pass/fail thresholds.
+are observations, not CI pass/fail thresholds. Keep generated corpora and
+measurement results outside the repository; only the code and reproduction
+procedure are versioned.
 
 Generate the default whitespace-tokenized corpus:
 
@@ -63,9 +65,3 @@ growth remains the implementation-independent memory metric.
 The compatibility integration fixture separately fixes `StringId`, token range,
 UTF-8 byte range, weighted distance, and result order. The benchmark package's
 unit test checks that corpus generation is byte-for-byte reproducible.
-
-Host-specific observations are stored in [`results/`](results/). They are
-reference snapshots only and are not compared by CI. The initial macOS snapshot
-captures the original `Vec + HashSet` path; the `without-candidate-dedup`
-snapshot records the same workload after proving candidates unique and removing
-the redundant set.
