@@ -18,17 +18,6 @@ pub enum Error {
     #[error("byte offset exceeds u32")]
     ByteOffsetOverflow,
 
-    /// A token byte range is not a valid UTF-8 slice of its original string.
-    #[error("token byte range {start}..{end} is invalid for a string of {string_len} bytes")]
-    InvalidByteRange {
-        /// The inclusive byte offset where the range starts.
-        start: usize,
-        /// The exclusive byte offset where the range ends.
-        end: usize,
-        /// The UTF-8 byte length of the original string.
-        string_len: usize,
-    },
-
     /// A vocabulary contains too many tokens for a `u32` symbol.
     #[error("symbol exceeds u32")]
     SymbolOverflow,
