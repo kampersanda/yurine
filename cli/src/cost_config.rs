@@ -123,14 +123,17 @@ enum CustomRule {
     Insertion { token: String, cost: f32 },
 }
 
-pub(crate) fn load(path: &Path, tokenizer: &impl Tokenizer) -> Result<RuntimeCosts<String>> {
+pub(crate) fn load<T>(path: &Path, tokenizer: &impl Tokenizer<Token = T>) -> Result<RuntimeCosts<T>>
+where
+    T: Clone + Eq + Hash,
+{
     let file = File::open(path)
         .with_context(|| format!("failed to open cost configuration '{}'", path.display()))?;
     let config: CostConfig = serde_json::from_reader(BufReader::new(file))
         .with_context(|| format!("failed to parse cost configuration '{}'", path.display()))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
 
-    let costs = (|| -> Result<RuntimeCosts<String>> {
+    let costs = (|| -> Result<RuntimeCosts<T>> {
         match config {
             CostConfig::Embedding {
                 version,
@@ -181,11 +184,14 @@ fn parse_cost(value: f32, field: &str) -> Result<Cost> {
     Cost::new(value).with_context(|| format!("invalid cost configuration field '{field}'"))
 }
 
-fn load_embeddings(
+fn load_embeddings<T>(
     path: &Path,
     _format: DataFormat,
-    tokenizer: &impl Tokenizer,
-) -> Result<EmbeddingStore<String>> {
+    tokenizer: &impl Tokenizer<Token = T>,
+) -> Result<EmbeddingStore<T>>
+where
+    T: Eq + Hash,
+{
     let reader = open_jsonl(path, "embedding")?;
     let mut store = None;
 
@@ -241,12 +247,15 @@ fn load_embeddings(
     store.with_context(|| format!("embedding file '{}' is empty", path.display()))
 }
 
-fn load_custom_costs(
+fn load_custom_costs<T>(
     path: &Path,
     _format: DataFormat,
     defaults: CustomDefaults,
-    tokenizer: &impl Tokenizer,
-) -> Result<CustomCosts<String>> {
+    tokenizer: &impl Tokenizer<Token = T>,
+) -> Result<CustomCosts<T>>
+where
+    T: Clone + Eq + Hash,
+{
     let mut costs = CustomCosts::new(
         parse_cost(defaults.substitution, "defaults.substitution")?,
         parse_cost(defaults.deletion, "defaults.deletion")?,
@@ -345,7 +354,7 @@ fn parse_rule_cost(value: f32, path: &Path, line_number: usize) -> Result<Cost> 
     })
 }
 
-fn single_token(tokenizer: &impl Tokenizer, text: &str) -> Result<String> {
+fn single_token<T>(tokenizer: &impl Tokenizer<Token = T>, text: &str) -> Result<T> {
     let mut tokens = tokenizer.tokenize(text);
     if tokens.len() != 1 || tokens[0].byte_range != (0..text.len()) {
         bail!("value must contain exactly one complete token");
@@ -416,10 +425,10 @@ mod tests {
 
         let costs = load(&config, &CharacterTokenizer).unwrap();
 
-        assert!((costs.substitution(&"x".to_owned(), &"a".to_owned()).get() - 0.2).abs() < 1e-6);
-        assert_eq!(costs.substitution(&"x".to_owned(), &"z".to_owned()), 0.7);
-        assert_eq!(costs.deletion(&"x".to_owned()), 0.3);
-        assert_eq!(costs.insertion(&"a".to_owned()), 0.4);
+        assert!((costs.substitution(&'x', &'a').get() - 0.2).abs() < 1e-6);
+        assert_eq!(costs.substitution(&'x', &'z'), 0.7);
+        assert_eq!(costs.deletion(&'x'), 0.3);
+        assert_eq!(costs.insertion(&'a'), 0.4);
     }
 
     #[test]
@@ -474,9 +483,9 @@ mod tests {
 
         let costs = load(&config, &CharacterTokenizer).unwrap();
 
-        assert_eq!(costs.substitution(&"a".to_owned(), &"b".to_owned()), 1.0);
-        assert_eq!(costs.deletion(&"a".to_owned()), 1.0);
-        assert_eq!(costs.insertion(&"a".to_owned()), 1.0);
+        assert_eq!(costs.substitution(&'a', &'b'), 1.0);
+        assert_eq!(costs.deletion(&'a'), 1.0);
+        assert_eq!(costs.insertion(&'a'), 1.0);
     }
 
     #[test]

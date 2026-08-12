@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::hash::Hash;
 use std::io::{self, BufRead, BufReader, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ mod cost_config;
 mod tokenization;
 
 use cost_config::RuntimeCosts;
-use tokenization::{CharacterTokenizer, Tokenized, Tokenizer, WhitespaceTokenizer};
+use tokenization::{CharacterTokenizer, Tokenizer, WhitespaceTokenizer};
 
 /// Search newline-delimited strings with edit distance using Yurine.
 #[derive(Debug, Parser, PartialEq)]
@@ -105,22 +106,28 @@ fn read_lines(reader: impl BufRead) -> io::Result<Vec<String>> {
     reader.lines().collect()
 }
 
-fn search(
+fn search<T>(
     corpus: &[String],
     options: &Options,
-    tokenizer: impl Tokenizer,
-) -> Result<Vec<LocatedMatch>> {
+    tokenizer: impl Tokenizer<Token = T>,
+) -> Result<Vec<LocatedMatch>>
+where
+    T: Clone + Eq + Hash,
+{
     let costs = match &options.costs {
         Some(path) => cost_config::load(path, &tokenizer)?,
         None => RuntimeCosts::levenshtein(),
     };
-    let tokenized_corpus: Vec<_> = corpus
-        .iter()
-        .map(|source_text| tokenizer.tokenize(source_text))
-        .collect();
     let mut builder = SearchEngineBuilder::new(costs);
-    for sequence in &tokenized_corpus {
-        builder.add_string(sequence.iter().map(|token| token.value.clone()))?;
+    let mut token_ranges = Vec::with_capacity(corpus.len());
+    for source_text in corpus {
+        let (sequence, ranges): (Vec<_>, Vec<_>) = tokenizer
+            .tokenize(source_text)
+            .into_iter()
+            .map(|token| (token.value, token.byte_range))
+            .unzip();
+        builder.add_string(sequence)?;
+        token_ranges.push(ranges);
     }
     let engine = builder.build()?;
     let mut params = RangeSearchParams::new(options.threshold);
@@ -135,7 +142,7 @@ fn search(
     let matches = engine.range_search(&query, &params)?;
     Ok(matches
         .into_iter()
-        .map(|matched| locate_match(matched, &tokenized_corpus))
+        .map(|matched| locate_match(matched, &token_ranges))
         .collect())
 }
 
@@ -146,13 +153,15 @@ struct LocatedMatch {
     distance: Cost,
 }
 
-fn locate_match(matched: Match, corpus: &[Vec<Tokenized>]) -> LocatedMatch {
-    let sequence = &corpus[matched.string_id.as_usize()];
+fn locate_match(matched: Match, token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
+    // Every corpus line is passed to `add_string` in order, so `StringId`
+    // indexes `token_ranges`. Matches are always non-empty token ranges.
+    let sequence = &token_ranges[matched.string_id.as_usize()];
     let start = matched.token_range.start.as_usize();
     let end = matched.token_range.end.as_usize();
     LocatedMatch {
         string_id: matched.string_id,
-        byte_range: sequence[start].byte_range.start..sequence[end - 1].byte_range.end,
+        byte_range: sequence[start].start..sequence[end - 1].end,
         distance: matched.distance,
     }
 }

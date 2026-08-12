@@ -1,31 +1,35 @@
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Tokenized {
-    pub(crate) value: String,
+pub(crate) struct Tokenized<T> {
+    pub(crate) value: T,
     pub(crate) byte_range: Range<usize>,
 }
 
-impl Tokenized {
-    fn new(value: String, byte_range: Range<usize>) -> Self {
+impl<T> Tokenized<T> {
+    fn new(value: T, byte_range: Range<usize>) -> Self {
         Self { value, byte_range }
     }
 }
 
 pub(crate) trait Tokenizer {
-    fn tokenize(&self, source_text: &str) -> Vec<Tokenized>;
+    type Token;
+
+    fn tokenize(&self, source_text: &str) -> Vec<Tokenized<Self::Token>>;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CharacterTokenizer;
 
 impl Tokenizer for CharacterTokenizer {
-    fn tokenize(&self, source_text: &str) -> Vec<Tokenized> {
+    type Token = char;
+
+    fn tokenize(&self, source_text: &str) -> Vec<Tokenized<Self::Token>> {
         source_text
             .char_indices()
             .map(|(start, token)| {
                 let end = start + token.len_utf8();
-                Tokenized::new(token.to_string(), start..end)
+                Tokenized::new(token, start..end)
             })
             .collect()
     }
@@ -35,7 +39,9 @@ impl Tokenizer for CharacterTokenizer {
 pub(crate) struct WhitespaceTokenizer;
 
 impl Tokenizer for WhitespaceTokenizer {
-    fn tokenize(&self, source_text: &str) -> Vec<Tokenized> {
+    type Token = String;
+
+    fn tokenize(&self, source_text: &str) -> Vec<Tokenized<Self::Token>> {
         let mut tokens = Vec::new();
         let mut token_start = None;
 
@@ -72,11 +78,16 @@ mod tests {
         assert_eq!(
             CharacterTokenizer.tokenize("aあ🦀"),
             [
-                Tokenized::new("a".to_owned(), 0..1),
-                Tokenized::new("あ".to_owned(), 1..4),
-                Tokenized::new("🦀".to_owned(), 4..8),
+                Tokenized::new('a', 0..1),
+                Tokenized::new('あ', 1..4),
+                Tokenized::new('🦀', 4..8),
             ]
         );
+    }
+
+    #[test]
+    fn character_tokenizer_handles_empty_input() {
+        assert!(CharacterTokenizer.tokenize("").is_empty());
     }
 
     #[test]
@@ -89,5 +100,23 @@ mod tests {
                 Tokenized::new("大阪".to_owned(), 16..22),
             ]
         );
+    }
+
+    #[test]
+    fn whitespace_tokenizer_splits_on_consecutive_whitespace() {
+        assert_eq!(
+            WhitespaceTokenizer.tokenize("  one\ttwo\nthree  "),
+            [
+                Tokenized::new("one".to_owned(), 2..5),
+                Tokenized::new("two".to_owned(), 6..9),
+                Tokenized::new("three".to_owned(), 10..15),
+            ]
+        );
+    }
+
+    #[test]
+    fn whitespace_tokenizer_handles_input_without_tokens() {
+        assert!(WhitespaceTokenizer.tokenize("").is_empty());
+        assert!(WhitespaceTokenizer.tokenize(" \t\n").is_empty());
     }
 }

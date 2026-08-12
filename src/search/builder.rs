@@ -10,7 +10,7 @@ use crate::store::CorpusStoreBuilder;
 use crate::types::{Position, Posting, StringId};
 use crate::vocabulary::VocabularyBuilder;
 
-/// Builds a [`SearchEngine`] from strings in insertion order.
+/// Builds a [`SearchEngine`] from token sequences in insertion order.
 #[derive(Debug)]
 pub struct SearchEngineBuilder<T, C> {
     costs: C,
