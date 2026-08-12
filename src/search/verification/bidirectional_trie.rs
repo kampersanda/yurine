@@ -14,7 +14,7 @@ struct TrieNode {
     // through this node. A child therefore needs exactly one `step_dp` call.
     column: Vec<f32>,
     // Labels are owned so a disk-backed store may release each decoded
-    // corpus string after processing one candidate.
+    // data string after processing one candidate.
     children: Vec<(Symbol, TrieNode)>,
 }
 

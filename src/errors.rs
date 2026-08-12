@@ -74,7 +74,7 @@ pub enum Error {
     InvalidStringPosition {
         /// The zero-based position supplied by the candidate.
         position: Position,
-        /// The number of symbols in the referenced corpus string.
+        /// The number of symbols in the referenced string.
         string_len: usize,
     },
 

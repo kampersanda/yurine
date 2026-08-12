@@ -29,7 +29,7 @@ impl CorpusStoreBuilder {
         }
     }
 
-    /// Adds a corpus string.
+    /// Adds a data string.
     pub fn add_string(&mut self, string: Vec<Symbol>) {
         let end = self.symbols.len() as u64 + string.len() as u64;
         self.alphabet.extend(string.iter().copied());

@@ -97,7 +97,7 @@ fn add_distance(left: f32, right: f32) -> f32 {
     if residual > 0.0 { f32::INFINITY } else { sum }
 }
 
-/// Initializes the weighted-edit-distance column for an empty string prefix.
+/// Initializes the weighted-edit-distance column for an empty data prefix.
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
@@ -105,7 +105,7 @@ fn root_column<C>(query: &[Symbol], costs: &C) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
-    // `column[r]` is wed(query[..r], empty). Reaching the empty string prefix
+    // `column[r]` is wed(query[..r], empty). Reaching the empty data prefix
     // requires deleting every symbol in the query prefix.
     let mut column = Vec::with_capacity(query.len() + 1);
     column.push(0.0);
@@ -118,16 +118,16 @@ where
     column
 }
 
-/// Advances a weighted-edit-distance column by one string symbol.
+/// Advances a weighted-edit-distance column by one data symbol.
 fn step_dp<C>(query: &[Symbol], string_symbol: Symbol, previous: &[f32], costs: &C) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
     debug_assert_eq!(previous.len(), query.len() + 1);
 
-    // If `previous[r]` describes a processed string prefix P, `current[r]`
+    // If `previous[r]` describes a processed data prefix P, `current[r]`
     // describes P followed by `string_symbol`. Row zero therefore inserts the
-    // new string symbol into an empty query.
+    // new data symbol into an empty query.
     let mut current = Vec::with_capacity(query.len() + 1);
     current.push(add_distance(
         previous[0],

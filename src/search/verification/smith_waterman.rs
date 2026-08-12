@@ -18,7 +18,7 @@ use crate::types::{StringId, Symbol};
 /// additionally uses `O(u)` space to deduplicate the `u` candidate-referenced
 /// corpus strings.
 ///
-/// Candidate anchors select corpus strings, but do not localize the baseline DP.
+/// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
 /// string positions, and query positions are validated before verification.
 pub(super) fn verify<C>(
@@ -73,14 +73,14 @@ fn enumerate_matches<C>(
 where
     C: EditCosts<Symbol>,
 {
-    // The two DP columns are reused across all O(n^2) cells of one corpus
+    // The two DP columns are reused across all O(n^2) cells of one data
     // string; only their contents are rewritten below.
     let mut previous = Vec::with_capacity(query.len() + 1);
     let mut current = Vec::with_capacity(query.len() + 1);
 
     // Fix the substring start so that each non-empty interval is considered
     // exactly once. Starts and ends increase monotonically, which also gives
-    // deterministic range ordering within a corpus string.
+    // deterministic range ordering within a data string.
     for start in 0..string.len() {
         // `previous[i]` is wed(query[..i], string[start..end)), where the corpus
         // prefix is initially empty. Matching a query prefix against an empty
@@ -106,7 +106,7 @@ where
 
             for (query_index, query_symbol) in query.iter().enumerate() {
                 // Extend the DP column for string[start..=end]. The direction is
-                // always query -> corpus substring: substitution consumes both
+                // always query -> data substring: substitution consumes both
                 // symbols, deletion consumes only the query symbol, and
                 // insertion consumes only the string symbol.
                 let substitution = add_distance(

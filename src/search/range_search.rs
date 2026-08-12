@@ -206,7 +206,7 @@ fn verify_exhaustively<C>(
 where
     C: EditCosts<Symbol>,
 {
-    // Smith-Waterman verification uses candidates only to select corpus strings. One
+    // Smith-Waterman verification uses candidates only to select data strings. One
     // in-bounds anchor per non-empty string requests exhaustive verification
     // without relying on the filtering guarantee that was unavailable.
     let mut candidates = Vec::new();

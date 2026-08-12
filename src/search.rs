@@ -29,7 +29,7 @@ struct Candidate {
 /// A verified substring satisfying the inclusive distance threshold.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
-    /// The corpus string containing the match.
+    /// The data string containing the match.
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
     pub token_range: Range<Position>,
