@@ -1,4 +1,4 @@
-//! Construction of consistent search engines from strings.
+//! Construction of consistent search engines from token sequences.
 
 use std::hash::Hash;
 
@@ -7,51 +7,44 @@ use crate::costs::EditCosts;
 use crate::errors::Result;
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
-use crate::tokenization::{Tokenized, Tokenizer};
-use crate::types::{ByteOffset, Position, Posting, StringId};
+use crate::types::{Position, Posting, StringId};
 use crate::vocabulary::VocabularyBuilder;
 
 /// Builds a [`SearchEngine`] from strings in insertion order.
 #[derive(Debug)]
-pub struct SearchEngineBuilder<T, C>
-where
-    T: Tokenizer,
-{
-    tokenizer: T,
+pub struct SearchEngineBuilder<T, C> {
     costs: C,
-    strings: Vec<Vec<Tokenized<T::Token>>>,
+    sequences: Vec<Vec<T>>,
 }
 
 impl<T, C> SearchEngineBuilder<T, C>
 where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
-    C: EditCosts<T::Token>,
+    T: Clone + Eq + Hash,
+    C: EditCosts<T>,
 {
     /// Creates an empty builder.
-    pub fn new(tokenizer: T, costs: C) -> Self {
+    pub fn new(costs: C) -> Self {
         Self {
-            tokenizer,
             costs,
-            strings: Vec::new(),
+            sequences: Vec::new(),
         }
     }
 
-    /// Tokenizes and adds a string, returning its insertion-ordered ID.
+    /// Adds a token sequence as a corpus string and returns its insertion-ordered ID.
     ///
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::StringIdOverflow`] if the corpus has
-    /// too many strings, [`crate::errors::Error::PositionOverflow`] if the
-    /// tokenized string is too long, or
-    /// [`crate::errors::Error::ByteOffsetOverflow`] if the UTF-8 string is
-    /// larger than `u32` bytes.
-    pub fn add_string(&mut self, input: &str) -> Result<StringId> {
-        let string_id = StringId::from_usize(self.strings.len())?;
-        ByteOffset::from_usize(input.len())?;
-        let tokens = self.tokenizer.tokenize(input);
-        Position::from_usize(tokens.len())?;
-        self.strings.push(tokens);
+    /// too many corpus strings or [`crate::errors::Error::PositionOverflow`]
+    /// if the sequence is too long.
+    pub fn add_string<I>(&mut self, sequence: I) -> Result<StringId>
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let string_id = StringId::from_usize(self.sequences.len())?;
+        let sequence: Vec<_> = sequence.into_iter().collect();
+        Position::from_usize(sequence.len())?;
+        self.sequences.push(sequence);
         Ok(string_id)
     }
 
@@ -60,32 +53,22 @@ where
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
-    /// many distinct tokens, or [`crate::errors::Error::ByteOffsetOverflow`]
-    /// if a token byte offset does not fit in `u32`. Returns
-    /// [`crate::errors::Error::UnknownCorpusSymbol`] if a corpus symbol is not
-    /// present in the vocabulary.
+    /// many distinct tokens. Returns [`crate::errors::Error::UnknownCorpusSymbol`]
+    /// if a corpus symbol is not present in the vocabulary.
     pub fn build(self) -> Result<SearchEngine<T, C>> {
-        let Self {
-            tokenizer,
-            costs,
-            strings,
-        } = self;
+        let Self { costs, sequences } = self;
 
         let mut vocabulary_builder = VocabularyBuilder::new();
-        for string in &strings {
-            vocabulary_builder.insert_all(string.iter().map(|token| token.value.clone()));
+        for sequence in &sequences {
+            vocabulary_builder.insert_all(sequence.iter().cloned());
         }
         let vocabulary = vocabulary_builder.build()?;
 
         let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         let mut store_builder = CorpusStoreBuilder::new();
-        for (raw_string_id, string) in strings.into_iter().enumerate() {
+        for (raw_string_id, sequence) in sequences.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
-            let (tokens, byte_ranges): (Vec<_>, Vec<_>) = string
-                .into_iter()
-                .map(|token| (token.value, token.byte_range))
-                .unzip();
-            let symbols = vocabulary.encode(tokens);
+            let symbols = vocabulary.encode(sequence);
             for (raw_position, symbol) in symbols.iter().copied().enumerate() {
                 index_builder.add_posting(
                     symbol,
@@ -95,11 +78,10 @@ where
                     },
                 )?;
             }
-            store_builder.add_string(symbols, byte_ranges)?;
+            store_builder.add_string(symbols);
         }
 
         SearchEngine::from_parts(
-            tokenizer,
             vocabulary,
             costs,
             index_builder.build(),
@@ -115,38 +97,35 @@ mod tests {
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
     use crate::search::range_search::RangeSearchParams;
-    use crate::tokenization::character::CharacterTokenizer;
-    use crate::tokenization::{Tokenized, Tokenizer};
     use crate::types::{Position, StringId};
 
     #[test]
     fn builds_an_empty_corpus() {
-        let engine = SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new())
+        let engine = SearchEngineBuilder::<char, _>::new(LevenshteinCosts::new())
             .build()
             .unwrap();
 
         assert!(
             engine
-                .range_search("a", &RangeSearchParams::new(Cost::ZERO))
+                .range_search(&['a'], &RangeSearchParams::new(Cost::ZERO))
                 .unwrap()
                 .is_empty()
         );
     }
 
     #[test]
-    fn preserves_insertion_ordered_ids_for_unicode_strings() {
-        let mut builder =
-            SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new());
+    fn preserves_insertion_ordered_ids_for_sequences() {
+        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
 
-        assert_eq!(builder.add_string("東京").unwrap(), StringId::new(0));
-        assert_eq!(builder.add_string("").unwrap(), StringId::new(1));
-        assert_eq!(builder.add_string("京都").unwrap(), StringId::new(2));
-        assert_eq!(builder.add_string("東京").unwrap(), StringId::new(3));
+        assert_eq!(builder.add_string(['東', '京']).unwrap(), StringId::new(0));
+        assert_eq!(builder.add_string([]).unwrap(), StringId::new(1));
+        assert_eq!(builder.add_string(['京', '都']).unwrap(), StringId::new(2));
+        assert_eq!(builder.add_string(['東', '京']).unwrap(), StringId::new(3));
 
         let matches = builder
             .build()
             .unwrap()
-            .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
+            .range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -155,13 +134,11 @@ mod tests {
                 Match {
                     string_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(2),
-                    byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(3),
                     token_range: Position::new(0)..Position::new(2),
-                    byte_range: 0..6,
                     distance: Cost::ZERO,
                 },
             ]
@@ -170,14 +147,13 @@ mod tests {
 
     #[test]
     fn indexes_repeated_tokens_at_each_position() {
-        let mut builder =
-            SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new());
-        builder.add_string("aaa").unwrap();
+        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+        builder.add_string(['a', 'a', 'a']).unwrap();
 
         let matches = builder
             .build()
             .unwrap()
-            .range_search("aa", &RangeSearchParams::new(Cost::ZERO))
+            .range_search(&['a', 'a'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -186,13 +162,11 @@ mod tests {
                 Match {
                     string_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(2),
-                    byte_range: 0..2,
                     distance: Cost::ZERO,
                 },
                 Match {
                     string_id: StringId::new(0),
                     token_range: Position::new(1)..Position::new(3),
-                    byte_range: 1..3,
                     distance: Cost::ZERO,
                 },
             ]
@@ -200,43 +174,16 @@ mod tests {
     }
 
     #[test]
-    fn returns_utf8_byte_range_in_original_string() {
-        let mut builder =
-            SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new());
-        builder.add_string("a東京b").unwrap();
+    fn accepts_non_text_token_types() {
+        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+        builder.add_string([10_u16, 20, 30, 40]).unwrap();
 
         let matches = builder
             .build()
             .unwrap()
-            .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
+            .range_search(&[20_u16, 30], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));
-        assert_eq!(matches[0].byte_range, 1..7);
-    }
-
-    struct WholeStringTokenizer;
-
-    impl Tokenizer for WholeStringTokenizer {
-        type Token = String;
-
-        fn tokenize(&self, input: &str) -> Vec<Tokenized<Self::Token>> {
-            vec![Tokenized::new(input.to_owned(), 0..input.len())]
-        }
-    }
-
-    #[test]
-    fn uses_the_same_tokenizer_for_corpus_and_query() {
-        let mut builder = SearchEngineBuilder::new(WholeStringTokenizer, LevenshteinCosts::new());
-        builder.add_string("東京").unwrap();
-
-        let matches = builder
-            .build()
-            .unwrap()
-            .range_search("東京", &RangeSearchParams::new(Cost::ZERO))
-            .unwrap();
-
-        assert_eq!(matches[0].token_range, Position::new(0)..Position::new(1));
-        assert_eq!(matches[0].byte_range, 0..6);
     }
 }

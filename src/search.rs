@@ -11,7 +11,6 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
-use crate::tokenization::Tokenizer;
 use crate::types::{Position, StringId};
 use crate::vocabulary::Vocabulary;
 
@@ -23,22 +22,17 @@ pub use builder::SearchEngineBuilder;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Candidate {
     string_id: StringId,
-    data_position: Position,
+    corpus_position: Position,
     query_position: Position,
 }
 
 /// A verified substring satisfying the inclusive distance threshold.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
-    /// The data string containing the match.
+    /// The corpus string containing the match.
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
     pub token_range: Range<Position>,
-    /// The matched zero-based, end-exclusive UTF-8 byte range in the original string.
-    ///
-    /// This range can be used to slice the string passed to
-    /// [`SearchEngineBuilder::add_string`].
-    pub byte_range: Range<usize>,
     /// The weighted edit distance from the query to the substring.
     pub distance: Cost,
 }
@@ -46,12 +40,8 @@ pub struct Match {
 /// Coordinates threshold-subsequence filtering and exact verification.
 ///
 /// Create an engine with [`SearchEngineBuilder`].
-pub struct SearchEngine<T, C>
-where
-    T: Tokenizer,
-{
-    tokenizer: T,
-    vocabulary: Vocabulary<T::Token>,
+pub struct SearchEngine<T, C> {
+    vocabulary: Vocabulary<T>,
     costs: C,
     index: PostingsIndex,
     store: CorpusStore,
@@ -60,13 +50,11 @@ where
 
 impl<T, C> SearchEngine<T, C>
 where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
-    C: EditCosts<T::Token>,
+    T: Clone + Eq + Hash,
+    C: EditCosts<T>,
 {
     pub(crate) fn from_parts(
-        tokenizer: T,
-        vocabulary: Vocabulary<T::Token>,
+        vocabulary: Vocabulary<T>,
         costs: C,
         index: PostingsIndex,
         store: CorpusStore,
@@ -78,7 +66,6 @@ where
         }
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
         Ok(Self {
-            tokenizer,
             vocabulary,
             costs,
             index,
@@ -95,7 +82,6 @@ mod tests {
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::store::CorpusStoreBuilder;
-    use crate::tokenization::character::CharacterTokenizer;
     use crate::types::Symbol;
     use crate::vocabulary::VocabularyBuilder;
 
@@ -107,12 +93,9 @@ mod tests {
         let unknown_symbol = Symbol::new(1);
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder
-            .add_string(vec![unknown_symbol], std::iter::once(0..1).collect())
-            .unwrap();
+        store_builder.add_string(vec![unknown_symbol]);
 
         let result = SearchEngine::from_parts(
-            CharacterTokenizer::new(),
             vocabulary,
             LevenshteinCosts::new(),
             PostingsIndexBuilder::new(1).build(),

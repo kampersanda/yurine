@@ -11,8 +11,8 @@ use std::ops::Sub;
 use crate::errors::{Error, Result};
 /// Supplies the costs that define a weighted edit distance.
 ///
-/// The search direction is always from the query to a data substring. Thus,
-/// deletion consumes a query token and insertion consumes a data token.
+/// The search direction is always from the query to a corpus substring. Thus,
+/// deletion consumes a query token and insertion consumes a corpus token.
 pub trait EditCosts<T> {
     /// Returns the cost of replacing `from` with `to`.
     ///
@@ -22,7 +22,7 @@ pub trait EditCosts<T> {
     /// Returns the cost of deleting a query token.
     fn deletion(&self, token: &T) -> Cost;
 
-    /// Returns the cost of inserting a data token.
+    /// Returns the cost of inserting a corpus token.
     fn insertion(&self, token: &T) -> Cost;
 }
 

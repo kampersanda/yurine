@@ -11,7 +11,8 @@ use yurine::costs::custom::CustomCosts;
 use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
 use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::costs::{Cost, EditCosts};
-use yurine::tokenization::Tokenizer;
+
+use crate::tokenization::Tokenizer;
 
 #[derive(Debug)]
 pub(crate) enum RuntimeCosts<T> {
@@ -122,18 +123,14 @@ enum CustomRule {
     Insertion { token: String, cost: f32 },
 }
 
-pub(crate) fn load<T>(path: &Path, tokenizer: &T) -> Result<RuntimeCosts<T::Token>>
-where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
-{
+pub(crate) fn load(path: &Path, tokenizer: &impl Tokenizer) -> Result<RuntimeCosts<String>> {
     let file = File::open(path)
         .with_context(|| format!("failed to open cost configuration '{}'", path.display()))?;
     let config: CostConfig = serde_json::from_reader(BufReader::new(file))
         .with_context(|| format!("failed to parse cost configuration '{}'", path.display()))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
 
-    let costs = (|| -> Result<RuntimeCosts<T::Token>> {
+    let costs = (|| -> Result<RuntimeCosts<String>> {
         match config {
             CostConfig::Embedding {
                 version,
@@ -184,15 +181,11 @@ fn parse_cost(value: f32, field: &str) -> Result<Cost> {
     Cost::new(value).with_context(|| format!("invalid cost configuration field '{field}'"))
 }
 
-fn load_embeddings<T>(
+fn load_embeddings(
     path: &Path,
     _format: DataFormat,
-    tokenizer: &T,
-) -> Result<EmbeddingStore<T::Token>>
-where
-    T: Tokenizer,
-    T::Token: Eq + Hash,
-{
+    tokenizer: &impl Tokenizer,
+) -> Result<EmbeddingStore<String>> {
     let reader = open_jsonl(path, "embedding")?;
     let mut store = None;
 
@@ -248,16 +241,12 @@ where
     store.with_context(|| format!("embedding file '{}' is empty", path.display()))
 }
 
-fn load_custom_costs<T>(
+fn load_custom_costs(
     path: &Path,
     _format: DataFormat,
     defaults: CustomDefaults,
-    tokenizer: &T,
-) -> Result<CustomCosts<T::Token>>
-where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
-{
+    tokenizer: &impl Tokenizer,
+) -> Result<CustomCosts<String>> {
     let mut costs = CustomCosts::new(
         parse_cost(defaults.substitution, "defaults.substitution")?,
         parse_cost(defaults.deletion, "defaults.deletion")?,
@@ -356,10 +345,7 @@ fn parse_rule_cost(value: f32, path: &Path, line_number: usize) -> Result<Cost> 
     })
 }
 
-fn single_token<T>(tokenizer: &T, text: &str) -> Result<T::Token>
-where
-    T: Tokenizer,
-{
+fn single_token(tokenizer: &impl Tokenizer, text: &str) -> Result<String> {
     let mut tokens = tokenizer.tokenize(text);
     if tokens.len() != 1 || tokens[0].byte_range != (0..text.len()) {
         bail!("value must contain exactly one complete token");
@@ -372,11 +358,9 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use yurine::costs::EditCosts;
-    use yurine::tokenization::character::CharacterTokenizer;
-    use yurine::tokenization::whitespace::WhitespaceTokenizer;
-
     use super::load;
+    use crate::tokenization::{CharacterTokenizer, WhitespaceTokenizer};
+    use yurine::costs::EditCosts;
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -430,12 +414,12 @@ mod tests {
             }"#,
         );
 
-        let costs = load(&config, &CharacterTokenizer::new()).unwrap();
+        let costs = load(&config, &CharacterTokenizer).unwrap();
 
-        assert!((costs.substitution(&'x', &'a').get() - 0.2).abs() < 1e-6);
-        assert_eq!(costs.substitution(&'x', &'z'), 0.7);
-        assert_eq!(costs.deletion(&'x'), 0.3);
-        assert_eq!(costs.insertion(&'a'), 0.4);
+        assert!((costs.substitution(&"x".to_owned(), &"a".to_owned()).get() - 0.2).abs() < 1e-6);
+        assert_eq!(costs.substitution(&"x".to_owned(), &"z".to_owned()), 0.7);
+        assert_eq!(costs.deletion(&"x".to_owned()), 0.3);
+        assert_eq!(costs.insertion(&"a".to_owned()), 0.4);
     }
 
     #[test]
@@ -459,7 +443,7 @@ mod tests {
             }"#,
         );
 
-        let costs = load(&config, &WhitespaceTokenizer::new()).unwrap();
+        let costs = load(&config, &WhitespaceTokenizer).unwrap();
 
         assert_eq!(
             costs.substitution(&"colour".to_owned(), &"color".to_owned()),
@@ -488,11 +472,11 @@ mod tests {
             }"#,
         );
 
-        let costs = load(&config, &CharacterTokenizer::new()).unwrap();
+        let costs = load(&config, &CharacterTokenizer).unwrap();
 
-        assert_eq!(costs.substitution(&'a', &'b'), 1.0);
-        assert_eq!(costs.deletion(&'a'), 1.0);
-        assert_eq!(costs.insertion(&'a'), 1.0);
+        assert_eq!(costs.substitution(&"a".to_owned(), &"b".to_owned()), 1.0);
+        assert_eq!(costs.deletion(&"a".to_owned()), 1.0);
+        assert_eq!(costs.insertion(&"a".to_owned()), 1.0);
     }
 
     #[test]
@@ -516,8 +500,8 @@ mod tests {
             }"#,
         );
 
-        let unknown_error = load(&unknown, &CharacterTokenizer::new()).unwrap_err();
-        let version_error = load(&version, &CharacterTokenizer::new()).unwrap_err();
+        let unknown_error = load(&unknown, &CharacterTokenizer).unwrap_err();
+        let version_error = load(&version, &CharacterTokenizer).unwrap_err();
 
         assert!(unknown_error.to_string().contains("unknown.json"));
         assert!(format!("{unknown_error:#}").contains("unknown field"));
@@ -544,7 +528,7 @@ mod tests {
             }"#,
         );
 
-        let error = load(&config, &CharacterTokenizer::new()).unwrap_err();
+        let error = load(&config, &CharacterTokenizer).unwrap_err();
         let message = format!("{error:#}");
 
         assert!(message.contains("embeddings.jsonl"));
@@ -583,8 +567,8 @@ mod tests {
             }"#,
         );
 
-        let malformed = load(&malformed_config, &CharacterTokenizer::new()).unwrap_err();
-        let duplicate = load(&duplicate_config, &CharacterTokenizer::new()).unwrap_err();
+        let malformed = load(&malformed_config, &CharacterTokenizer).unwrap_err();
+        let duplicate = load(&duplicate_config, &CharacterTokenizer).unwrap_err();
 
         assert!(format!("{malformed:#}").contains("malformed.jsonl"));
         assert!(format!("{malformed:#}").contains("line 2"));
@@ -623,8 +607,8 @@ mod tests {
             }"#,
         );
 
-        let invalid_token = load(&invalid_token_config, &WhitespaceTokenizer::new()).unwrap_err();
-        let duplicate = load(&duplicate_config, &WhitespaceTokenizer::new()).unwrap_err();
+        let invalid_token = load(&invalid_token_config, &WhitespaceTokenizer).unwrap_err();
+        let duplicate = load(&duplicate_config, &WhitespaceTokenizer).unwrap_err();
 
         assert!(format!("{invalid_token:#}").contains("line 1"));
         assert!(format!("{invalid_token:#}").contains("exactly one complete token"));
@@ -658,8 +642,8 @@ mod tests {
             }"#,
         );
 
-        let negative = load(&negative_config, &CharacterTokenizer::new()).unwrap_err();
-        let extra_field = load(&extra_field_config, &CharacterTokenizer::new()).unwrap_err();
+        let negative = load(&negative_config, &CharacterTokenizer).unwrap_err();
+        let extra_field = load(&extra_field_config, &CharacterTokenizer).unwrap_err();
 
         assert!(format!("{negative:#}").contains("defaults.deletion"));
         assert!(format!("{extra_field:#}").contains("unknown field"));
