@@ -57,11 +57,11 @@ impl PostingsIndexBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnknownCorpusSymbol`] if `symbol` is not present in
+    /// Returns [`Error::UnknownStringSymbol`] if `symbol` is not present in
     /// the configured vocabulary.
     pub fn add_posting(&mut self, symbol: Symbol, posting: Posting) -> Result<()> {
         if symbol.is_unknown() || symbol.as_usize() >= self.symbol_count {
-            return Err(Error::UnknownCorpusSymbol(symbol));
+            return Err(Error::UnknownStringSymbol(symbol));
         }
         self.postings.push((symbol, posting));
         Ok(())
@@ -209,11 +209,11 @@ mod tests {
 
         assert_eq!(
             builder.add_posting(Symbol::new(1), posting),
-            Err(Error::UnknownCorpusSymbol(Symbol::new(1)))
+            Err(Error::UnknownStringSymbol(Symbol::new(1)))
         );
         assert_eq!(
             builder.add_posting(Symbol::UNKNOWN, posting),
-            Err(Error::UnknownCorpusSymbol(Symbol::UNKNOWN))
+            Err(Error::UnknownStringSymbol(Symbol::UNKNOWN))
         );
     }
 

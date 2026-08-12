@@ -38,7 +38,7 @@ impl Display for StringId {
     }
 }
 
-/// A zero-based symbol position.
+/// A zero-based symbol position within a string.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position(u32);

@@ -20,7 +20,7 @@ use crate::types::{StringId, Symbol};
 ///
 /// Candidate anchors select corpus strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
-/// corpus positions, and query positions are validated before verification.
+/// string positions, and query positions are validated before verification.
 pub(super) fn verify<C>(
     query: &[Symbol],
     candidates: &[Candidate],
@@ -95,29 +95,29 @@ where
             previous.push(deletion);
         }
 
-        for (end, corpus_symbol) in string.iter().enumerate().skip(start) {
+        for (end, string_symbol) in string.iter().enumerate().skip(start) {
             // `current[0]` matches an empty query against string[start..=end],
-            // so the newly consumed corpus symbol is an insertion.
+            // so the newly consumed string symbol is an insertion.
             current.clear();
             current.push(add_distance(
                 previous[0],
-                costs.insertion(corpus_symbol).get(),
+                costs.insertion(string_symbol).get(),
             ));
 
             for (query_index, query_symbol) in query.iter().enumerate() {
                 // Extend the DP column for string[start..=end]. The direction is
                 // always query -> corpus substring: substitution consumes both
                 // symbols, deletion consumes only the query symbol, and
-                // insertion consumes only the corpus symbol.
+                // insertion consumes only the string symbol.
                 let substitution = add_distance(
                     previous[query_index],
-                    costs.substitution(query_symbol, corpus_symbol).get(),
+                    costs.substitution(query_symbol, string_symbol).get(),
                 );
                 let deletion =
                     add_distance(current[query_index], costs.deletion(query_symbol).get());
                 let insertion = add_distance(
                     previous[query_index + 1],
-                    costs.insertion(corpus_symbol).get(),
+                    costs.insertion(string_symbol).get(),
                 );
                 current.push(substitution.min(deletion).min(insertion));
             }

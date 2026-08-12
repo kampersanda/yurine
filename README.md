@@ -15,8 +15,8 @@ use yurine::search::range_search::RangeSearchParams;
 fn main() -> Result<()> {
     let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
 
-    let tokyo = builder.add_string(['東', '京'])?;
-    builder.add_string(['京', '都'])?;
+    let tokyo = builder.add_sequence(['東', '京'])?;
+    builder.add_sequence(['京', '都'])?;
 
     let engine = builder.build()?;
     let matches = engine.range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))?;
@@ -34,8 +34,8 @@ to source-text byte ranges. Token types remain generic for in-memory search.
 
 ## Command-line search
 
-The `yurine-cli` package provides the `yurine` binary. It reads one corpus
-string per line from a file or standard input. Searches use unit Levenshtein
+The `yurine-cli` package provides the `yurine` binary. It reads one source text
+per line from a file or standard input. Searches use unit Levenshtein
 costs, character tokenization, and a default threshold of zero. The CLI owns
 the source text and token byte ranges so it can continue to print matched text;
 these are not stored by the Yurine library.

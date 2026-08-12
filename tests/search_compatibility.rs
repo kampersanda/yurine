@@ -29,8 +29,8 @@ impl EditCosts<char> for CompatibilityCosts {
 #[test]
 fn range_search_result_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
-    for string in ["x東京y", "東京", "東亰", "東京東京", "京都"] {
-        builder.add_string(string.chars()).unwrap();
+    for source_text in ["x東京y", "東京", "東亰", "東京東京", "京都"] {
+        builder.add_sequence(source_text.chars()).unwrap();
     }
     let engine = builder.build().unwrap();
 
@@ -77,7 +77,7 @@ fn range_search_result_contract_is_stable() {
 fn repeated_postings_report_candidate_count_without_deduplication() {
     let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
     for _ in 0..128 {
-        builder.add_string("aaaaaaaa".chars()).unwrap();
+        builder.add_sequence("aaaaaaaa".chars()).unwrap();
     }
     let engine = builder.build().unwrap();
 
@@ -92,8 +92,8 @@ fn repeated_postings_report_candidate_count_without_deduplication() {
 #[test]
 fn exhaustive_fallback_result_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
-    builder.add_string(['a']).unwrap();
-    builder.add_string([]).unwrap();
+    builder.add_sequence(['a']).unwrap();
+    builder.add_sequence([]).unwrap();
     let engine = builder.build().unwrap();
 
     let (matches, metrics) = engine
@@ -114,7 +114,7 @@ fn exhaustive_fallback_result_contract_is_stable() {
 #[test]
 fn empty_query_error_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
-    builder.add_string(['a']).unwrap();
+    builder.add_sequence(['a']).unwrap();
     let engine = builder.build().unwrap();
 
     // This intentionally fixes the current error variant. Replacing it with a

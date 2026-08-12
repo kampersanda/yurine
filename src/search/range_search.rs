@@ -107,8 +107,12 @@ where
     /// than the normal filter-and-verify path.
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
-    pub fn range_search(&self, query: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
-        self.range_search_with_metrics(query, params)
+    pub fn range_search(
+        &self,
+        query_sequence: &[T],
+        params: &RangeSearchParams,
+    ) -> Result<Vec<Match>> {
+        self.range_search_with_metrics(query_sequence, params)
             .map(|(matches, _)| matches)
     }
 
@@ -116,10 +120,10 @@ where
     /// performance comparisons.
     pub fn range_search_with_metrics(
         &self,
-        query: &[T],
+        query_sequence: &[T],
         params: &RangeSearchParams,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
-        let query = EncodedQuery::new(query.to_vec(), &self.vocabulary)?;
+        let query = EncodedQuery::new(query_sequence.to_vec(), &self.vocabulary)?;
         let costs = query.costs(&self.vocabulary, &self.costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
@@ -214,7 +218,7 @@ where
         if !string.is_empty() {
             candidates.push(Candidate {
                 string_id,
-                corpus_position: Position::new(0),
+                string_position: Position::new(0),
                 query_position: Position::new(0),
             });
         }
@@ -392,9 +396,9 @@ mod tests {
         embeddings.insert('c', vec![-1.0, 0.0]).unwrap();
 
         let mut builder = SearchEngineBuilder::new(CosineEmbeddingCosts::new(embeddings));
-        builder.add_string(['a', 'b']).unwrap();
-        builder.add_string(['b', 'a']).unwrap();
-        builder.add_string(['a', 'c']).unwrap();
+        builder.add_sequence(['a', 'b']).unwrap();
+        builder.add_sequence(['b', 'a']).unwrap();
+        builder.add_sequence(['a', 'c']).unwrap();
         let engine = builder.build().unwrap();
         let threshold = Cost::new_const(0.5);
         let eta = Cost::new_const(0.25);

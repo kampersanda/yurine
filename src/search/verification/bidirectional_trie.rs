@@ -67,25 +67,25 @@ where
     I: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
-    // Index zero denotes the empty corpus prefix. It must be retained so an
+    // Index zero denotes the empty string prefix. It must be retained so an
     // answer may begin or end exactly at the candidate anchor.
     let mut distances = vec![node.column[query.len()]];
 
-    for corpus_symbol in symbols {
-        // The path label identifies the processed corpus prefix. Following an
+    for string_symbol in symbols {
+        // The path label identifies the processed string prefix. Following an
         // existing edge reuses its complete DP column; a missing edge advances
         // the parent column once and caches the result for later candidates.
         let child_index = node
             .children
             .iter()
-            .position(|(symbol, _)| *symbol == corpus_symbol);
+            .position(|(symbol, _)| *symbol == string_symbol);
 
         let index = match child_index {
             Some(index) => index,
             None => {
-                let column = step_dp(query, corpus_symbol, &node.column, costs);
+                let column = step_dp(query, string_symbol, &node.column, costs);
                 node.children.push((
-                    corpus_symbol,
+                    string_symbol,
                     TrieNode {
                         column,
                         children: Vec::new(),
@@ -136,9 +136,9 @@ where
             .string(candidate.string_id)?
             .ok_or(Error::UnknownString(candidate.string_id))?;
         let query_position = candidate.query_position.as_usize();
-        let corpus_position = candidate.corpus_position.as_usize();
+        let string_position = candidate.string_position.as_usize();
         let anchor_cost = costs
-            .substitution(&query[query_position], &string[corpus_position])
+            .substitution(&query[query_position], &string[string_position])
             .get();
         if anchor_cost >= threshold {
             continue;
@@ -160,8 +160,8 @@ where
         let backward = cached_prefix_distances(
             &directional_query.backward,
             // Distance from the anchor increases while indices decrease,
-            // hence the corpus prefix must be visited in reverse as well.
-            string[..corpus_position].iter().rev().copied(),
+            // hence the string prefix must be visited in reverse as well.
+            string[..string_position].iter().rev().copied(),
             budget,
             backward_root,
             costs,
@@ -175,7 +175,7 @@ where
         };
         let forward = cached_prefix_distances(
             &directional_query.forward,
-            string[corpus_position + 1..].iter().copied(),
+            string[string_position + 1..].iter().copied(),
             budget,
             forward_root,
             costs,
@@ -190,8 +190,8 @@ where
                     forward_distance,
                 );
                 if distance < threshold {
-                    let start = corpus_position - backward_len;
-                    let end = corpus_position + forward_len + 1;
+                    let start = string_position - backward_len;
+                    let end = string_position + forward_len + 1;
                     intervals
                         .entry((candidate.string_id, start, end))
                         .and_modify(|stored| *stored = (*stored).min(distance))

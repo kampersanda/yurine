@@ -160,8 +160,8 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let build_heap_start = reset_heap_peak();
     let build_start = Instant::now();
     let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
-    for string in &corpus {
-        builder.add_string(string.split_whitespace().map(str::to_owned))?;
+    for source_text in &corpus {
+        builder.add_sequence(source_text.split_whitespace().map(str::to_owned))?;
     }
     let engine = builder.build()?;
     let build_elapsed = build_start.elapsed();

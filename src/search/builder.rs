@@ -30,14 +30,14 @@ where
         }
     }
 
-    /// Adds a token sequence as a corpus string and returns its insertion-ordered ID.
+    /// Adds a data sequence and returns the ID reserved for its encoded string.
     ///
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::StringIdOverflow`] if the corpus has
     /// too many corpus strings or [`crate::errors::Error::PositionOverflow`]
     /// if the sequence is too long.
-    pub fn add_string<I>(&mut self, sequence: I) -> Result<StringId>
+    pub fn add_sequence<I>(&mut self, sequence: I) -> Result<StringId>
     where
         I: IntoIterator<Item = T>,
     {
@@ -53,8 +53,8 @@ where
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
-    /// many distinct tokens. Returns [`crate::errors::Error::UnknownCorpusSymbol`]
-    /// if a corpus symbol is not present in the vocabulary.
+    /// many distinct tokens. Returns [`crate::errors::Error::UnknownStringSymbol`]
+    /// if a string symbol is not present in the vocabulary.
     pub fn build(self) -> Result<SearchEngine<T, C>> {
         let Self { costs, sequences } = self;
 
@@ -117,10 +117,19 @@ mod tests {
     fn preserves_insertion_ordered_ids_for_sequences() {
         let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
 
-        assert_eq!(builder.add_string(['東', '京']).unwrap(), StringId::new(0));
-        assert_eq!(builder.add_string([]).unwrap(), StringId::new(1));
-        assert_eq!(builder.add_string(['京', '都']).unwrap(), StringId::new(2));
-        assert_eq!(builder.add_string(['東', '京']).unwrap(), StringId::new(3));
+        assert_eq!(
+            builder.add_sequence(['東', '京']).unwrap(),
+            StringId::new(0)
+        );
+        assert_eq!(builder.add_sequence([]).unwrap(), StringId::new(1));
+        assert_eq!(
+            builder.add_sequence(['京', '都']).unwrap(),
+            StringId::new(2)
+        );
+        assert_eq!(
+            builder.add_sequence(['東', '京']).unwrap(),
+            StringId::new(3)
+        );
 
         let matches = builder
             .build()
@@ -148,7 +157,7 @@ mod tests {
     #[test]
     fn indexes_repeated_tokens_at_each_position() {
         let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
-        builder.add_string(['a', 'a', 'a']).unwrap();
+        builder.add_sequence(['a', 'a', 'a']).unwrap();
 
         let matches = builder
             .build()
@@ -176,7 +185,7 @@ mod tests {
     #[test]
     fn accepts_non_text_token_types() {
         let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
-        builder.add_string([10_u16, 20, 30, 40]).unwrap();
+        builder.add_sequence([10_u16, 20, 30, 40]).unwrap();
 
         let matches = builder
             .build()

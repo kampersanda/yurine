@@ -18,9 +18,9 @@ pub enum Error {
     #[error("symbol exceeds u32")]
     SymbolOverflow,
 
-    /// A corpus contains a symbol that is not present in its vocabulary.
-    #[error("corpus symbol {0} is not present in the vocabulary")]
-    UnknownCorpusSymbol(Symbol),
+    /// A string contains a symbol that is not present in its vocabulary.
+    #[error("string symbol {0} is not present in the vocabulary")]
+    UnknownStringSymbol(Symbol),
 
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]
@@ -69,9 +69,9 @@ pub enum Error {
         query_len: usize,
     },
 
-    /// A candidate corpus position is outside its referenced corpus string.
-    #[error("corpus position {position} is out of bounds for corpus string length {string_len}")]
-    InvalidCorpusPosition {
+    /// A candidate position is outside its referenced string.
+    #[error("string position {position} is out of bounds for string length {string_len}")]
+    InvalidStringPosition {
         /// The zero-based position supplied by the candidate.
         position: Position,
         /// The number of symbols in the referenced corpus string.

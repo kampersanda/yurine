@@ -22,7 +22,7 @@ pub use builder::SearchEngineBuilder;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Candidate {
     string_id: StringId,
-    corpus_position: Position,
+    string_position: Position,
     query_position: Position,
 }
 
@@ -61,7 +61,7 @@ where
     ) -> Result<Self> {
         for symbol in store.alphabet() {
             if vocabulary.token(*symbol).is_none() {
-                return Err(Error::UnknownCorpusSymbol(*symbol));
+                return Err(Error::UnknownStringSymbol(*symbol));
             }
         }
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
@@ -86,7 +86,7 @@ mod tests {
     use crate::vocabulary::VocabularyBuilder;
 
     #[test]
-    fn rejects_corpus_symbol_absent_from_vocabulary() {
+    fn rejects_string_symbol_absent_from_vocabulary() {
         let mut vocabulary_builder = VocabularyBuilder::new();
         vocabulary_builder.insert('a');
         let vocabulary = vocabulary_builder.build().unwrap();
@@ -104,7 +104,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(Error::UnknownCorpusSymbol(symbol)) if symbol == unknown_symbol
+            Err(Error::UnknownStringSymbol(symbol)) if symbol == unknown_symbol
         ));
     }
 }

@@ -60,10 +60,10 @@ fn validated_candidate_string<'a>(
     let string = corpus
         .string(candidate.string_id)?
         .ok_or(Error::UnknownString(candidate.string_id))?;
-    let corpus_position = candidate.corpus_position.as_usize();
-    if corpus_position >= string.len() {
-        return Err(Error::InvalidCorpusPosition {
-            position: candidate.corpus_position,
+    let string_position = candidate.string_position.as_usize();
+    if string_position >= string.len() {
+        return Err(Error::InvalidStringPosition {
+            position: candidate.string_position,
             string_len: string.len(),
         });
     }
@@ -97,7 +97,7 @@ fn add_distance(left: f32, right: f32) -> f32 {
     if residual > 0.0 { f32::INFINITY } else { sum }
 }
 
-/// Initializes the weighted-edit-distance column for an empty corpus-string prefix.
+/// Initializes the weighted-edit-distance column for an empty string prefix.
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
@@ -105,7 +105,7 @@ fn root_column<C>(query: &[Symbol], costs: &C) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
-    // `column[r]` is wed(query[..r], empty). Reaching the empty corpus prefix
+    // `column[r]` is wed(query[..r], empty). Reaching the empty string prefix
     // requires deleting every symbol in the query prefix.
     let mut column = Vec::with_capacity(query.len() + 1);
     column.push(0.0);
@@ -118,32 +118,32 @@ where
     column
 }
 
-/// Advances a weighted-edit-distance column by one corpus symbol.
-fn step_dp<C>(query: &[Symbol], corpus_symbol: Symbol, previous: &[f32], costs: &C) -> Vec<f32>
+/// Advances a weighted-edit-distance column by one string symbol.
+fn step_dp<C>(query: &[Symbol], string_symbol: Symbol, previous: &[f32], costs: &C) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
     debug_assert_eq!(previous.len(), query.len() + 1);
 
-    // If `previous[r]` describes a processed corpus prefix P, `current[r]`
-    // describes P followed by `corpus_symbol`. Row zero therefore inserts the
-    // new corpus symbol into an empty query.
+    // If `previous[r]` describes a processed string prefix P, `current[r]`
+    // describes P followed by `string_symbol`. Row zero therefore inserts the
+    // new string symbol into an empty query.
     let mut current = Vec::with_capacity(query.len() + 1);
     current.push(add_distance(
         previous[0],
-        costs.insertion(&corpus_symbol).get(),
+        costs.insertion(&string_symbol).get(),
     ));
     for (query_index, query_symbol) in query.iter().enumerate() {
-        // The three predecessors consume both symbols, only the corpus symbol,
+        // The three predecessors consume both symbols, only the string symbol,
         // or only the query symbol, respectively. This fixes the direction as
-        // wed(query, corpus prefix).
+        // wed(query, string prefix).
         let substitution = add_distance(
             previous[query_index],
-            costs.substitution(query_symbol, &corpus_symbol).get(),
+            costs.substitution(query_symbol, &string_symbol).get(),
         );
         let insertion = add_distance(
             previous[query_index + 1],
-            costs.insertion(&corpus_symbol).get(),
+            costs.insertion(&string_symbol).get(),
         );
         let deletion = add_distance(current[query_index], costs.deletion(query_symbol).get());
         current.push(substitution.min(insertion).min(deletion));
@@ -188,10 +188,10 @@ mod tests {
         let x = Symbol::new(2);
         let corpus = corpus(vec![a, x, b]);
         let candidates: Vec<_> = (0..3)
-            .flat_map(|corpus_position| {
+            .flat_map(|string_position| {
                 (0..2).map(move |query_position| Candidate {
                     string_id: StringId::new(0),
-                    corpus_position: Position::new(corpus_position),
+                    string_position: Position::new(string_position),
                     query_position: Position::new(query_position),
                 })
             })
@@ -240,12 +240,12 @@ mod tests {
         let duplicate_candidates = [
             Candidate {
                 string_id: StringId::new(0),
-                corpus_position: Position::new(0),
+                string_position: Position::new(0),
                 query_position: Position::new(0),
             },
             Candidate {
                 string_id: StringId::new(0),
-                corpus_position: Position::new(1),
+                string_position: Position::new(1),
                 query_position: Position::new(0),
             },
         ];
@@ -277,7 +277,7 @@ mod tests {
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
             string_id: StringId::new(1),
-            corpus_position: Position::new(0),
+            string_position: Position::new(0),
             query_position: Position::new(0),
         };
 
@@ -296,12 +296,12 @@ mod tests {
     }
 
     #[test]
-    fn verification_rejects_out_of_bounds_corpus_position() {
+    fn verification_rejects_out_of_bounds_string_position() {
         let symbol = Symbol::new(0);
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
             string_id: StringId::new(0),
-            corpus_position: Position::new(1),
+            string_position: Position::new(1),
             query_position: Position::new(0),
         };
 
@@ -315,7 +315,7 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(crate::errors::Error::InvalidCorpusPosition {
+            Err(crate::errors::Error::InvalidStringPosition {
                 position: Position::new(1),
                 string_len: 1,
             })
@@ -328,7 +328,7 @@ mod tests {
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
             string_id: StringId::new(0),
-            corpus_position: Position::new(0),
+            string_position: Position::new(0),
             query_position: Position::new(1),
         };
 

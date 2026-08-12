@@ -19,14 +19,14 @@ mod tokenization;
 use cost_config::RuntimeCosts;
 use tokenization::{CharacterTokenizer, Tokenizer, WhitespaceTokenizer};
 
-/// Search newline-delimited strings with edit distance using Yurine.
+/// Search newline-delimited source texts with edit distance using Yurine.
 #[derive(Debug, Parser, PartialEq)]
 #[command(version)]
 struct Options {
-    /// Query string.
+    /// Query source text.
     query: String,
 
-    /// File containing one string per line; reads standard input if omitted or '-'.
+    /// File containing one source text per line; reads standard input if omitted or '-'.
     corpus: Option<PathBuf>,
 
     /// Maximum edit distance.
@@ -119,15 +119,15 @@ where
         None => RuntimeCosts::levenshtein(),
     };
     let mut builder = SearchEngineBuilder::new(costs);
-    let mut token_ranges = Vec::with_capacity(corpus.len());
+    let mut source_token_ranges = Vec::with_capacity(corpus.len());
     for source_text in corpus {
         let (sequence, ranges): (Vec<_>, Vec<_>) = tokenizer
             .tokenize(source_text)
             .into_iter()
             .map(|token| (token.value, token.byte_range))
             .unzip();
-        builder.add_string(sequence)?;
-        token_ranges.push(ranges);
+        builder.add_sequence(sequence)?;
+        source_token_ranges.push(ranges);
     }
     let engine = builder.build()?;
     let mut params = RangeSearchParams::new(options.threshold);
@@ -142,7 +142,7 @@ where
     let matches = engine.range_search(&query, &params)?;
     Ok(matches
         .into_iter()
-        .map(|matched| locate_match(matched, &token_ranges))
+        .map(|matched| locate_match(matched, &source_token_ranges))
         .collect())
 }
 
@@ -153,15 +153,15 @@ struct LocatedMatch {
     distance: Cost,
 }
 
-fn locate_match(matched: Match, token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
-    // Every corpus line is passed to `add_string` in order, so `StringId`
-    // indexes `token_ranges`. Matches are always non-empty token ranges.
-    let sequence = &token_ranges[matched.string_id.as_usize()];
+fn locate_match(matched: Match, source_token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
+    // Every corpus line is passed to `add_sequence` in order, so `StringId`
+    // indexes `source_token_ranges`. Matches are always non-empty token ranges.
+    let ranges = &source_token_ranges[matched.string_id.as_usize()];
     let start = matched.token_range.start.as_usize();
     let end = matched.token_range.end.as_usize();
     LocatedMatch {
         string_id: matched.string_id,
-        byte_range: sequence[start].start..sequence[end - 1].end,
+        byte_range: ranges[start].start..ranges[end - 1].end,
         distance: matched.distance,
     }
 }
@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_one_string_per_line() {
+    fn reads_one_source_text_per_line() {
         let corpus = read_lines(Cursor::new("東京\r\n京都\n\n")).unwrap();
         assert_eq!(corpus, ["東京", "京都", ""]);
     }

@@ -8,7 +8,7 @@ use crate::errors::{Error, Result};
 use crate::types::Symbol;
 use crate::vocabulary::Vocabulary;
 
-/// A query represented in the corpus symbol space.
+/// A query sequence represented in the vocabulary's symbol space.
 ///
 /// Known tokens use their vocabulary symbols. Query-only tokens use symbols
 /// starting at `vocabulary.len()` and exist only for this search call.
@@ -86,7 +86,7 @@ where
     T: Eq + Hash,
 {
     fn token(&self, symbol: &Symbol) -> &T {
-        // SearchEngine validates that every corpus symbol belongs to the
+        // SearchEngine validates that every string symbol belongs to the
         // vocabulary. A symbol outside it is therefore query-local, and its
         // offset identifies the corresponding entry in `unknown_tokens`.
         self.vocabulary
