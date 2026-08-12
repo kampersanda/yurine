@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, BufRead, BufReader, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -10,22 +11,22 @@ use csv::{Terminator, WriterBuilder};
 use yurine::costs::Cost;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::search::{Match, SearchEngineBuilder};
-use yurine::tokenization::Tokenizer;
-use yurine::tokenization::character::CharacterTokenizer;
-use yurine::tokenization::whitespace::WhitespaceTokenizer;
+use yurine::types::StringId;
 
 mod cost_config;
+mod tokenization;
 
 use cost_config::RuntimeCosts;
+use tokenization::{CharacterTokenizer, Tokenizer, WhitespaceTokenizer};
 
-/// Search newline-delimited strings with edit distance using Yurine.
+/// Search newline-delimited source texts with edit distance using Yurine.
 #[derive(Debug, Parser, PartialEq)]
 #[command(version)]
 struct Options {
-    /// Query string.
+    /// Query source text.
     query: String,
 
-    /// File containing one string per line; reads standard input if omitted or '-'.
+    /// File containing one source text per line; reads standard input if omitted or '-'.
     corpus: Option<PathBuf>,
 
     /// Maximum edit distance.
@@ -65,8 +66,8 @@ fn main() -> ExitCode {
 fn run(options: Options) -> Result<()> {
     let corpus = read_corpus(options.corpus.as_deref())?;
     let matches = match options.tokenizer {
-        TokenizerKind::Character => search(&corpus, &options, CharacterTokenizer::new()),
-        TokenizerKind::Whitespace => search(&corpus, &options, WhitespaceTokenizer::new()),
+        TokenizerKind::Character => search(&corpus, &options, CharacterTokenizer),
+        TokenizerKind::Whitespace => search(&corpus, &options, WhitespaceTokenizer),
     }
     .context("search failed")?;
 
@@ -105,28 +106,71 @@ fn read_lines(reader: impl BufRead) -> io::Result<Vec<String>> {
     reader.lines().collect()
 }
 
-fn search<T>(corpus: &[String], options: &Options, tokenizer: T) -> Result<Vec<Match>>
+fn search<T>(
+    corpus: &[String],
+    options: &Options,
+    tokenizer: impl Tokenizer<Token = T>,
+) -> Result<Vec<LocatedMatch>>
 where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
+    T: Clone + Eq + Hash,
 {
     let costs = match &options.costs {
         Some(path) => cost_config::load(path, &tokenizer)?,
         None => RuntimeCosts::levenshtein(),
     };
-    let mut builder = SearchEngineBuilder::new(tokenizer, costs);
-    for string in corpus {
-        builder.add_string(string)?;
+    let mut builder = SearchEngineBuilder::new(costs);
+    let mut source_token_ranges = Vec::with_capacity(corpus.len());
+    for source_text in corpus {
+        let (sequence, ranges): (Vec<_>, Vec<_>) = tokenizer
+            .tokenize(source_text)
+            .into_iter()
+            .map(|token| (token.value, token.byte_range))
+            .unzip();
+        builder.add_sequence(sequence)?;
+        source_token_ranges.push(ranges);
     }
     let engine = builder.build()?;
     let mut params = RangeSearchParams::new(options.threshold);
     if let Some(eta) = options.eta {
         params = params.with_eta(eta);
     }
-    Ok(engine.range_search(&options.query, &params)?)
+    let query: Vec<_> = tokenizer
+        .tokenize(&options.query)
+        .into_iter()
+        .map(|token| token.value)
+        .collect();
+    let matches = engine.range_search(&query, &params)?;
+    Ok(matches
+        .into_iter()
+        .map(|matched| locate_match(matched, &source_token_ranges))
+        .collect())
 }
 
-fn write_matches(output: impl Write, corpus: &[String], matches: &[Match]) -> csv::Result<()> {
+#[derive(Debug, Clone, PartialEq)]
+struct LocatedMatch {
+    string_id: StringId,
+    byte_range: Range<usize>,
+    distance: Cost,
+}
+
+fn locate_match(matched: Match, source_token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
+    // Every corpus line is passed to `add_sequence` in order, so `StringId`
+    // indexes `source_token_ranges`. Matches are always non-empty token ranges.
+    let ranges = &source_token_ranges[matched.string_id.as_usize()];
+    let start = matched.token_range.start.as_usize();
+    let end = matched.token_range.end.as_usize();
+    LocatedMatch {
+        string_id: matched.string_id,
+        byte_range: ranges[start].start..ranges[end - 1].end,
+        distance: matched.distance,
+    }
+}
+
+fn write_matches(
+    output: impl Write,
+    corpus: &[String],
+    matches: &[LocatedMatch],
+) -> csv::Result<()> {
     let mut writer = WriterBuilder::new()
         .delimiter(b'\t')
         .terminator(Terminator::Any(b'\n'))
@@ -157,12 +201,10 @@ mod tests {
 
     use clap::{CommandFactory, Parser};
     use yurine::costs::Cost;
-    use yurine::search::Match;
-    use yurine::tokenization::character::CharacterTokenizer;
-    use yurine::tokenization::whitespace::WhitespaceTokenizer;
-    use yurine::types::{Position, StringId};
+    use yurine::types::StringId;
 
-    use super::{Options, TokenizerKind, read_lines, search, write_matches};
+    use super::{LocatedMatch, Options, TokenizerKind, read_lines, search, write_matches};
+    use crate::tokenization::{CharacterTokenizer, WhitespaceTokenizer};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -248,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_one_string_per_line() {
+    fn reads_one_source_text_per_line() {
         let corpus = read_lines(Cursor::new("東京\r\n京都\n\n")).unwrap();
         assert_eq!(corpus, ["東京", "京都", ""]);
     }
@@ -265,7 +307,7 @@ mod tests {
             costs: None,
         };
 
-        let matches = search(&corpus, &options, CharacterTokenizer::new()).unwrap();
+        let matches = search(&corpus, &options, CharacterTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].string_id.get(), 0);
         assert_eq!(matches[0].byte_range, 0..6);
@@ -283,7 +325,7 @@ mod tests {
             costs: None,
         };
 
-        let matches = search(&corpus, &options, WhitespaceTokenizer::new()).unwrap();
+        let matches = search(&corpus, &options, WhitespaceTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..8);
     }
@@ -315,7 +357,7 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["あ".to_owned()], &options, CharacterTokenizer::new()).unwrap();
+        let matches = search(&["あ".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
@@ -348,12 +390,7 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(
-            &["color palette".to_owned()],
-            &options,
-            WhitespaceTokenizer::new(),
-        )
-        .unwrap();
+        let matches = search(&["color palette".to_owned()], &options, WhitespaceTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..5);
@@ -384,7 +421,7 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["a".to_owned()], &options, CharacterTokenizer::new()).unwrap();
+        let matches = search(&["a".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..1);
@@ -415,12 +452,7 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(
-            &["color palette".to_owned()],
-            &options,
-            WhitespaceTokenizer::new(),
-        )
-        .unwrap();
+        let matches = search(&["color palette".to_owned()], &options, WhitespaceTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..5);
@@ -430,9 +462,8 @@ mod tests {
     #[test]
     fn csv_writer_quotes_tabs_in_output_fields() {
         let corpus = vec!["a\tb".to_owned()];
-        let matches = vec![Match {
+        let matches = vec![LocatedMatch {
             string_id: StringId::new(0),
-            token_range: Position::new(0)..Position::new(3),
             byte_range: 0..3,
             distance: Cost::ZERO,
         }];

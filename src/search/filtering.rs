@@ -45,7 +45,7 @@ where
             for posting in index.postings(neighbor) {
                 candidates.push(Candidate {
                     string_id: posting.string_id,
-                    data_position: posting.position,
+                    string_position: posting.position,
                     query_position: *selected_position,
                 });
             }
@@ -105,12 +105,12 @@ mod tests {
             [
                 Candidate {
                     string_id: StringId::new(0),
-                    data_position: Position::new(3),
+                    string_position: Position::new(3),
                     query_position: Position::new(1),
                 },
                 Candidate {
                     string_id: StringId::new(1),
-                    data_position: Position::new(2),
+                    string_position: Position::new(2),
                     query_position: Position::new(0),
                 },
             ]

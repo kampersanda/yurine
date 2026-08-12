@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{add_distance, create_match, validated_candidate_data};
+use super::{add_distance, create_match, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
@@ -16,11 +16,11 @@ use crate::types::{StringId, Symbol};
 /// implementation therefore uses `O(n^2 m)` time and `O(m)` DP working space,
 /// as described in `docs/development/smith-waterman-verification.md`. It
 /// additionally uses `O(u)` space to deduplicate the `u` candidate-referenced
-/// data strings.
+/// corpus strings.
 ///
 /// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
-/// data positions, and query positions are validated before verification.
+/// string positions, and query positions are validated before verification.
 pub(super) fn verify<C>(
     query: &[Symbol],
     candidates: &[Candidate],
@@ -36,18 +36,10 @@ where
     let mut matches = Vec::new();
 
     for string_id in string_ids {
-        let data = corpus
+        let string = corpus
             .string(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
-        enumerate_matches(
-            query,
-            data,
-            corpus,
-            string_id,
-            threshold,
-            costs,
-            &mut matches,
-        )?;
+        enumerate_matches(query, string, string_id, threshold, costs, &mut matches)?;
     }
 
     Ok(matches)
@@ -62,18 +54,17 @@ fn validated_candidate_strings(
 ) -> Result<BTreeSet<StringId>> {
     let mut string_ids = BTreeSet::new();
     for candidate in candidates {
-        validated_candidate_data(query, candidate, corpus)?;
+        validated_candidate_string(query, candidate, corpus)?;
         string_ids.insert(candidate.string_id);
     }
     Ok(string_ids)
 }
 
-/// Enumerates every non-empty substring of `data` whose distance from `query` is
+/// Enumerates every non-empty substring of `string` whose distance from `query` is
 /// strictly less than `threshold`. Each match is pushed to `matches`.
 fn enumerate_matches<C>(
     query: &[Symbol],
-    data: &[Symbol],
-    corpus: &CorpusStore,
+    string: &[Symbol],
     string_id: StringId,
     threshold: Cost,
     costs: &C,
@@ -90,10 +81,10 @@ where
     // Fix the substring start so that each non-empty interval is considered
     // exactly once. Starts and ends increase monotonically, which also gives
     // deterministic range ordering within a data string.
-    for start in 0..data.len() {
-        // `previous[i]` is wed(query[..i], data[start..end)), where the data
+    for start in 0..string.len() {
+        // `previous[i]` is wed(query[..i], string[start..end)), where the corpus
         // prefix is initially empty. Matching a query prefix against an empty
-        // data string deletes every query symbol.
+        // corpus string deletes every query symbol.
         previous.clear();
         previous.push(0.0);
         for query_symbol in query {
@@ -104,40 +95,39 @@ where
             previous.push(deletion);
         }
 
-        for (end, data_symbol) in data.iter().enumerate().skip(start) {
-            // `current[0]` matches an empty query against data[start..=end],
-            // so the newly consumed data symbol is an insertion.
+        for (end, string_symbol) in string.iter().enumerate().skip(start) {
+            // `current[0]` matches an empty query against string[start..=end],
+            // so the newly consumed string symbol is an insertion.
             current.clear();
             current.push(add_distance(
                 previous[0],
-                costs.insertion(data_symbol).get(),
+                costs.insertion(string_symbol).get(),
             ));
 
             for (query_index, query_symbol) in query.iter().enumerate() {
-                // Extend the DP column for data[start..=end]. The direction is
+                // Extend the DP column for string[start..=end]. The direction is
                 // always query -> data substring: substitution consumes both
                 // symbols, deletion consumes only the query symbol, and
-                // insertion consumes only the data symbol.
+                // insertion consumes only the string symbol.
                 let substitution = add_distance(
                     previous[query_index],
-                    costs.substitution(query_symbol, data_symbol).get(),
+                    costs.substitution(query_symbol, string_symbol).get(),
                 );
                 let deletion =
                     add_distance(current[query_index], costs.deletion(query_symbol).get());
                 let insertion = add_distance(
                     previous[query_index + 1],
-                    costs.insertion(data_symbol).get(),
+                    costs.insertion(string_symbol).get(),
                 );
                 current.push(substitution.min(deletion).min(insertion));
             }
 
-            // The final cell is wed(query, data[start..=end]). Convert the
+            // The final cell is wed(query, string[start..=end]). Convert the
             // inclusive `end` used by this loop to the public end-exclusive
             // range. The internal threshold is the strict upper bound
             // immediately above the public inclusive threshold.
             if current[query.len()] < threshold {
                 matches.push(create_match(
-                    corpus,
                     string_id,
                     start,
                     end + 1,

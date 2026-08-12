@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{add_distance, create_match, root_column, step_dp, validated_candidate_data};
+use super::{add_distance, create_match, root_column, step_dp, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
@@ -14,7 +14,7 @@ struct TrieNode {
     // through this node. A child therefore needs exactly one `step_dp` call.
     column: Vec<f32>,
     // Labels are owned so a disk-backed store may release each decoded
-    // document after processing one candidate.
+    // data string after processing one candidate.
     children: Vec<(Symbol, TrieNode)>,
 }
 
@@ -40,8 +40,8 @@ struct TrieForest {
 }
 
 struct DirectionalQueries {
-    // The backward data iterator is also reversed below. Reversing both sides
-    // preserves wed(query, data), including asymmetric insertion/deletion.
+    // The backward corpus iterator is also reversed below. Reversing both sides
+    // preserves wed(query, corpus string), including asymmetric insertion/deletion.
     backward: Vec<Symbol>,
     forward: Vec<Symbol>,
 }
@@ -57,7 +57,7 @@ impl DirectionalQueries {
 
 fn cached_prefix_distances<C, I>(
     query: &[Symbol],
-    data: I,
+    symbols: I,
     budget: f32,
     root: &mut TrieNode,
     costs: &C,
@@ -67,25 +67,25 @@ where
     I: IntoIterator<Item = Symbol>,
 {
     let mut node = root;
-    // Index zero denotes the empty data prefix. It must be retained so an
+    // Index zero denotes the empty string prefix. It must be retained so an
     // answer may begin or end exactly at the candidate anchor.
     let mut distances = vec![node.column[query.len()]];
 
-    for data_symbol in data {
-        // The path label identifies the processed data prefix. Following an
+    for string_symbol in symbols {
+        // The path label identifies the processed string prefix. Following an
         // existing edge reuses its complete DP column; a missing edge advances
         // the parent column once and caches the result for later candidates.
         let child_index = node
             .children
             .iter()
-            .position(|(symbol, _)| *symbol == data_symbol);
+            .position(|(symbol, _)| *symbol == string_symbol);
 
         let index = match child_index {
             Some(index) => index,
             None => {
-                let column = step_dp(query, data_symbol, &node.column, costs);
+                let column = step_dp(query, string_symbol, &node.column, costs);
                 node.children.push((
-                    data_symbol,
+                    string_symbol,
                     TrieNode {
                         column,
                         children: Vec::new(),
@@ -120,7 +120,7 @@ where
 {
     let threshold = threshold.next_up()?;
     for candidate in candidates {
-        validated_candidate_data(query, candidate, corpus)?;
+        validated_candidate_string(query, candidate, corpus)?;
     }
 
     // Both caches are call-local deliberately: a DP column depends on this
@@ -132,13 +132,13 @@ where
     for candidate in candidates {
         // Candidates were validated before cache construction, so an
         // error cannot leave misleading partial statistics behind.
-        let data = corpus
+        let string = corpus
             .string(candidate.string_id)?
             .ok_or(Error::UnknownString(candidate.string_id))?;
         let query_position = candidate.query_position.as_usize();
-        let data_position = candidate.data_position.as_usize();
+        let string_position = candidate.string_position.as_usize();
         let anchor_cost = costs
-            .substitution(&query[query_position], &data[data_position])
+            .substitution(&query[query_position], &string[string_position])
             .get();
         if anchor_cost >= threshold {
             continue;
@@ -160,8 +160,8 @@ where
         let backward = cached_prefix_distances(
             &directional_query.backward,
             // Distance from the anchor increases while indices decrease,
-            // hence the data prefix must be visited in reverse as well.
-            data[..data_position].iter().rev().copied(),
+            // hence the string prefix must be visited in reverse as well.
+            string[..string_position].iter().rev().copied(),
             budget,
             backward_root,
             costs,
@@ -175,7 +175,7 @@ where
         };
         let forward = cached_prefix_distances(
             &directional_query.forward,
-            data[data_position + 1..].iter().copied(),
+            string[string_position + 1..].iter().copied(),
             budget,
             forward_root,
             costs,
@@ -190,8 +190,8 @@ where
                     forward_distance,
                 );
                 if distance < threshold {
-                    let start = data_position - backward_len;
-                    let end = data_position + forward_len + 1;
+                    let start = string_position - backward_len;
+                    let end = string_position + forward_len + 1;
                     intervals
                         .entry((candidate.string_id, start, end))
                         .and_modify(|stored| *stored = (*stored).min(distance))
@@ -204,7 +204,7 @@ where
     let matches = intervals
         .into_iter()
         .map(|((string_id, start, end), distance)| {
-            create_match(corpus, string_id, start, end, Cost::new(distance)?)
+            create_match(string_id, start, end, Cost::new(distance)?)
         })
         .collect::<Result<Vec<_>>>()?;
 

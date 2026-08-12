@@ -11,31 +11,34 @@ use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::errors::Result;
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
-use yurine::tokenization::character::CharacterTokenizer;
 
 fn main() -> Result<()> {
-    let mut builder = SearchEngineBuilder::new(
-        CharacterTokenizer::new(),
-        LevenshteinCosts::new(),
-    );
+    let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
 
-    let tokyo = builder.add_string("東京")?;
-    builder.add_string("京都")?;
+    let tokyo = builder.add_sequence(['東', '京'])?;
+    builder.add_sequence(['京', '都'])?;
 
     let engine = builder.build()?;
-    let matches = engine.range_search("東京", &RangeSearchParams::new(Cost::ZERO))?;
+    let matches = engine.range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))?;
 
     assert_eq!(matches[0].string_id, tokyo);
-    assert_eq!(matches[0].byte_range, 0..6);
+    assert_eq!(matches[0].token_range.start.get(), 0);
+    assert_eq!(matches[0].token_range.end.get(), 2);
     Ok(())
 }
 ```
 
+Yurine accepts token sequences and encodes them as internal symbol strings.
+Callers own source text, tokenization, and conversion from returned token ranges
+to source-text byte ranges. Token types remain generic for in-memory search.
+
 ## Command-line search
 
-The `yurine-cli` package provides the `yurine` binary. It reads one corpus
-string per line from a file or standard input. Searches use unit Levenshtein
-costs, character tokenization, and a default threshold of zero.
+The `yurine-cli` package provides the `yurine` binary. It reads one source text
+per line from a file or standard input. Searches use unit Levenshtein
+costs, character tokenization, and a default threshold of zero. The CLI owns
+the source text and token byte ranges so it can continue to print matched text;
+these are not stored by the Yurine library.
 
 Results are headerless, tab-delimited CSV records containing the string ID,
 distance, byte start, byte end, and matched text. CSV quoting applies when
@@ -64,7 +67,7 @@ Use `--costs` to load an edit-cost policy from JSON. Without this option,
 searches continue to use unit Levenshtein costs.
 
 The following configuration loads static token embeddings from a JSON Lines
-file. Relative data paths are resolved from the directory containing the
+file. Relative resource paths are resolved from the directory containing the
 configuration file.
 
 ```json
@@ -137,7 +140,7 @@ $ cargo run -p yurine-cli -- \
 
 Run `cargo run -p yurine-cli -- --help` for the complete command-line reference.
 
-## Preparing embedding-search data
+## Preparing embedding-search inputs
 
 The uv project in [`tools/`](tools/) converts word2vec text embeddings to
 Yurine JSON Lines and normalizes and tokenizes corpora and queries. Its default

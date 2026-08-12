@@ -3,6 +3,5 @@ pub mod errors;
 pub mod postings;
 pub mod search;
 pub mod store;
-pub mod tokenization;
 pub mod types;
 pub mod vocabulary;

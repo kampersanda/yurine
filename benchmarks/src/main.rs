@@ -12,7 +12,6 @@ use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
-use yurine::tokenization::whitespace::WhitespaceTokenizer;
 use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY, write_corpus};
 
 struct TrackingAllocator;
@@ -160,9 +159,9 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
 
     let build_heap_start = reset_heap_peak();
     let build_start = Instant::now();
-    let mut builder = SearchEngineBuilder::new(WhitespaceTokenizer::new(), LevenshteinCosts::new());
-    for string in &corpus {
-        builder.add_string(string)?;
+    let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+    for source_text in &corpus {
+        builder.add_sequence(source_text.split_whitespace().map(str::to_owned))?;
     }
     let engine = builder.build()?;
     let build_elapsed = build_start.elapsed();
@@ -178,7 +177,12 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let cold_heap_start = reset_heap_peak();
     let engine_resident_heap = cold_heap_start;
     let cold_start = Instant::now();
-    let (cold_matches, metrics) = engine.range_search_with_metrics(&options.query, &params)?;
+    let query: Vec<_> = options
+        .query
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    let (cold_matches, metrics) = engine.range_search_with_metrics(&query, &params)?;
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
@@ -190,7 +194,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let mut warm_matches = 0usize;
     for _ in 0..warm_runs {
         let start = Instant::now();
-        let matches = engine.range_search(&options.query, &params)?;
+        let matches = engine.range_search(&query, &params)?;
         warm_elapsed += start.elapsed();
         warm_matches = matches.len();
     }

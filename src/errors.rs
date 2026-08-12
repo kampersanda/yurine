@@ -14,17 +14,13 @@ pub enum Error {
     #[error("position exceeds u32")]
     PositionOverflow,
 
-    /// A UTF-8 byte offset in a single string is too large for `u32`.
-    #[error("byte offset exceeds u32")]
-    ByteOffsetOverflow,
-
     /// A vocabulary contains too many tokens for a `u32` symbol.
     #[error("symbol exceeds u32")]
     SymbolOverflow,
 
-    /// A corpus contains a symbol that is not present in its vocabulary.
-    #[error("corpus symbol {0} is not present in the vocabulary")]
-    UnknownCorpusSymbol(Symbol),
+    /// A string contains a symbol that is not present in its vocabulary.
+    #[error("string symbol {0} is not present in the vocabulary")]
+    UnknownStringSymbol(Symbol),
 
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]
@@ -73,13 +69,13 @@ pub enum Error {
         query_len: usize,
     },
 
-    /// A candidate data position is outside its referenced string.
-    #[error("data position {position} is out of bounds for data string length {data_len}")]
-    InvalidDataPosition {
+    /// A candidate position is outside its referenced string.
+    #[error("string position {position} is out of bounds for string length {string_len}")]
+    InvalidStringPosition {
         /// The zero-based position supplied by the candidate.
         position: Position,
-        /// The number of symbols in the referenced data string.
-        data_len: usize,
+        /// The number of symbols in the referenced string.
+        string_len: usize,
     },
 
     /// A candidate refers to a string that is not present in the corpus.

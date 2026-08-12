@@ -11,7 +11,6 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
-use crate::tokenization::Tokenizer;
 use crate::types::{Position, StringId};
 use crate::vocabulary::Vocabulary;
 
@@ -23,7 +22,7 @@ pub use builder::SearchEngineBuilder;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Candidate {
     string_id: StringId,
-    data_position: Position,
+    string_position: Position,
     query_position: Position,
 }
 
@@ -34,11 +33,6 @@ pub struct Match {
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
     pub token_range: Range<Position>,
-    /// The matched zero-based, end-exclusive UTF-8 byte range in the original string.
-    ///
-    /// This range can be used to slice the string passed to
-    /// [`SearchEngineBuilder::add_string`].
-    pub byte_range: Range<usize>,
     /// The weighted edit distance from the query to the substring.
     pub distance: Cost,
 }
@@ -46,12 +40,8 @@ pub struct Match {
 /// Coordinates threshold-subsequence filtering and exact verification.
 ///
 /// Create an engine with [`SearchEngineBuilder`].
-pub struct SearchEngine<T, C>
-where
-    T: Tokenizer,
-{
-    tokenizer: T,
-    vocabulary: Vocabulary<T::Token>,
+pub struct SearchEngine<T, C> {
+    vocabulary: Vocabulary<T>,
     costs: C,
     index: PostingsIndex,
     store: CorpusStore,
@@ -60,25 +50,22 @@ where
 
 impl<T, C> SearchEngine<T, C>
 where
-    T: Tokenizer,
-    T::Token: Clone + Eq + Hash,
-    C: EditCosts<T::Token>,
+    T: Clone + Eq + Hash,
+    C: EditCosts<T>,
 {
     pub(crate) fn from_parts(
-        tokenizer: T,
-        vocabulary: Vocabulary<T::Token>,
+        vocabulary: Vocabulary<T>,
         costs: C,
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {
         for symbol in store.alphabet() {
             if vocabulary.token(*symbol).is_none() {
-                return Err(Error::UnknownCorpusSymbol(*symbol));
+                return Err(Error::UnknownStringSymbol(*symbol));
             }
         }
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
         Ok(Self {
-            tokenizer,
             vocabulary,
             costs,
             index,
@@ -95,24 +82,20 @@ mod tests {
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::store::CorpusStoreBuilder;
-    use crate::tokenization::character::CharacterTokenizer;
     use crate::types::Symbol;
     use crate::vocabulary::VocabularyBuilder;
 
     #[test]
-    fn rejects_corpus_symbol_absent_from_vocabulary() {
+    fn rejects_string_symbol_absent_from_vocabulary() {
         let mut vocabulary_builder = VocabularyBuilder::new();
         vocabulary_builder.insert('a');
         let vocabulary = vocabulary_builder.build().unwrap();
         let unknown_symbol = Symbol::new(1);
 
         let mut store_builder = CorpusStoreBuilder::new();
-        store_builder
-            .add_string(vec![unknown_symbol], std::iter::once(0..1).collect())
-            .unwrap();
+        store_builder.add_string(vec![unknown_symbol]);
 
         let result = SearchEngine::from_parts(
-            CharacterTokenizer::new(),
             vocabulary,
             LevenshteinCosts::new(),
             PostingsIndexBuilder::new(1).build(),
@@ -121,7 +104,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(Error::UnknownCorpusSymbol(symbol)) if symbol == unknown_symbol
+            Err(Error::UnknownStringSymbol(symbol)) if symbol == unknown_symbol
         ));
     }
 }
