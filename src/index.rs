@@ -1,9 +1,9 @@
 //! Portable on-disk index writing and complete verification.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fs;
+use std::fs::{self, File};
 use std::hash::Hash;
-use std::io;
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -30,16 +30,77 @@ const POSTING_OFFSETS: &str = "posting_offsets.u64";
 const VOCABULARY: &str = "vocabulary.utf8";
 const VOCABULARY_OFFSETS: &str = "vocabulary_offsets.u64";
 
-const FILE_NAMES: [&str; 9] = [
-    STRINGS,
-    STRING_BYTE_OFFSETS,
-    SYMBOLS,
-    STRING_SYMBOL_OFFSETS,
-    BYTE_RANGES,
-    POSTINGS,
-    POSTING_OFFSETS,
-    VOCABULARY,
-    VOCABULARY_OFFSETS,
+#[derive(Clone, Copy)]
+enum ElementCount {
+    Bytes,
+    StringsPlusOne,
+    Tokens,
+    VocabularyPlusOne,
+}
+
+#[derive(Clone, Copy)]
+struct FileLayout {
+    name: &'static str,
+    element_type: &'static str,
+    width: u64,
+    elements: ElementCount,
+}
+
+const LAYOUT: [FileLayout; 9] = [
+    FileLayout {
+        name: STRINGS,
+        element_type: "u8",
+        width: 1,
+        elements: ElementCount::Bytes,
+    },
+    FileLayout {
+        name: STRING_BYTE_OFFSETS,
+        element_type: "u64",
+        width: 8,
+        elements: ElementCount::StringsPlusOne,
+    },
+    FileLayout {
+        name: SYMBOLS,
+        element_type: "u32",
+        width: 4,
+        elements: ElementCount::Tokens,
+    },
+    FileLayout {
+        name: STRING_SYMBOL_OFFSETS,
+        element_type: "u64",
+        width: 8,
+        elements: ElementCount::StringsPlusOne,
+    },
+    FileLayout {
+        name: BYTE_RANGES,
+        element_type: "u32x2",
+        width: 8,
+        elements: ElementCount::Tokens,
+    },
+    FileLayout {
+        name: POSTINGS,
+        element_type: "u32x2",
+        width: 8,
+        elements: ElementCount::Tokens,
+    },
+    FileLayout {
+        name: POSTING_OFFSETS,
+        element_type: "u64",
+        width: 8,
+        elements: ElementCount::VocabularyPlusOne,
+    },
+    FileLayout {
+        name: VOCABULARY,
+        element_type: "u8",
+        width: 1,
+        elements: ElementCount::Bytes,
+    },
+    FileLayout {
+        name: VOCABULARY_OFFSETS,
+        element_type: "u64",
+        width: 8,
+        elements: ElementCount::VocabularyPlusOne,
+    },
 ];
 
 /// The versioned metadata stored in `manifest.json`.
@@ -154,64 +215,113 @@ where
     }
 
     let (vocabulary, index, store) = engine.index_parts();
-    let mut files = BTreeMap::new();
-    files.insert(STRINGS.to_owned(), store.strings().to_vec());
-    files.insert(
-        STRING_BYTE_OFFSETS.to_owned(),
-        encode_u64(store.string_byte_offsets().iter().copied()),
-    );
-    files.insert(
-        SYMBOLS.to_owned(),
-        encode_u32(store.symbols().iter().map(|symbol| symbol.get())),
-    );
-    files.insert(
-        STRING_SYMBOL_OFFSETS.to_owned(),
-        encode_u64(store.string_offsets().iter().copied()),
-    );
-    files.insert(
-        BYTE_RANGES.to_owned(),
-        encode_pairs(
-            store
-                .byte_ranges()
-                .iter()
-                .map(|range| (range.start().get(), range.end().get())),
-        ),
-    );
-    files.insert(
-        POSTINGS.to_owned(),
-        encode_pairs(
-            index
-                .raw_postings()
-                .iter()
-                .map(|posting| (posting.string_id.get(), posting.position.get())),
-        ),
-    );
-    files.insert(
-        POSTING_OFFSETS.to_owned(),
-        encode_u64(index.posting_offsets().iter().copied()),
-    );
-
-    let mut vocabulary_bytes = Vec::new();
-    let mut vocabulary_offsets = vec![0u64];
-    for token in vocabulary.tokens() {
-        vocabulary_bytes.extend_from_slice(token_text(token).as_bytes());
-        vocabulary_offsets.push(vocabulary_bytes.len() as u64);
-    }
-    files.insert(VOCABULARY.to_owned(), vocabulary_bytes);
-    files.insert(
-        VOCABULARY_OFFSETS.to_owned(),
-        encode_u64(vocabulary_offsets),
-    );
-
     let counts = IndexCounts {
         strings: store.len() as u64,
         tokens: store.symbols().len() as u64,
         vocabulary: vocabulary.len() as u64,
     };
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let staging = tempfile::Builder::new()
+        .prefix(".yurine-index-")
+        .tempdir_in(parent)
+        .map_err(|source| file_io(parent, source))?;
+
     let mut file_manifests = BTreeMap::new();
-    for (name, bytes) in &files {
-        file_manifests.insert(name.clone(), describe_file(name, bytes, counts));
-    }
+    file_manifests.insert(
+        STRINGS.to_owned(),
+        write_data_file(
+            staging.path(),
+            STRINGS,
+            store.strings().len() as u64,
+            |writer| writer.write_all(store.strings()),
+        )?,
+    );
+    file_manifests.insert(
+        STRING_BYTE_OFFSETS.to_owned(),
+        write_u64_file(
+            staging.path(),
+            STRING_BYTE_OFFSETS,
+            store.string_byte_offsets().iter().copied(),
+        )?,
+    );
+    file_manifests.insert(
+        SYMBOLS.to_owned(),
+        write_u32_file(
+            staging.path(),
+            SYMBOLS,
+            store.symbols().iter().map(|symbol| symbol.get()),
+        )?,
+    );
+    file_manifests.insert(
+        STRING_SYMBOL_OFFSETS.to_owned(),
+        write_u64_file(
+            staging.path(),
+            STRING_SYMBOL_OFFSETS,
+            store.string_offsets().iter().copied(),
+        )?,
+    );
+    file_manifests.insert(
+        BYTE_RANGES.to_owned(),
+        write_pairs_file(
+            staging.path(),
+            BYTE_RANGES,
+            store
+                .byte_ranges()
+                .iter()
+                .map(|range| (range.start().get(), range.end().get())),
+        )?,
+    );
+    file_manifests.insert(
+        POSTINGS.to_owned(),
+        write_pairs_file(
+            staging.path(),
+            POSTINGS,
+            index
+                .raw_postings()
+                .iter()
+                .map(|posting| (posting.string_id.get(), posting.position.get())),
+        )?,
+    );
+    file_manifests.insert(
+        POSTING_OFFSETS.to_owned(),
+        write_u64_file(
+            staging.path(),
+            POSTING_OFFSETS,
+            index.posting_offsets().iter().copied(),
+        )?,
+    );
+
+    file_manifests.insert(
+        VOCABULARY.to_owned(),
+        write_data_file(staging.path(), VOCABULARY, 0, |writer| {
+            for token in vocabulary.tokens() {
+                let token = token_text(token);
+                writer.write_all(token.as_bytes())?;
+            }
+            Ok(())
+        })?,
+    );
+    file_manifests.insert(
+        VOCABULARY_OFFSETS.to_owned(),
+        write_data_file(
+            staging.path(),
+            VOCABULARY_OFFSETS,
+            counts.vocabulary + 1,
+            |writer| {
+                writer.write_all(&0u64.to_le_bytes())?;
+                let mut offset = 0u64;
+                for token in vocabulary.tokens() {
+                    offset += token_text(token).len() as u64;
+                    writer.write_all(&offset.to_le_bytes())?;
+                }
+                Ok(())
+            },
+        )?,
+    );
+
     let manifest = IndexManifest {
         format: FORMAT.to_owned(),
         version: VERSION,
@@ -227,24 +337,15 @@ where
         files: file_manifests,
     };
 
-    let parent = output
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let staging = tempfile::Builder::new()
-        .prefix(".yurine-index-")
-        .tempdir_in(parent)
-        .map_err(|source| file_io(parent, source))?;
-    for (name, bytes) in files {
-        write_file(&staging.path().join(name), &bytes)?;
-    }
     let mut manifest_bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|error| IndexError::InvalidManifest(error.to_string()))?;
     manifest_bytes.push(b'\n');
-    write_file(&staging.path().join("manifest.json"), &manifest_bytes)?;
+    write_synced_file(&staging.path().join("manifest.json"), &manifest_bytes)?;
 
     let verified = verify_index(staging.path())?;
+    sync_directory(staging.path())?;
     fs::rename(staging.path(), output).map_err(|source| file_io(output, source))?;
+    sync_directory(parent)?;
     Ok(verified)
 }
 
@@ -255,17 +356,17 @@ pub fn verify_index(directory: impl AsRef<Path>) -> Result<IndexManifest, IndexE
     let manifest_bytes = read_file(&manifest_path)?;
     let manifest: IndexManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| IndexError::InvalidManifest(error.to_string()))?;
-    validate_manifest(&manifest)?;
+    let tokenizer = validate_manifest(&manifest)?;
 
     let mut files = BTreeMap::new();
-    for name in FILE_NAMES {
-        let metadata = &manifest.files[name];
-        validate_file_metadata(name, metadata, counts(&manifest))?;
-        let bytes = read_file(&directory.join(name))?;
+    for layout in LAYOUT {
+        let metadata = &manifest.files[layout.name];
+        validate_file_metadata(layout, metadata, counts(&manifest))?;
+        let bytes = read_file(&directory.join(layout.name))?;
         let actual_bytes = bytes.len() as u64;
         if actual_bytes != metadata.bytes {
             return Err(IndexError::FileLength {
-                file: name.to_owned(),
+                file: layout.name.to_owned(),
                 expected: metadata.bytes,
                 actual: actual_bytes,
             });
@@ -273,19 +374,25 @@ pub fn verify_index(directory: impl AsRef<Path>) -> Result<IndexManifest, IndexE
         let actual_checksum = checksum(&bytes);
         if actual_checksum != metadata.sha256 {
             return Err(IndexError::ChecksumMismatch {
-                file: name.to_owned(),
+                file: layout.name.to_owned(),
                 expected: metadata.sha256.clone(),
                 actual: actual_checksum,
             });
         }
-        files.insert(name, bytes);
+        files.insert(layout.name, bytes);
     }
 
-    verify_data(&manifest, &files)?;
+    verify_data(&manifest, tokenizer, &files)?;
     Ok(manifest)
 }
 
-fn validate_manifest(manifest: &IndexManifest) -> Result<(), IndexError> {
+#[derive(Clone, Copy)]
+enum TokenizerKind {
+    Character,
+    Whitespace,
+}
+
+fn validate_manifest(manifest: &IndexManifest) -> Result<TokenizerKind, IndexError> {
     if manifest.format != FORMAT {
         return Err(IndexError::UnsupportedFormat(manifest.format.clone()));
     }
@@ -302,62 +409,60 @@ fn validate_manifest(manifest: &IndexManifest) -> Result<(), IndexError> {
             manifest.byte_offsets.clone(),
         ));
     }
-    if manifest.tokenizer.version != 1
-        || !matches!(
-            manifest.tokenizer.r#type.as_str(),
-            "character" | "whitespace"
-        )
-    {
-        return Err(IndexError::UnsupportedTokenizer {
-            kind: manifest.tokenizer.r#type.clone(),
-            version: manifest.tokenizer.version,
-        });
-    }
-    for name in FILE_NAMES {
-        if !manifest.files.contains_key(name) {
-            return Err(IndexError::MissingFileMetadata(name.to_owned()));
+    let tokenizer = match (
+        manifest.tokenizer.r#type.as_str(),
+        manifest.tokenizer.version,
+    ) {
+        ("character", 1) => TokenizerKind::Character,
+        ("whitespace", 1) => TokenizerKind::Whitespace,
+        _ => {
+            return Err(IndexError::UnsupportedTokenizer {
+                kind: manifest.tokenizer.r#type.clone(),
+                version: manifest.tokenizer.version,
+            });
+        }
+    };
+    for layout in LAYOUT {
+        if !manifest.files.contains_key(layout.name) {
+            return Err(IndexError::MissingFileMetadata(layout.name.to_owned()));
         }
     }
     if let Some(name) = manifest
         .files
         .keys()
-        .find(|name| !FILE_NAMES.contains(&name.as_str()))
+        .find(|name| !LAYOUT.iter().any(|layout| layout.name == name.as_str()))
     {
         return Err(IndexError::UnexpectedFileMetadata(name.clone()));
     }
-    Ok(())
+    Ok(tokenizer)
 }
 
 fn validate_file_metadata(
-    name: &str,
+    layout: FileLayout,
     metadata: &FileManifest,
     counts: IndexCounts,
 ) -> Result<(), IndexError> {
-    let string_offsets = counts
-        .strings
-        .checked_add(1)
-        .ok_or_else(|| invalid_error("manifest.json", "string count overflows u64"))?;
-    let vocabulary_offsets = counts
-        .vocabulary
-        .checked_add(1)
-        .ok_or_else(|| invalid_error("manifest.json", "vocabulary count overflows u64"))?;
-    let (element_type, elements, width) = match name {
-        STRINGS | VOCABULARY => ("u8", metadata.bytes, 1),
-        STRING_BYTE_OFFSETS => ("u64", string_offsets, 8),
-        SYMBOLS => ("u32", counts.tokens, 4),
-        STRING_SYMBOL_OFFSETS => ("u64", string_offsets, 8),
-        BYTE_RANGES => ("u32x2", counts.tokens, 8),
-        POSTINGS => ("u32x2", counts.tokens, 8),
-        POSTING_OFFSETS => ("u64", vocabulary_offsets, 8),
-        VOCABULARY_OFFSETS => ("u64", vocabulary_offsets, 8),
-        _ => unreachable!(),
+    let elements = match layout.elements {
+        ElementCount::Bytes => metadata.bytes,
+        ElementCount::StringsPlusOne => counts
+            .strings
+            .checked_add(1)
+            .ok_or_else(|| invalid_error("manifest.json", "string count is too large"))?,
+        ElementCount::Tokens => counts.tokens,
+        ElementCount::VocabularyPlusOne => counts
+            .vocabulary
+            .checked_add(1)
+            .ok_or_else(|| invalid_error("manifest.json", "vocabulary count is too large"))?,
     };
-    if metadata.element_type != element_type {
-        return invalid(name, format!("element type must be {element_type}"));
+    if metadata.element_type != layout.element_type {
+        return invalid(
+            layout.name,
+            format!("element type must be {}", layout.element_type),
+        );
     }
     if metadata.elements != elements {
         return invalid(
-            name,
+            layout.name,
             format!(
                 "element count is {}; expected {elements}",
                 metadata.elements
@@ -365,11 +470,11 @@ fn validate_file_metadata(
         );
     }
     let expected_bytes = elements
-        .checked_mul(width)
-        .ok_or_else(|| invalid_error(name, "byte length overflows u64"))?;
+        .checked_mul(layout.width)
+        .ok_or_else(|| invalid_error(layout.name, "byte length overflows u64"))?;
     if metadata.bytes != expected_bytes {
         return invalid(
-            name,
+            layout.name,
             format!(
                 "manifest byte length is {}; expected {expected_bytes}",
                 metadata.bytes
@@ -378,13 +483,14 @@ fn validate_file_metadata(
     }
     if metadata.sha256.len() != 64 || !metadata.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        return invalid(name, "SHA-256 must contain 64 hexadecimal digits");
+        return invalid(layout.name, "SHA-256 must contain 64 hexadecimal digits");
     }
     Ok(())
 }
 
 fn verify_data(
     manifest: &IndexManifest,
+    tokenizer: TokenizerKind,
     files: &BTreeMap<&str, Vec<u8>>,
 ) -> Result<(), IndexError> {
     let strings = std::str::from_utf8(&files[STRINGS])
@@ -399,13 +505,13 @@ fn verify_data(
         .map_err(|error| invalid_error(VOCABULARY, format!("not UTF-8: {error}")))?;
     let vocabulary_offsets = decode_u64(VOCABULARY_OFFSETS, &files[VOCABULARY_OFFSETS])?;
 
-    verify_offsets(STRING_BYTE_OFFSETS, &string_byte_offsets, strings.len())?;
-    verify_offsets(STRING_SYMBOL_OFFSETS, &string_symbol_offsets, symbols.len())?;
-    verify_offsets(POSTING_OFFSETS, &posting_offsets, postings.len())?;
-    verify_offsets(VOCABULARY_OFFSETS, &vocabulary_offsets, vocabulary.len())?;
+    verify_offsets(STRING_BYTE_OFFSETS, string_byte_offsets, strings.len())?;
+    verify_offsets(STRING_SYMBOL_OFFSETS, string_symbol_offsets, symbols.len())?;
+    verify_offsets(POSTING_OFFSETS, posting_offsets, postings.len())?;
+    verify_offsets(VOCABULARY_OFFSETS, vocabulary_offsets, vocabulary.len())?;
 
     let vocabulary_count = usize_count("manifest.json", manifest.vocabulary)?;
-    for (index, &symbol) in symbols.iter().enumerate() {
+    for (index, symbol) in symbols.iter().enumerate() {
         if symbol as usize >= vocabulary_count {
             return invalid(
                 SYMBOLS,
@@ -417,21 +523,20 @@ fn verify_data(
     let mut tokens = Vec::with_capacity(vocabulary_count);
     let mut unique = HashSet::with_capacity(vocabulary_count);
     for index in 0..vocabulary_count {
-        let start = offset(VOCABULARY_OFFSETS, vocabulary_offsets[index])?;
-        let end = offset(VOCABULARY_OFFSETS, vocabulary_offsets[index + 1])?;
+        let start = offset(VOCABULARY_OFFSETS, vocabulary_offsets.get(index))?;
+        let end = offset(VOCABULARY_OFFSETS, vocabulary_offsets.get(index + 1))?;
         let token = vocabulary.get(start..end).ok_or_else(|| {
             invalid_error(VOCABULARY, format!("token {index} is not valid UTF-8"))
         })?;
         if !unique.insert(token) {
             return invalid(VOCABULARY, format!("duplicate token at element {index}"));
         }
-        let valid_token = match manifest.tokenizer.r#type.as_str() {
-            "character" => token.chars().count() == 1,
-            "whitespace" => {
+        let valid_token = match tokenizer {
+            TokenizerKind::Character => token.chars().count() == 1,
+            TokenizerKind::Whitespace => {
                 let mut split = token.split_whitespace();
                 split.next() == Some(token) && split.next().is_none()
             }
-            _ => unreachable!(),
         };
         if !valid_token {
             return invalid(
@@ -447,28 +552,33 @@ fn verify_data(
 
     let string_count = usize_count("manifest.json", manifest.strings)?;
     for string_index in 0..string_count {
-        let byte_start = offset(STRING_BYTE_OFFSETS, string_byte_offsets[string_index])?;
-        let byte_end = offset(STRING_BYTE_OFFSETS, string_byte_offsets[string_index + 1])?;
+        let byte_start = offset(STRING_BYTE_OFFSETS, string_byte_offsets.get(string_index))?;
+        let byte_end = offset(
+            STRING_BYTE_OFFSETS,
+            string_byte_offsets.get(string_index + 1),
+        )?;
         let string = strings.get(byte_start..byte_end).ok_or_else(|| {
             invalid_error(STRINGS, format!("string {string_index} is not valid UTF-8"))
         })?;
-        let symbol_start = offset(STRING_SYMBOL_OFFSETS, string_symbol_offsets[string_index])?;
+        let symbol_start = offset(
+            STRING_SYMBOL_OFFSETS,
+            string_symbol_offsets.get(string_index),
+        )?;
         let symbol_end = offset(
             STRING_SYMBOL_OFFSETS,
-            string_symbol_offsets[string_index + 1],
+            string_symbol_offsets.get(string_index + 1),
         )?;
-        let expected_tokens: Vec<_> = match manifest.tokenizer.r#type.as_str() {
-            "character" => CharacterTokenizer::new()
+        let expected_tokens: Vec<_> = match tokenizer {
+            TokenizerKind::Character => CharacterTokenizer::new()
                 .tokenize(string)
                 .into_iter()
                 .map(|token| (token.value.to_string(), token.byte_range))
                 .collect(),
-            "whitespace" => WhitespaceTokenizer::new()
+            TokenizerKind::Whitespace => WhitespaceTokenizer::new()
                 .tokenize(string)
                 .into_iter()
                 .map(|token| (token.value, token.byte_range))
                 .collect(),
-            _ => unreachable!(),
         };
         if expected_tokens.len() != symbol_end - symbol_start {
             return invalid(
@@ -480,7 +590,7 @@ fn verify_data(
             expected_tokens.into_iter().enumerate()
         {
             let position = symbol_start + relative_position;
-            let (start, end) = byte_ranges[position];
+            let (start, end) = byte_ranges.get(position);
             let start = start as usize;
             let end = end as usize;
             if (start..end) != expected_range {
@@ -491,7 +601,7 @@ fn verify_data(
                     ),
                 );
             }
-            let token = tokens[symbols[position] as usize];
+            let token = tokens[symbols.get(position) as usize];
             if token != expected_token {
                 return invalid(
                     SYMBOLS,
@@ -502,10 +612,10 @@ fn verify_data(
     }
 
     for symbol in 0..vocabulary_count {
-        let start = offset(POSTING_OFFSETS, posting_offsets[symbol])?;
-        let end = offset(POSTING_OFFSETS, posting_offsets[symbol + 1])?;
+        let start = offset(POSTING_OFFSETS, posting_offsets.get(symbol))?;
+        let end = offset(POSTING_OFFSETS, posting_offsets.get(symbol + 1))?;
         let mut previous = None;
-        for (posting_index, &(string_id, position)) in postings[start..end].iter().enumerate() {
+        for (posting_index, (string_id, position)) in postings.range(start..end).enumerate() {
             let pair = (string_id, position);
             if previous.is_some_and(|value| value >= pair) {
                 return invalid(
@@ -527,8 +637,11 @@ fn verify_data(
                     ),
                 );
             }
-            let string_start = offset(STRING_SYMBOL_OFFSETS, string_symbol_offsets[string_id])?;
-            let string_end = offset(STRING_SYMBOL_OFFSETS, string_symbol_offsets[string_id + 1])?;
+            let string_start = offset(STRING_SYMBOL_OFFSETS, string_symbol_offsets.get(string_id))?;
+            let string_end = offset(
+                STRING_SYMBOL_OFFSETS,
+                string_symbol_offsets.get(string_id + 1),
+            )?;
             let corpus_index = string_start
                 .checked_add(position as usize)
                 .ok_or_else(|| invalid_error(POSTINGS, "posting position overflows usize"))?;
@@ -541,7 +654,7 @@ fn verify_data(
                     ),
                 );
             }
-            if symbols[corpus_index] as usize != symbol {
+            if symbols.get(corpus_index) as usize != symbol {
                 return invalid(
                     POSTINGS,
                     format!(
@@ -553,24 +666,6 @@ fn verify_data(
         }
     }
     Ok(())
-}
-
-fn describe_file(name: &str, bytes: &[u8], counts: IndexCounts) -> FileManifest {
-    let (element_type, elements) = match name {
-        STRINGS | VOCABULARY => ("u8", bytes.len() as u64),
-        STRING_BYTE_OFFSETS | STRING_SYMBOL_OFFSETS => ("u64", counts.strings + 1),
-        SYMBOLS | BYTE_RANGES | POSTINGS => {
-            (if name == SYMBOLS { "u32" } else { "u32x2" }, counts.tokens)
-        }
-        POSTING_OFFSETS | VOCABULARY_OFFSETS => ("u64", counts.vocabulary + 1),
-        _ => unreachable!(),
-    };
-    FileManifest {
-        element_type: element_type.to_owned(),
-        elements,
-        bytes: bytes.len() as u64,
-        sha256: checksum(bytes),
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -588,68 +683,208 @@ fn counts(manifest: &IndexManifest) -> IndexCounts {
     }
 }
 
-fn encode_u32(values: impl IntoIterator<Item = u32>) -> Vec<u8> {
-    values.into_iter().flat_map(u32::to_le_bytes).collect()
+struct ChecksummedWriter {
+    inner: BufWriter<File>,
+    hasher: Sha256,
+    bytes: u64,
 }
 
-fn encode_u64(values: impl IntoIterator<Item = u64>) -> Vec<u8> {
-    values.into_iter().flat_map(u64::to_le_bytes).collect()
+impl ChecksummedWriter {
+    fn create(path: &Path) -> Result<Self, IndexError> {
+        let file = File::create(path).map_err(|source| file_io(path, source))?;
+        Ok(Self {
+            inner: BufWriter::new(file),
+            hasher: Sha256::new(),
+            bytes: 0,
+        })
+    }
+
+    fn finish(mut self, path: &Path) -> Result<(u64, String), IndexError> {
+        self.inner.flush().map_err(|source| file_io(path, source))?;
+        self.inner
+            .get_ref()
+            .sync_all()
+            .map_err(|source| file_io(path, source))?;
+        Ok((self.bytes, format!("{:x}", self.hasher.finalize())))
+    }
 }
 
-fn encode_pairs(values: impl IntoIterator<Item = (u32, u32)>) -> Vec<u8> {
-    values
-        .into_iter()
-        .flat_map(|(first, second)| first.to_le_bytes().into_iter().chain(second.to_le_bytes()))
-        .collect()
+impl Write for ChecksummedWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hasher.update(&buffer[..written]);
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
-fn decode_u32(name: &str, bytes: &[u8]) -> Result<Vec<u32>, IndexError> {
+fn write_data_file(
+    directory: &Path,
+    name: &str,
+    elements: u64,
+    write: impl FnOnce(&mut ChecksummedWriter) -> io::Result<()>,
+) -> Result<FileManifest, IndexError> {
+    let layout = layout(name);
+    let path = directory.join(name);
+    let mut writer = ChecksummedWriter::create(&path)?;
+    write(&mut writer).map_err(|source| file_io(&path, source))?;
+    let (bytes, sha256) = writer.finish(&path)?;
+    let elements = match layout.elements {
+        ElementCount::Bytes => bytes,
+        _ => elements,
+    };
+    Ok(FileManifest {
+        element_type: layout.element_type.to_owned(),
+        elements,
+        bytes,
+        sha256,
+    })
+}
+
+fn write_u32_file<I>(directory: &Path, name: &str, values: I) -> Result<FileManifest, IndexError>
+where
+    I: IntoIterator<Item = u32>,
+    I::IntoIter: ExactSizeIterator,
+{
+    let values = values.into_iter();
+    let elements = values.len() as u64;
+    write_data_file(directory, name, elements, |writer| {
+        for value in values {
+            writer.write_all(&value.to_le_bytes())?;
+        }
+        Ok(())
+    })
+}
+
+fn write_u64_file<I>(directory: &Path, name: &str, values: I) -> Result<FileManifest, IndexError>
+where
+    I: IntoIterator<Item = u64>,
+    I::IntoIter: ExactSizeIterator,
+{
+    let values = values.into_iter();
+    let elements = values.len() as u64;
+    write_data_file(directory, name, elements, |writer| {
+        for value in values {
+            writer.write_all(&value.to_le_bytes())?;
+        }
+        Ok(())
+    })
+}
+
+fn write_pairs_file<I>(directory: &Path, name: &str, values: I) -> Result<FileManifest, IndexError>
+where
+    I: IntoIterator<Item = (u32, u32)>,
+    I::IntoIter: ExactSizeIterator,
+{
+    let values = values.into_iter();
+    let elements = values.len() as u64;
+    write_data_file(directory, name, elements, |writer| {
+        for (first, second) in values {
+            writer.write_all(&first.to_le_bytes())?;
+            writer.write_all(&second.to_le_bytes())?;
+        }
+        Ok(())
+    })
+}
+
+fn layout(name: &str) -> FileLayout {
+    LAYOUT
+        .iter()
+        .copied()
+        .find(|layout| layout.name == name)
+        .expect("internal index file must have a layout")
+}
+
+#[derive(Clone, Copy)]
+struct U32Array<'a>(&'a [u8]);
+
+impl<'a> U32Array<'a> {
+    fn len(self) -> usize {
+        self.0.len() / 4
+    }
+
+    fn get(self, index: usize) -> u32 {
+        u32::from_le_bytes(self.0[index * 4..index * 4 + 4].try_into().unwrap())
+    }
+
+    fn iter(self) -> impl Iterator<Item = u32> + 'a {
+        (0..self.len()).map(move |index| self.get(index))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct U64Array<'a>(&'a [u8]);
+
+impl U64Array<'_> {
+    fn len(self) -> usize {
+        self.0.len() / 8
+    }
+
+    fn get(self, index: usize) -> u64 {
+        u64::from_le_bytes(self.0[index * 8..index * 8 + 8].try_into().unwrap())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PairArray<'a>(&'a [u8]);
+
+impl<'a> PairArray<'a> {
+    fn len(self) -> usize {
+        self.0.len() / 8
+    }
+
+    fn get(self, index: usize) -> (u32, u32) {
+        let chunk = &self.0[index * 8..index * 8 + 8];
+        (
+            u32::from_le_bytes(chunk[..4].try_into().unwrap()),
+            u32::from_le_bytes(chunk[4..].try_into().unwrap()),
+        )
+    }
+
+    fn range(self, range: std::ops::Range<usize>) -> impl Iterator<Item = (u32, u32)> + 'a {
+        range.map(move |index| self.get(index))
+    }
+}
+
+fn decode_u32<'a>(name: &str, bytes: &'a [u8]) -> Result<U32Array<'a>, IndexError> {
     if !bytes.len().is_multiple_of(4) {
         return invalid(name, "byte length is not divisible by 4");
     }
-    Ok(bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
-        .collect())
+    Ok(U32Array(bytes))
 }
 
-fn decode_u64(name: &str, bytes: &[u8]) -> Result<Vec<u64>, IndexError> {
+fn decode_u64<'a>(name: &str, bytes: &'a [u8]) -> Result<U64Array<'a>, IndexError> {
     if !bytes.len().is_multiple_of(8) {
         return invalid(name, "byte length is not divisible by 8");
     }
-    Ok(bytes
-        .chunks_exact(8)
-        .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
-        .collect())
+    Ok(U64Array(bytes))
 }
 
-fn decode_pairs(name: &str, bytes: &[u8]) -> Result<Vec<(u32, u32)>, IndexError> {
+fn decode_pairs<'a>(name: &str, bytes: &'a [u8]) -> Result<PairArray<'a>, IndexError> {
     if !bytes.len().is_multiple_of(8) {
         return invalid(name, "byte length is not divisible by 8");
     }
-    Ok(bytes
-        .chunks_exact(8)
-        .map(|chunk| {
-            (
-                u32::from_le_bytes(chunk[..4].try_into().unwrap()),
-                u32::from_le_bytes(chunk[4..].try_into().unwrap()),
-            )
-        })
-        .collect())
+    Ok(PairArray(bytes))
 }
 
-fn verify_offsets(name: &str, offsets: &[u64], expected_end: usize) -> Result<(), IndexError> {
-    if offsets.first() != Some(&0) {
+fn verify_offsets(
+    name: &str,
+    offsets: U64Array<'_>,
+    expected_end: usize,
+) -> Result<(), IndexError> {
+    if offsets.get(0) != 0 {
         return invalid(name, "first offset must be zero");
     }
-    if let Some((index, _)) = offsets
-        .windows(2)
-        .enumerate()
-        .find(|(_, pair)| pair[0] > pair[1])
+    if let Some(index) =
+        (1..offsets.len()).find(|&index| offsets.get(index - 1) > offsets.get(index))
     {
         return invalid(name, format!("offsets decrease at element {}", index + 1));
     }
-    if offsets.last().copied() != Some(expected_end as u64) {
+    if offsets.get(offsets.len() - 1) != expected_end as u64 {
         return invalid(name, format!("final offset must be {expected_end}"));
     }
     Ok(())
@@ -671,8 +906,17 @@ fn read_file(path: &Path) -> Result<Vec<u8>, IndexError> {
     fs::read(path).map_err(|source| file_io(path, source))
 }
 
-fn write_file(path: &Path, bytes: &[u8]) -> Result<(), IndexError> {
-    fs::write(path, bytes).map_err(|source| file_io(path, source))
+fn write_synced_file(path: &Path, bytes: &[u8]) -> Result<(), IndexError> {
+    let mut file = File::create(path).map_err(|source| file_io(path, source))?;
+    file.write_all(bytes)
+        .map_err(|source| file_io(path, source))?;
+    file.sync_all().map_err(|source| file_io(path, source))
+}
+
+fn sync_directory(path: &Path) -> Result<(), IndexError> {
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| file_io(path, source))
 }
 
 fn file_io(path: &Path, source: io::Error) -> IndexError {
@@ -751,6 +995,28 @@ mod tests {
     }
 
     #[test]
+    fn writes_and_verifies_empty_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("empty.yurine");
+        let engine = SearchEngineBuilder::new(CharacterTokenizer::new(), LevenshteinCosts::new())
+            .build()
+            .unwrap();
+
+        let manifest = engine.write_index(&output).unwrap();
+
+        assert_eq!(
+            (manifest.strings, manifest.tokens, manifest.vocabulary),
+            (0, 0, 0)
+        );
+        assert!(fs::read(output.join("strings.utf8")).unwrap().is_empty());
+        assert_eq!(
+            fs::read(output.join("posting_offsets.u64")).unwrap(),
+            0u64.to_le_bytes()
+        );
+        verify_index(output).unwrap();
+    }
+
+    #[test]
     fn rejects_missing_truncated_and_checksum_mismatched_files() {
         let directory = tempfile::tempdir().unwrap();
         let output = write_fixture(directory.path());
@@ -794,6 +1060,51 @@ mod tests {
             verify_index(&output),
             Err(IndexError::UnsupportedByteOrder(order)) if order == "big"
         ));
+
+        let output = write_fixture(directory.path());
+        update_manifest(&output, |manifest| manifest["format"] = "other".into());
+        assert!(matches!(
+            verify_index(&output),
+            Err(IndexError::UnsupportedFormat(format)) if format == "other"
+        ));
+
+        let output = write_fixture(directory.path());
+        update_manifest(&output, |manifest| manifest["byte_offsets"] = "u64".into());
+        assert!(matches!(
+            verify_index(&output),
+            Err(IndexError::UnsupportedByteOffsets(offsets)) if offsets == "u64"
+        ));
+
+        let output = write_fixture(directory.path());
+        update_manifest(&output, |manifest| {
+            manifest["tokenizer"]["type"] = "custom".into()
+        });
+        assert!(matches!(
+            verify_index(&output),
+            Err(IndexError::UnsupportedTokenizer { kind, version: 1 }) if kind == "custom"
+        ));
+
+        let output = write_fixture(directory.path());
+        update_manifest(&output, |manifest| {
+            manifest["files"]
+                .as_object_mut()
+                .unwrap()
+                .remove("symbols.u32");
+        });
+        assert!(matches!(
+            verify_index(&output),
+            Err(IndexError::MissingFileMetadata(file)) if file == "symbols.u32"
+        ));
+
+        let output = write_fixture(directory.path());
+        update_manifest(&output, |manifest| {
+            let metadata = manifest["files"]["symbols.u32"].clone();
+            manifest["files"]["extra.u32"] = metadata;
+        });
+        assert!(matches!(
+            verify_index(&output),
+            Err(IndexError::UnexpectedFileMetadata(file)) if file == "extra.u32"
+        ));
     }
 
     #[test]
@@ -830,10 +1141,10 @@ mod tests {
         for (file, corrupt) in cases {
             let output = write_fixture(directory.path());
             rewrite_file(&output, file, corrupt);
-            assert!(
-                matches!(verify_index(output), Err(IndexError::InvalidData { .. })),
-                "{file} corruption was not rejected as invalid data"
-            );
+            assert!(matches!(
+                verify_index(output),
+                Err(IndexError::InvalidData { file: reported, .. }) if reported == file
+            ));
         }
     }
 

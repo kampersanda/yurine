@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 use crate::types::{ByteRange, Position, StringId, Symbol};
 
 /// A builder for a [`CorpusStore`].
@@ -36,7 +36,17 @@ impl CorpusStoreBuilder {
         }
     }
 
-    /// Adds a string and the original UTF-8 byte range of each symbol.
+    /// Adds an original string, its symbols, and each symbol's UTF-8 byte range.
+    ///
+    /// The store retains `original` in a contiguous UTF-8 blob so that a
+    /// persistent index can later be written. Every byte range must identify a
+    /// valid UTF-8 slice of `original`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ByteOffsetOverflow`] when a range endpoint exceeds
+    /// `u32`, or [`Error::InvalidByteRange`] when a range is not a valid UTF-8
+    /// slice of `original`.
     pub fn add_string(
         &mut self,
         original: String,
@@ -48,6 +58,17 @@ impl CorpusStoreBuilder {
             .into_iter()
             .map(ByteRange::try_from)
             .collect::<Result<Vec<_>>>()?;
+        if let Some(range) = byte_ranges
+            .iter()
+            .map(|range| range.as_range())
+            .find(|range| original.get(range.clone()).is_none())
+        {
+            return Err(Error::InvalidByteRange {
+                start: range.start,
+                end: range.end,
+                string_len: original.len(),
+            });
+        }
         let end = self.symbols.len() as u64 + string.len() as u64;
         let byte_end = self.strings.len() as u64 + original.len() as u64;
         self.strings.extend_from_slice(original.as_bytes());
@@ -79,6 +100,10 @@ impl CorpusStoreBuilder {
     }
 }
 
+/// Compact corpus storage retaining original UTF-8 text and flat token arrays.
+///
+/// Original text remains resident for the lifetime of the store so the index
+/// can be persisted without requiring callers to provide the corpus again.
 pub struct CorpusStore {
     strings: Vec<u8>,
     string_byte_offsets: Vec<u64>,
@@ -270,6 +295,30 @@ mod tests {
         assert_eq!(builder.string_offsets, [0]);
         assert!(builder.symbols.is_empty());
         assert!(builder.byte_ranges.is_empty());
+    }
+
+    #[test]
+    fn rejects_byte_ranges_outside_the_original_string() {
+        let mut builder = CorpusStoreBuilder::new();
+
+        let error = builder
+            .add_string(
+                "あ".to_owned(),
+                vec![Symbol::new(0)],
+                std::iter::once(0..1).collect(),
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            Error::InvalidByteRange {
+                start: 0,
+                end: 1,
+                string_len: 3,
+            }
+        );
+        assert_eq!(builder.string_offsets, [0]);
+        assert!(builder.symbols.is_empty());
     }
 
     #[test]
