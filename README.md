@@ -168,3 +168,7 @@ tokenization, and custom or embedding-based edit costs.
 The [`tools/`](tools/) project prepares tokenized corpora and static embeddings
 for the command-line interface. See [`tools/README.md`](tools/README.md) for its
 setup and commands.
+
+## License
+
+Licensed under either of MIT or Apache 2.0 at your option.
