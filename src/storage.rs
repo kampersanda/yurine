@@ -19,6 +19,14 @@ impl<T> Storage<T> {
             Self::Mapped(values) => values,
         }
     }
+
+    pub(crate) fn requires_validation(&self) -> bool {
+        match self {
+            Self::Owned(_) => false,
+            #[cfg(feature = "persist")]
+            Self::Mapped(_) => true,
+        }
+    }
 }
 
 impl<T> Deref for Storage<T> {
@@ -40,5 +48,6 @@ mod tests {
 
         assert_eq!(values[0].get(), 7);
         assert!(format!("{values:?}").contains("Symbol"));
+        assert!(!values.requires_validation());
     }
 }

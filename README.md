@@ -62,10 +62,11 @@ The version 1 file is little-endian and contains a fixed header and section
 table followed by vocabulary token offsets/blob, sequence offsets, corpus
 symbols, posting offsets, and postings. Vocabulary tokens are decoded into
 memory. The four fixed-width corpus and posting arrays remain views into one
-read-only mmap. Opening validates metadata and every offset; `verify` additionally
-scans corpus symbols and postings for semantic consistency. Individual corpus
-sequences are checked when first accessed by a search even if `verify` was not
-called.
+read-only mmap. Opening validates metadata and every offset. Search validates
+the symbol range of each corpus sequence it accesses, but it does not establish
+full corpus/posting consistency. Call `verify` before searching when the snapshot
+is not trusted; it scans all corpus symbols and postings. `save_with` performs
+this complete, corpus-linear verification before writing.
 
 Saving writes and synchronizes a temporary file in the destination directory,
 then atomically renames it. Published snapshots must never be modified or

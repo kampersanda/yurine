@@ -160,6 +160,8 @@ mod tests {
         let mapped = Storage::Mapped(mapped);
 
         assert_eq!(owned.as_slice(), mapped.as_slice());
+        assert!(!owned.requires_validation());
+        assert!(mapped.requires_validation());
     }
 
     #[test]

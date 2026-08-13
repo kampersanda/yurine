@@ -303,7 +303,10 @@ pub(crate) fn write_file<T, C: TokenCodec<T>>(
         file_len: U64::new(cursor),
     };
 
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
     let mut temporary =
         tempfile::NamedTempFile::new_in(parent).map_err(|error| Error::io(path, error))?;
     {
@@ -357,10 +360,16 @@ fn align_up(value: u64, alignment: u64) -> Result<u64> {
 }
 
 fn write_padding(writer: &mut impl Write, len: u64, path: &Path) -> Result<()> {
-    const ZEROS: [u8; 8] = [0; 8];
-    writer
-        .write_all(&ZEROS[..len as usize])
-        .map_err(|error| Error::io(path, error))
+    const ZEROS: [u8; 64] = [0; 64];
+    let mut remaining = len;
+    while remaining != 0 {
+        let chunk_len = usize::try_from(remaining.min(ZEROS.len() as u64)).unwrap();
+        writer
+            .write_all(&ZEROS[..chunk_len])
+            .map_err(|error| Error::io(path, error))?;
+        remaining -= chunk_len as u64;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -723,7 +732,7 @@ mod tests {
     use super::{
         DiskHeader, DiskPosting, DiskSectionEntry, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION,
         FileKind, HEADER_LEN, MAGIC, MAX_CODEC_ID_LEN, PersistedFile, SECTION_ENTRY_LEN,
-        SectionKind, U32, U64,
+        SectionKind, U32, U64, write_padding,
     };
     use crate::errors::Error;
     use crate::persistence::{CharCodec, TokenCodec};
@@ -1098,5 +1107,14 @@ mod tests {
         assert_eq!(align_of::<DiskSymbol>(), 4);
         assert_eq!(size_of::<DiskPosting>(), 8);
         assert_eq!(align_of::<DiskPosting>(), 4);
+    }
+
+    #[test]
+    fn writes_padding_larger_than_the_internal_zero_buffer() {
+        let mut output = Vec::new();
+
+        write_padding(&mut output, 129, Path::new("unused")).unwrap();
+
+        assert_eq!(output, vec![0; 129]);
     }
 }

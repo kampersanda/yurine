@@ -1,6 +1,6 @@
 //! Storage abstractions for indexed strings.
 
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 #[cfg(feature = "persist")]
 use crate::persistence::storage::MappedSlice;
 use crate::storage::Storage;
@@ -57,15 +57,11 @@ pub(crate) struct CorpusStore {
 impl CorpusStore {
     /// Returns the string identified by `id`, or `None` when it is unknown.
     pub(crate) fn string(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
-        let Some((start, end)) = self.string_bounds(id)? else {
+        let Some(string) = self.string_unvalidated(id)? else {
             return Ok(None);
         };
-        let string = &self.symbols[start..end];
-        if let Some(symbol) = string
-            .iter()
-            .find(|symbol| symbol.is_unknown() || symbol.as_usize() >= self.symbol_count)
-        {
-            return Err(crate::errors::Error::UnknownStringSymbol(symbol.get()));
+        if self.symbols.requires_validation() {
+            self.validate_symbols(string)?;
         }
         Ok(Some(string))
     }
@@ -83,9 +79,19 @@ impl CorpusStore {
 
     pub(crate) fn verify(&self) -> Result<()> {
         for raw_id in 0..self.len() {
-            self.string(SequenceId::from_usize(raw_id)?)?;
+            let string = self
+                .string_unvalidated(SequenceId::from_usize(raw_id)?)?
+                .unwrap();
+            self.validate_symbols(string)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn string_unvalidated(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
+        let Some((start, end)) = self.string_bounds(id)? else {
+            return Ok(None);
+        };
+        Ok(Some(&self.symbols[start..end]))
     }
 
     pub(crate) fn symbol_len(&self) -> usize {
@@ -127,6 +133,16 @@ impl CorpusStore {
             return Ok(None);
         };
         Ok(Some((start as usize, end as usize)))
+    }
+
+    fn validate_symbols(&self, string: &[Symbol]) -> Result<()> {
+        if let Some(symbol) = string
+            .iter()
+            .find(|symbol| symbol.is_unknown() || symbol.as_usize() >= self.symbol_count)
+        {
+            return Err(Error::UnknownStringSymbol(symbol.get()));
+        }
+        Ok(())
     }
 }
 

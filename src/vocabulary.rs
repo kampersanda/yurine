@@ -4,6 +4,8 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::hash::Hash;
 
+#[cfg(feature = "persist")]
+use crate::errors::Error;
 use crate::errors::Result;
 use crate::types::Symbol;
 
@@ -90,7 +92,7 @@ where
         let mut symbols = HashMap::with_capacity(tokens.len());
         for (index, token) in tokens.iter().cloned().enumerate() {
             if symbols.insert(token, Symbol::from_usize(index)?).is_some() {
-                return Err(crate::errors::Error::InvalidFile(
+                return Err(Error::InvalidFile(
                     "decoded vocabulary contains duplicate tokens",
                 ));
             }

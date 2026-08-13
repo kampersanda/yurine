@@ -31,6 +31,8 @@ impl PostingsIndex {
             .windows(2)
             .enumerate()
             .filter(|(_, pair)| pair[0] != pair[1])
+            // Builders and persisted-file validation both guarantee that one
+            // offset pair exists for every representable vocabulary symbol.
             .map(|(index, _)| Symbol::from_usize(index).unwrap())
             .collect()
     }
@@ -51,7 +53,10 @@ impl PostingsIndex {
             }
             for posting in postings {
                 let string = corpus
-                    .string(posting.string_id)?
+                    // SearchEngine::verify validates every corpus symbol once
+                    // before checking postings, so rescanning here would make
+                    // verification quadratic in each sequence length.
+                    .string_unvalidated(posting.string_id)?
                     .ok_or(Error::InvalidFile("posting sequence id is out of range"))?;
                 if string.get(posting.position.as_usize()) != Some(&symbol) {
                     return Err(Error::InvalidFile("posting does not match the corpus"));

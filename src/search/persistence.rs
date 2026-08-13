@@ -168,6 +168,21 @@ mod tests {
     }
 
     #[test]
+    fn bare_relative_save_path_uses_the_current_directory() {
+        let path = format!(".yurine-bare-save-{}.index", std::process::id());
+        let path = Path::new(&path);
+        let _ = fs::remove_file(path);
+
+        engine().save_with(path, &CharCodec).unwrap();
+        SearchEngine::open_with(path, &CharCodec)
+            .unwrap()
+            .verify()
+            .unwrap();
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn saving_the_same_engine_is_byte_deterministic() {
         let directory = tempdir().unwrap();
         let first = directory.path().join("first.yurine");
