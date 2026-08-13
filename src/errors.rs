@@ -1,14 +1,14 @@
 //! Error types.
 
-use crate::types::{Position, StringId, Symbol};
+use crate::types::{Position, SequenceId, Symbol};
 
 /// An error type for the library.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The corpus contains too many strings for a `u32` string identifier.
-    #[error("string identifier exceeds u32")]
-    StringIdOverflow,
+    /// The corpus contains too many sequences for a `u32` sequence identifier.
+    #[error("sequence identifier exceeds u32")]
+    SequenceIdOverflow,
 
     /// A string or range endpoint is too large for a `u32` position.
     #[error("position exceeds u32")]
@@ -80,7 +80,7 @@ pub enum Error {
 
     /// A candidate refers to a string that is not present in the corpus.
     #[error("unknown string id: {0}")]
-    UnknownString(StringId),
+    UnknownString(SequenceId),
 
     /// No threshold subsequence can be constructed for the query, possibly
     /// because deletion costs are too small for the threshold.

@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{StringId, Symbol};
+use crate::types::{SequenceId, Symbol};
 
 /// Exact Smith-Waterman-based verification that preserves every start position.
 ///
@@ -58,7 +58,7 @@ fn validated_candidate_strings(
     query_string: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
-) -> Result<BTreeSet<StringId>> {
+) -> Result<BTreeSet<SequenceId>> {
     let mut string_ids = BTreeSet::new();
     for candidate in candidates {
         validated_candidate_string(query_string, candidate, corpus)?;
@@ -73,7 +73,7 @@ fn validated_candidate_strings(
 fn enumerate_substring_matches<C>(
     query_string: &[Symbol],
     string: &[Symbol],
-    string_id: StringId,
+    string_id: SequenceId,
     threshold: Cost,
     costs: &C,
     matches: &mut Vec<Match>,

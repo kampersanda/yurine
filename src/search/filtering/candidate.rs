@@ -102,7 +102,7 @@ mod tests {
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
-    use crate::types::{Position, Posting, StringId, Symbol};
+    use crate::types::{Position, Posting, SequenceId, Symbol};
 
     fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
         for position in 0..count {
@@ -110,7 +110,7 @@ mod tests {
                 .add_posting(
                     symbol,
                     Posting {
-                        string_id: StringId::new(0),
+                        string_id: SequenceId::new(0),
                         position: Position::new(position),
                     },
                 )

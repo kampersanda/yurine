@@ -3,12 +3,12 @@
 use crate::errors::{Error, Result};
 use std::fmt::Display;
 
-/// Identifies a data string in a corpus.
+/// Identifies a data sequence by its insertion order.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StringId(u32);
+pub struct SequenceId(u32);
 
-impl StringId {
+impl SequenceId {
     /// Creates an identifier from its zero-based integer representation.
     pub const fn new(value: u32) -> Self {
         Self(value)
@@ -23,7 +23,7 @@ impl StringId {
     pub fn from_usize(value: usize) -> Result<Self> {
         u32::try_from(value)
             .map(Self)
-            .map_err(|_| Error::StringIdOverflow)
+            .map_err(|_| Error::SequenceIdOverflow)
     }
 
     /// Returns the identifier as a usize value.
@@ -32,7 +32,7 @@ impl StringId {
     }
 }
 
-impl Display for StringId {
+impl Display for SequenceId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
     }
@@ -81,7 +81,7 @@ impl Display for Position {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Posting {
-    pub string_id: StringId,
+    pub string_id: SequenceId,
     pub position: Position,
 }
 
@@ -137,18 +137,18 @@ impl Display for Symbol {
 mod tests {
     use std::mem::{align_of, size_of};
 
-    use super::{Position, Posting, StringId, Symbol};
+    use super::{Position, Posting, SequenceId, Symbol};
     use crate::errors::Error;
 
     #[test]
     fn fixed_width_values_round_trip_through_public_representations() {
-        let string_id = StringId::from_usize(12).unwrap();
+        let sequence_id = SequenceId::from_usize(12).unwrap();
         let position = Position::from_usize(34).unwrap();
         let symbol = Symbol::from_usize(56).unwrap();
 
-        assert_eq!(string_id.get(), 12);
-        assert_eq!(string_id.as_usize(), 12);
-        assert_eq!(string_id.to_string(), "12");
+        assert_eq!(sequence_id.get(), 12);
+        assert_eq!(sequence_id.as_usize(), 12);
+        assert_eq!(sequence_id.to_string(), "12");
         assert_eq!(position.get(), 34);
         assert_eq!(position.as_usize(), 34);
         assert_eq!(position.to_string(), "34");
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn storage_types_have_fixed_width_layouts() {
-        assert_eq!(size_of::<StringId>(), 4);
+        assert_eq!(size_of::<SequenceId>(), 4);
         assert_eq!(size_of::<Position>(), 4);
         assert_eq!(size_of::<Symbol>(), 4);
         assert_eq!(size_of::<Posting>(), 8);

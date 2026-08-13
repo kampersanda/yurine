@@ -11,7 +11,7 @@ use crate::search::filtering::generate_candidates;
 use crate::search::verification::Verifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId, Symbol};
+use crate::types::{Position, SequenceId, Symbol};
 
 /// Parameters for threshold range search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -86,7 +86,7 @@ where
 {
     /// Finds non-empty data segments satisfying the configured range search.
     ///
-    /// Results are ordered by data string ID, then token-range start, then
+    /// Results are ordered by data sequence ID, then token-range start, then
     /// token-range end.
     ///
     /// When eta is not configured, it defaults to
@@ -216,7 +216,7 @@ where
     // without relying on the filtering guarantee that was unavailable.
     let mut candidates = Vec::new();
     for raw_id in 0..corpus.len() {
-        let string_id = StringId::from_usize(raw_id)?;
+        let string_id = SequenceId::from_usize(raw_id)?;
         let string = corpus
             .string(string_id)?
             .ok_or(Error::UnknownString(string_id))?;
@@ -244,7 +244,7 @@ mod tests {
     use crate::search::encoding::EncodedQuery;
     use crate::search::{Match, SearchEngine};
     use crate::store::CorpusStoreBuilder;
-    use crate::types::{Position, Posting, StringId};
+    use crate::types::{Position, Posting, SequenceId};
     use crate::vocabulary::VocabularyBuilder;
 
     struct CharacterCosts;
@@ -280,7 +280,7 @@ mod tests {
         let symbol = vocabulary.symbol(&'a');
 
         let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
-        for string_id in [StringId::new(0), StringId::new(1)] {
+        for string_id in [SequenceId::new(0), SequenceId::new(1)] {
             index_builder
                 .add_posting(
                     symbol,
@@ -308,12 +308,12 @@ mod tests {
     fn expected_matches(distance: Cost) -> Vec<Match> {
         vec![
             Match {
-                string_id: StringId::new(0),
+                sequence_id: SequenceId::new(0),
                 token_range: Position::new(0)..Position::new(1),
                 distance,
             },
             Match {
-                string_id: StringId::new(1),
+                sequence_id: SequenceId::new(1),
                 token_range: Position::new(0)..Position::new(1),
                 distance,
             },
@@ -434,7 +434,7 @@ mod tests {
 
         assert_eq!(filtered, exhaustive);
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].string_id, StringId::new(0));
+        assert_eq!(filtered[0].sequence_id, SequenceId::new(0));
         assert_eq!(filtered[0].token_range, Position::new(0)..Position::new(2));
     }
 }

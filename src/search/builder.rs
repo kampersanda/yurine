@@ -7,7 +7,7 @@ use crate::costs::EditCosts;
 use crate::errors::Result;
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
-use crate::types::{Position, Posting, StringId};
+use crate::types::{Position, Posting, SequenceId};
 use crate::vocabulary::VocabularyBuilder;
 
 /// Builds a [`SearchEngine`] from token sequences in insertion order.
@@ -30,22 +30,22 @@ where
         }
     }
 
-    /// Adds a data sequence and returns the ID reserved for its encoded string.
+    /// Adds a data sequence and returns its identifier.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::errors::Error::StringIdOverflow`] if the corpus has
-    /// too many data strings or [`crate::errors::Error::PositionOverflow`]
+    /// Returns [`crate::errors::Error::SequenceIdOverflow`] if the corpus has
+    /// too many data sequences or [`crate::errors::Error::PositionOverflow`]
     /// if the sequence is too long.
-    pub fn add_sequence<I>(&mut self, sequence: I) -> Result<StringId>
+    pub fn add_sequence<I>(&mut self, sequence: I) -> Result<SequenceId>
     where
         I: IntoIterator<Item = T>,
     {
-        let string_id = StringId::from_usize(self.sequences.len())?;
+        let sequence_id = SequenceId::from_usize(self.sequences.len())?;
         let sequence: Vec<_> = sequence.into_iter().collect();
         Position::from_usize(sequence.len())?;
         self.sequences.push(sequence);
-        Ok(string_id)
+        Ok(sequence_id)
     }
 
     /// Builds the vocabulary, corpus store, postings index, and search engine.
@@ -66,14 +66,14 @@ where
 
         let mut index_builder = PostingsIndexBuilder::new(vocabulary.len());
         let mut store_builder = CorpusStoreBuilder::new();
-        for (raw_string_id, sequence) in sequences.into_iter().enumerate() {
-            let string_id = StringId::from_usize(raw_string_id)?;
+        for (raw_sequence_id, sequence) in sequences.into_iter().enumerate() {
+            let sequence_id = SequenceId::from_usize(raw_sequence_id)?;
             let string = vocabulary.encode(sequence);
             for (raw_position, symbol) in string.iter().copied().enumerate() {
                 index_builder.add_posting(
                     symbol,
                     Posting {
-                        string_id,
+                        string_id: sequence_id,
                         position: Position::from_usize(raw_position)?,
                     },
                 )?;
@@ -97,7 +97,7 @@ mod tests {
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
     use crate::search::range_search::RangeSearchParams;
-    use crate::types::{Position, StringId};
+    use crate::types::{Position, SequenceId};
 
     #[test]
     fn builds_an_empty_corpus() {
@@ -119,16 +119,16 @@ mod tests {
 
         assert_eq!(
             builder.add_sequence(['東', '京']).unwrap(),
-            StringId::new(0)
+            SequenceId::new(0)
         );
-        assert_eq!(builder.add_sequence([]).unwrap(), StringId::new(1));
+        assert_eq!(builder.add_sequence([]).unwrap(), SequenceId::new(1));
         assert_eq!(
             builder.add_sequence(['京', '都']).unwrap(),
-            StringId::new(2)
+            SequenceId::new(2)
         );
         assert_eq!(
             builder.add_sequence(['東', '京']).unwrap(),
-            StringId::new(3)
+            SequenceId::new(3)
         );
 
         let matches = builder
@@ -141,12 +141,12 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    string_id: StringId::new(3),
+                    sequence_id: SequenceId::new(3),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
@@ -169,12 +169,12 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(1)..Position::new(3),
                     distance: Cost::ZERO,
                 },

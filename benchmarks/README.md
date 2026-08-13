@@ -68,7 +68,7 @@ growth remains the implementation-independent memory metric.
 
 `used_exhaustive_verification` is emitted as numeric boolean `0` or `1`.
 
-The library compatibility integration fixture separately fixes `StringId`, token
-range, weighted distance, and result order. CLI tests fix conversion from token
+The library compatibility integration fixture separately fixes `SequenceId`,
+token range, weighted distance, and result order. CLI tests fix conversion from token
 ranges to UTF-8 byte ranges and matched source text. The benchmark package's unit
 test checks that corpus generation is byte-for-byte reproducible.

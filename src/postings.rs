@@ -10,7 +10,7 @@ pub struct PostingsIndex {
 }
 
 impl PostingsIndex {
-    /// Returns indexed occurrences in `(StringId, Position)` order.
+    /// Returns indexed occurrences in `(SequenceId, Position)` order.
     ///
     /// The iterator does not emit duplicates.
     pub fn postings(&self, symbol: Symbol) -> impl Iterator<Item = Posting> + '_ {
@@ -100,20 +100,20 @@ impl PostingsIndexBuilder {
 mod tests {
     use super::PostingsIndexBuilder;
     use crate::errors::Error;
-    use crate::types::{Position, Posting, StringId, Symbol};
+    use crate::types::{Position, Posting, SequenceId, Symbol};
 
     #[test]
     fn build_orders_and_deduplicates_postings() {
         let first = Posting {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             position: Position::new(2),
         };
         let second = Posting {
-            string_id: StringId::new(1),
+            string_id: SequenceId::new(1),
             position: Position::new(0),
         };
         let third = Posting {
-            string_id: StringId::new(1),
+            string_id: SequenceId::new(1),
             position: Position::new(1),
         };
 
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn flat_offsets_represent_absent_and_trailing_symbols() {
         let posting = Posting {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             position: Position::new(0),
         };
         let mut builder = PostingsIndexBuilder::new(3);
@@ -156,19 +156,19 @@ mod tests {
     #[test]
     fn groups_out_of_order_postings_by_symbol() {
         let for_first = Posting {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             position: Position::new(1),
         };
         let for_second = Posting {
-            string_id: StringId::new(1),
+            string_id: SequenceId::new(1),
             position: Position::new(0),
         };
         let later_for_third = Posting {
-            string_id: StringId::new(2),
+            string_id: SequenceId::new(2),
             position: Position::new(2),
         };
         let earlier_for_third = Posting {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             position: Position::new(3),
         };
         let mut builder = PostingsIndexBuilder::new(3);
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn rejects_symbols_outside_the_vocabulary() {
         let posting = Posting {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             position: Position::new(0),
         };
         let mut builder = PostingsIndexBuilder::new(1);
