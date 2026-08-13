@@ -92,10 +92,9 @@ let embeddings = builder.build();
 embeddings.save_with("embeddings.yurine", &CharCodec)?;
 
 let mapped = EmbeddingStore::open_with("embeddings.yurine", &CharCodec)?;
-let costs = CosineEmbeddingCosts::new(mapped);
+let costs = CosineEmbeddingCosts::new(mapped.clone());
 costs.save("cosine-costs.yurine")?;
 
-let mapped = EmbeddingStore::open_with("embeddings.yurine", &CharCodec)?;
 let costs = CosineEmbeddingCosts::open("cosine-costs.yurine", mapped)?;
 costs.verify()?;
 # Ok(())
@@ -107,9 +106,12 @@ This replaces the former mutable `EmbeddingStore::new`/`insert` workflow: call
 
 The embedding file stores token offsets/blob, a small dimension record, and a
 contiguous little-endian `f32` matrix. Only the token index is rebuilt in heap
-memory; the matrix remains mmap-backed. Accessed rows are checked for finite,
-non-zero, normalized values. A damaged row behaves as a missing embedding in
-normal search, while `verify` scans all rows and reports the corruption.
+memory; the matrix remains mmap-backed. Rows are checked for finite, non-zero,
+normalized values on first access, and the result is cached. A damaged row
+behaves as a missing embedding in normal search, while `verify` scans all rows
+and reports the corruption. Call `verify` immediately after opening an
+untrusted embedding snapshot to avoid silently applying the configured
+missing-embedding cost.
 
 `LevenshteinCosts::save`/`open`, `CustomCosts::save_with`/`open_with`, and
 `CosineEmbeddingCosts::save`/`open` use independent files. Cosine-cost files

@@ -45,10 +45,7 @@ mod tests {
         LevenshteinCosts.save(&first).unwrap();
         LevenshteinCosts.save(&second).unwrap();
 
-        LevenshteinCosts::open(first).unwrap().verify().unwrap();
-        assert_eq!(
-            fs::read(second).unwrap(),
-            fs::read(directory.path().join("first.yurine")).unwrap()
-        );
+        LevenshteinCosts::open(&first).unwrap().verify().unwrap();
+        assert_eq!(fs::read(second).unwrap(), fs::read(first).unwrap());
     }
 }

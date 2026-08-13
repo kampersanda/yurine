@@ -592,6 +592,14 @@ impl PersistedFile {
     fn validate_structure(&self) -> Result<()> {
         match self.kind {
             FileKind::SearchEngine => {
+                self.require_exact_sections(&[
+                    SectionKind::VocabularyTokenOffsets,
+                    SectionKind::VocabularyTokenBlob,
+                    SectionKind::SequenceOffsets,
+                    SectionKind::CorpusSymbols,
+                    SectionKind::PostingOffsets,
+                    SectionKind::Postings,
+                ])?;
                 // SearchEngine slicing depends only on these three offset arrays. They
                 // are small relative to their payloads and are scanned fully at open.
                 // Corpus symbols and postings themselves remain demand-paged and are
@@ -624,6 +632,12 @@ impl PersistedFile {
                 }
             }
             FileKind::EmbeddingStore => {
+                self.require_exact_sections(&[
+                    SectionKind::EmbeddingTokenOffsets,
+                    SectionKind::EmbeddingTokenBlob,
+                    SectionKind::Embeddings,
+                    SectionKind::CostMetadata,
+                ])?;
                 let offsets = self.mapped_slice::<u64>(SectionKind::EmbeddingTokenOffsets)?;
                 let blob = self.section(SectionKind::EmbeddingTokenBlob)?;
                 self.section(SectionKind::Embeddings)?;
@@ -639,7 +653,23 @@ impl PersistedFile {
                     ));
                 }
             }
-            _ => {}
+            FileKind::LevenshteinCosts => self.require_exact_sections(&[])?,
+            FileKind::CustomCosts | FileKind::CosineEmbeddingCosts => {
+                self.require_exact_sections(&[SectionKind::CostMetadata])?;
+            }
+        }
+        Ok(())
+    }
+
+    fn require_exact_sections(&self, expected: &[SectionKind]) -> Result<()> {
+        if self.sections.len() != expected.len()
+            || expected
+                .iter()
+                .any(|kind| !self.sections.contains_key(kind))
+        {
+            return Err(Error::InvalidFile(
+                "sections do not match the selected file kind",
+            ));
         }
         Ok(())
     }

@@ -57,6 +57,10 @@ impl<'a> MetadataReader<'a> {
         Ok(value)
     }
 
+    pub(crate) fn remaining(&self) -> usize {
+        self.bytes.len() - self.position
+    }
+
     pub(crate) fn finish(self) -> Result<()> {
         if self.position == self.bytes.len() {
             Ok(())

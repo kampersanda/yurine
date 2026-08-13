@@ -32,6 +32,9 @@ impl<T> CosineEmbeddingCosts<T> {
     }
 
     /// Opens constant costs and combines them with a separately opened store.
+    ///
+    /// The cost file intentionally contains no embedding-store identifier or
+    /// dimension. The caller is responsible for supplying the intended store.
     pub fn open(path: impl AsRef<Path>, embeddings: EmbeddingStore<T>) -> Result<Self> {
         let file =
             PersistedFile::open(path.as_ref(), FileKind::CosineEmbeddingCosts, &NoTokenCodec)?;
@@ -58,11 +61,8 @@ impl<T> CosineEmbeddingCosts<T>
 where
     T: Eq + std::hash::Hash,
 {
-    /// Fully validates the constant costs and every embedding row.
+    /// Fully validates every embedding row.
     pub fn verify(&self) -> Result<()> {
-        for cost in [self.deletion, self.insertion, self.missing_substitution] {
-            Cost::new(cost.get())?;
-        }
         self.embeddings.verify()
     }
 }

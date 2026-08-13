@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
+use std::sync::OnceLock;
 
 use super::{Cost, EditCosts};
 use crate::errors::{Error, Result};
@@ -133,6 +134,7 @@ where
             dimension: self.dimension,
             embedding_indices: self.embedding_indices,
             embeddings: Storage::Owned(self.embeddings.into_boxed_slice()),
+            validated_rows: None,
         }
     }
 }
@@ -147,6 +149,7 @@ pub struct EmbeddingStore<T> {
     dimension: NonZeroUsize,
     embedding_indices: HashMap<T, u32>,
     embeddings: Storage<f32>,
+    validated_rows: Option<Box<[OnceLock<bool>]>>,
 }
 
 impl<T> EmbeddingStore<T>
@@ -164,9 +167,15 @@ where
     {
         let index = *self.embedding_indices.get(token)? as usize;
         let start = index.checked_mul(self.dimension.get())?;
-        let row = self.embeddings.get(start..start + self.dimension.get())?;
-        if self.embeddings.is_mapped() && validate_embedding(row).is_err() {
-            return None;
+        let end = start.checked_add(self.dimension.get())?;
+        let row = self.embeddings.get(start..end)?;
+        if let Some(validated_rows) = &self.validated_rows {
+            let valid = validated_rows
+                .get(index)?
+                .get_or_init(|| validate_embedding(row).is_ok());
+            if !valid {
+                return None;
+            }
         }
         Some(row)
     }
@@ -197,8 +206,16 @@ where
                 "embedding matrix length does not match its shape",
             ));
         }
-        for row in self.embeddings.chunks_exact(self.dimension.get()) {
-            validate_embedding(row)?;
+        for (index, row) in self
+            .embeddings
+            .chunks_exact(self.dimension.get())
+            .enumerate()
+        {
+            let result = validate_embedding(row);
+            if let Some(validated_rows) = &self.validated_rows {
+                let _ = validated_rows[index].set(result.is_ok());
+            }
+            result?;
         }
         Ok(())
     }

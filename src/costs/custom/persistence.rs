@@ -97,6 +97,12 @@ where
         let substitution_count = count(reader.u64()?)?;
         let deletion_count = count(reader.u64()?)?;
         let insertion_count = count(reader.u64()?)?;
+        validate_rule_counts(
+            reader.remaining(),
+            substitution_count,
+            deletion_count,
+            insertion_count,
+        )?;
 
         let mut substitutions: HashMap<T, HashMap<T, Cost>> = HashMap::new();
         for _ in 0..substitution_count {
@@ -190,6 +196,24 @@ fn count(value: u64) -> Result<usize> {
     usize::try_from(value).map_err(|_| Error::PlatformSizeOverflow)
 }
 
+fn validate_rule_counts(
+    remaining: usize,
+    substitutions: usize,
+    deletions: usize,
+    insertions: usize,
+) -> Result<()> {
+    let minimum_len = substitutions
+        .checked_mul(20)
+        .and_then(|len| deletions.checked_mul(12)?.checked_add(len))
+        .and_then(|len| insertions.checked_mul(12)?.checked_add(len));
+    if minimum_len.is_none_or(|minimum_len| minimum_len > remaining) {
+        return Err(Error::InvalidFile(
+            "custom-cost rule counts exceed metadata size",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -266,6 +290,24 @@ mod tests {
 
         let result = CustomCosts::<char>::open_with(path, &CharCodec);
         assert!(matches!(result, Err(Error::InvalidCost(value)) if value.is_nan()));
+    }
+
+    #[test]
+    fn corrupt_rule_count_is_rejected_before_allocation() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("corrupt-count.yurine");
+        costs().save_with(&path, &CharCodec).unwrap();
+        let mut bytes = fs::read(&path).unwrap();
+        let metadata = section_offset(&bytes, SectionKind::CostMetadata as u32);
+        bytes[metadata + 24..metadata + 32].copy_from_slice(&u64::MAX.to_le_bytes());
+        fs::write(&path, bytes).unwrap();
+
+        assert!(matches!(
+            CustomCosts::<char>::open_with(path, &CharCodec),
+            Err(Error::InvalidFile(
+                "custom-cost rule counts exceed metadata size"
+            ))
+        ));
     }
 
     fn section_offset(bytes: &[u8], wanted_kind: u32) -> usize {

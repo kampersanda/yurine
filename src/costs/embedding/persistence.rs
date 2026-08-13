@@ -79,7 +79,9 @@ where
     /// Opens a store while keeping its vector matrix memory-mapped.
     ///
     /// The published snapshot must not be modified or truncated while this
-    /// store is alive.
+    /// store is alive. Row validation is cached on first access. Call
+    /// [`EmbeddingStore::verify`] after opening an untrusted snapshot to reject
+    /// corruption instead of treating an invalid row as a missing embedding.
     pub fn open_with<C: TokenCodec<T>>(path: impl AsRef<Path>, codec: &C) -> Result<Self> {
         let file = PersistedFile::open(path.as_ref(), FileKind::EmbeddingStore, codec)?;
         let mut metadata = MetadataReader::new(file.bytes(SectionKind::CostMetadata)?);
@@ -124,6 +126,11 @@ where
             dimension,
             embedding_indices,
             embeddings: Storage::Mapped(embeddings),
+            validated_rows: Some(
+                std::iter::repeat_with(std::sync::OnceLock::new)
+                    .take(row_count)
+                    .collect(),
+            ),
         })
     }
 }
