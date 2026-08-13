@@ -78,8 +78,8 @@ $ printf 'Jinbocho is a book town known for curry\n' | \
 0	1	14	39	book town known for curry
 ```
 
-Run `cargo run -p yurine-cli -- --help` for tokenization, thresholds, corpora,
-and edit-cost configuration options.
+See the [CLI guide](cli/README.md) for installation, input and output formats,
+tokenization, and custom or embedding-based edit costs.
 
 ## Data preparation
 
