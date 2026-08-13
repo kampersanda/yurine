@@ -82,12 +82,58 @@
 //! Here, `bookshops` matches `bookstores` with cosine distance `0.2`, returning
 //! the `bookstores and curry` segment from the longer sequence.
 //!
+//! # Saving and loading an index
+//!
+//! Enable the `persist` feature to save an immutable index and reopen it
+//! without rebuilding. Opening restores the vocabulary in memory while the
+//! corpus and postings remain memory-mapped.
+//!
+//! ```
+//! # #[cfg(feature = "persist")]
+//! # fn example() -> yurine::errors::Result<()> {
+//! use tempfile::tempdir;
+//! use yurine::costs::{Cost, levenshtein::LevenshteinCosts};
+//! use yurine::persistence::StringCodec;
+//! use yurine::search::{SearchEngine, SearchEngineBuilder};
+//! use yurine::search::range_search::RangeSearchParams;
+//!
+//! let directory = tempdir().expect("create temporary directory");
+//! let path = directory.path().join("jinbocho.yurine");
+//!
+//! let mut builder = SearchEngineBuilder::new();
+//! let jinbocho = builder.add_sequence(
+//!     ["Jinbocho", "is", "a", "book", "town", "known", "for", "curry"]
+//!         .map(str::to_owned),
+//! )?;
+//! builder.build()?.save_with(&path, &StringCodec)?;
+//!
+//! let engine = SearchEngine::open_with(&path, &StringCodec)?;
+//! engine.verify()?;
+//! let query = ["book", "town"].map(str::to_owned);
+//! let matches = engine.range_searcher(LevenshteinCosts::new()).search(
+//!     &query,
+//!     &RangeSearchParams::new(Cost::ZERO),
+//! )?;
+//!
+//! assert_eq!(matches[0].sequence_id, jinbocho);
+//! assert_eq!(matches[0].token_range.start.get(), 3);
+//! assert_eq!(matches[0].token_range.end.get(), 5);
+//! # Ok(())
+//! # }
+//! # #[cfg(feature = "persist")]
+//! # example()?;
+//! # Ok::<(), yurine::errors::Error>(())
+//! ```
+//!
+//! `StringCodec` and `CharCodec` cover the built-in token types. Other token
+//! types require a stable `TokenCodec` implementation.
+//! Call [`SearchEngine::verify`](search::SearchEngine::verify) after opening an
+//! untrusted snapshot, and never modify or truncate a file while it is mapped.
+//!
 //! Build an index once, then create any number of searchers with
 //! [`levenshtein::LevenshteinCosts`](costs::levenshtein::LevenshteinCosts),
 //! [`custom::CustomCosts`](costs::custom::CustomCosts), or
 //! [`embedding::CosineEmbeddingCosts`](costs::embedding::CosineEmbeddingCosts).
-//! Enable the `persist` feature to add a `persistence` module for saving
-//! immutable, memory-mapped snapshots.
 #![warn(missing_docs)]
 
 pub mod costs;

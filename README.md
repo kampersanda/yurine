@@ -39,6 +39,63 @@ The query matches the `book town known for curry` segment rather than the whole
 sequence. It does not occur verbatim: replacing `district` with `town` costs
 `0.25`, less than the default substitution cost.
 
+## Embedding-based search
+
+`CosineEmbeddingCosts` derives substitution costs from token embeddings, so
+similar tokens can match without an explicit rule:
+
+```rust
+use std::num::NonZeroUsize;
+use yurine::costs::Cost;
+use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+
+let mut builder = SearchEngineBuilder::new();
+builder.add_sequence([
+    "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
+])?;
+let engine = builder.build()?;
+
+let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+embeddings.insert("bookshops", [1.0, 0.0])?;
+embeddings.insert("bookstores", [0.8, 0.6])?;
+let costs = CosineEmbeddingCosts::new(embeddings.build());
+
+let matches = engine.range_searcher(costs).search(
+    &["bookshops", "and", "curry"],
+    &RangeSearchParams::new(Cost::new_const(0.2)),
+)?;
+
+assert_eq!(matches[0].token_range.start.get(), 2);
+assert_eq!(matches[0].token_range.end.get(), 5);
+```
+
+Here, `bookshops` matches `bookstores` by cosine distance, returning the
+`bookstores and curry` segment. The crate-level Rust Doc contains the tested
+version of this example.
+
+## Optional persistence
+
+The `persist` feature adds immutable, memory-mapped snapshots for search
+engines, embedding stores, and edit-cost policies:
+
+```rust
+use yurine::persistence::StringCodec;
+use yurine::search::{SearchEngine, SearchEngineBuilder};
+
+let mut builder = SearchEngineBuilder::new();
+builder.add_sequence(["Jinbocho", "book", "town"].map(str::to_owned))?;
+builder.build()?.save_with("index.yurine", &StringCodec)?;
+
+let engine = SearchEngine::open_with("index.yurine", &StringCodec)?;
+engine.verify()?;
+```
+
+Build with `--features persist`. Opened indexes keep their large corpus and
+posting arrays memory-mapped. The snapshot must not be modified or truncated
+while it is mapped. The tested example and codec requirements are documented
+under “Saving and loading an index” in the crate-level Rust Doc.
+
 ## Documentation
 
 The Rust Doc is the primary library documentation. It contains the API
@@ -59,12 +116,6 @@ Rust Doc examples are tested with `cargo test --doc`. This README intentionally
 keeps its example introductory and does not duplicate detailed API guidance.
 New public behavior and examples should be documented in `src/lib.rs` or on the
 relevant public item so they remain close to the code and can be tested.
-
-## Optional persistence
-
-The `persist` feature adds immutable, memory-mapped snapshots for search
-engines, embedding stores, and edit-cost policies. File-lifetime requirements
-and examples are documented in the `persistence` Rust Doc module.
 
 ## Command-line search
 
