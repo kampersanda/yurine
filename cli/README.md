@@ -111,10 +111,11 @@ timing: read=0.097ms costs=0.000ms build=0.064ms search=0.061ms total=0.317ms
 | `search` | Tokenizing the query and searching |
 | `total` | The whole run, including writing the results |
 
-Every stage is always reported, so `costs` is `0.000ms` when `--costs` is
-omitted. Values are always in milliseconds with three decimal places, and the
-difference between `total` and the sum of the stages is output and start-up
-overhead.
+Every stage is always reported, so the fields are the same with and without
+`--costs`. When `--costs` is omitted, the `costs` stage only builds the unit-cost
+policy, which rounds to `0.000ms`. Values are always in milliseconds with three
+decimal places, and the difference between `total` and the sum of the stages is
+output and start-up overhead.
 
 Each stage is measured once, without warm-up or repetition, so the numbers vary
 between runs. Build a release binary before comparing them, and use the
