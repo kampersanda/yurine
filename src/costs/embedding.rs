@@ -265,13 +265,13 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 /// use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
 ///
 /// let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
-/// builder.insert("cat", [1.0, 0.0])?;
-/// builder.insert("kitten", [0.8, 0.6])?;
+/// builder.insert("bookshops", [1.0, 0.0])?;
+/// builder.insert("bookstores", [0.8, 0.6])?;
 /// let costs = CosineEmbeddingCosts::new(builder.build());
 ///
-/// let distance = costs.substitution(&"cat", &"kitten").get();
+/// let distance = costs.substitution(&"bookshops", &"bookstores").get();
 /// assert!((distance - 0.2).abs() < 1e-6);
-/// assert_eq!(costs.substitution(&"cat", &"unknown"), Cost::ONE);
+/// assert_eq!(costs.substitution(&"bookshops", &"unknown"), Cost::ONE);
 /// # Ok::<(), yurine::errors::Error>(())
 /// ```
 #[derive(Debug, Clone)]

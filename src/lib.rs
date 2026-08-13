@@ -41,6 +41,47 @@
 //! whole sequence. It does not occur verbatim: replacing `district` with
 //! `town` costs `0.25`, while unspecified substitutions retain unit cost.
 //!
+//! # Embedding-based search
+//!
+//! [`CosineEmbeddingCosts`](costs::embedding::CosineEmbeddingCosts) derives
+//! substitution costs from static token embeddings. Tokens with similar
+//! vectors can therefore match without an explicit substitution rule.
+//!
+//! ```
+//! use std::num::NonZeroUsize;
+//! use yurine::costs::Cost;
+//! use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+//! use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+//!
+//! # fn main() -> yurine::errors::Result<()> {
+//! let mut builder = SearchEngineBuilder::new();
+//! let jinbocho = builder.add_sequence([
+//!     "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
+//! ])?;
+//! let engine = builder.build()?;
+//!
+//! let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+//! embeddings.insert("bookshops", [1.0, 0.0])?;
+//! embeddings.insert("bookstores", [0.8, 0.6])?;
+//! let costs = CosineEmbeddingCosts::new(embeddings.build());
+//!
+//! let matches = engine.range_searcher(costs).search(
+//!     &["bookshops", "and", "curry"],
+//!     &RangeSearchParams::new(Cost::new_const(0.2)),
+//! )?;
+//!
+//! assert_eq!(matches.len(), 1);
+//! assert_eq!(matches[0].sequence_id, jinbocho);
+//! assert_eq!(matches[0].token_range.start.get(), 2);
+//! assert_eq!(matches[0].token_range.end.get(), 5);
+//! assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Here, `bookshops` matches `bookstores` with cosine distance `0.2`, returning
+//! the `bookstores and curry` segment from the longer sequence.
+//!
 //! Build an index once, then create any number of searchers with
 //! [`levenshtein::LevenshteinCosts`](costs::levenshtein::LevenshteinCosts),
 //! [`custom::CustomCosts`](costs::custom::CustomCosts), or

@@ -42,7 +42,8 @@ sequence. It does not occur verbatim: replacing `district` with `town` costs
 ## Documentation
 
 The Rust Doc is the primary library documentation. It contains the API
-contracts, usage guidance, and executable examples. Generate and open it with:
+contracts, usage guidance, and executable examples, including embedding-based
+search. Generate and open it with:
 
 ```console
 $ cargo doc --no-deps --open
