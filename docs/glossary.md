@@ -1,5 +1,7 @@
 # Glossary
 
+This document defines Yurine's core terminology.
+
 | Term                      | Definition                                                                                                    |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **Token**                 | A user-provided value treated as an indivisible unit of comparison and indexing.                              |
