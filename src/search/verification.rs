@@ -188,7 +188,7 @@ mod tests {
     fn corpus(symbols: Vec<Symbol>) -> CorpusStore {
         let mut builder = CorpusStoreBuilder::new();
         builder.add_string(symbols);
-        builder.build()
+        builder.build(8)
     }
 
     #[test]

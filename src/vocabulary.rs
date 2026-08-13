@@ -82,6 +82,22 @@ impl<T> Vocabulary<T>
 where
     T: Eq + Hash,
 {
+    #[cfg(feature = "persist")]
+    pub(crate) fn from_tokens(tokens: Vec<T>) -> Result<Self>
+    where
+        T: Clone,
+    {
+        let mut symbols = HashMap::with_capacity(tokens.len());
+        for (index, token) in tokens.iter().cloned().enumerate() {
+            if symbols.insert(token, Symbol::from_usize(index)?).is_some() {
+                return Err(crate::errors::Error::InvalidFile(
+                    "decoded vocabulary contains duplicate tokens",
+                ));
+            }
+        }
+        Ok(Self { tokens, symbols })
+    }
+
     /// Returns the symbol assigned to `token`, or [`Symbol::UNKNOWN`].
     pub(crate) fn symbol(&self, token: &T) -> Symbol {
         self.symbols.get(token).copied().unwrap_or(Symbol::UNKNOWN)
@@ -112,6 +128,11 @@ where
     /// Returns the number of distinct tokens.
     pub(crate) fn len(&self) -> usize {
         self.tokens.len()
+    }
+
+    #[cfg(feature = "persist")]
+    pub(crate) fn tokens(&self) -> &[T] {
+        &self.tokens
     }
 
     /// Returns whether the vocabulary contains no tokens.

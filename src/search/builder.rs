@@ -79,7 +79,12 @@ where
             store_builder.add_string(string);
         }
 
-        SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build())
+        let symbol_count = vocabulary.len();
+        SearchEngine::from_parts(
+            vocabulary,
+            index_builder.build(),
+            store_builder.build(symbol_count),
+        )
     }
 }
 

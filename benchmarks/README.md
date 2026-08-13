@@ -24,12 +24,22 @@ Measure construction and one cold plus five warm searches:
 cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-baseline.txt
 ```
 
+To save the engine, reopen its large arrays through mmap, and run the same
+search workload, pass a snapshot path:
+
+```console
+cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-baseline.txt \
+  --persistent-index /tmp/yurine-baseline.index
+```
+
 Output is tab-separated `metric`, `value`, and `unit`. It includes:
 
-- source corpus and persistent-index sizes (the baseline has no persistent index),
+- source corpus and persistent-index sizes,
 - corpus-load, engine-build, cold-search, and warm-search timings,
+- snapshot-save and mmap-open timings,
 - allocator-observed heap peaks for each phase,
 - process peak RSS after build, cold search, and warm search,
+- current file-backed RSS after open, cold search, and warm search on Linux,
 - engine-resident heap after releasing the input corpus,
 - whether exhaustive verification was used, selected query positions, and the
   generated candidate count.
@@ -39,12 +49,11 @@ process, so search RSS includes any earlier construction peak. Heap peaks are
 reset at each phase, and the source text and line vector are released before the
 search phases. `engine_resident_heap` is the allocator-observed current heap
 after that release; use it rather than peak RSS to compare the resident engine
-state. On unsupported operating systems RSS is reported as zero. The
-current implementation has no file-backed mmap pages, so anonymous/file-backed
-RSS is not split. On Linux, record that split externally with
-`/proc/$PID/smaps_rollup`; on macOS use `vmmap` while a larger run is active.
-Later mmap benchmarks should use the same corpus and report the split when the
-host exposes it.
+state. On unsupported operating systems peak RSS is reported as zero. Allocator
+metrics exclude file-backed mmap pages. Linux file-backed RSS is read from
+`/proc/self/smaps_rollup` as total RSS minus anonymous RSS. It includes other
+mapped files as well as the index, so compare it with the in-memory baseline.
+On macOS, use `vmmap` externally while a larger run is active.
 
 To stress candidate generation with repeated postings, use a smaller corpus and
 threshold one:

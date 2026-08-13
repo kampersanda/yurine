@@ -33,6 +33,45 @@ Yurine accepts token sequences and encodes them as internal symbol strings.
 Callers own source text, tokenization, and conversion from returned token ranges
 to source-text byte ranges. Token types remain generic for in-memory search.
 
+## Persistent search indexes
+
+Enable the `persist` feature to save an immutable `SearchEngine` snapshot and
+open it in another process without rebuilding the index:
+
+```rust
+use yurine::persistence::CharCodec;
+use yurine::search::{SearchEngine, SearchEngineBuilder};
+
+# fn example() -> yurine::errors::Result<()> {
+let mut builder = SearchEngineBuilder::new();
+builder.add_sequence(['東', '京'])?;
+let engine = builder.build()?;
+engine.save_with("index.yurine", &CharCodec)?;
+
+let mapped = SearchEngine::open_with("index.yurine", &CharCodec)?;
+mapped.verify()?;
+# Ok(())
+# }
+```
+
+`StringCodec` is also provided. Other token types implement `TokenCodec`; its
+identifier and version must remain stable, and decoding an encoded token must
+preserve equality and hashing.
+
+The version 1 file is little-endian and contains a fixed header and section
+table followed by vocabulary token offsets/blob, sequence offsets, corpus
+symbols, posting offsets, and postings. Vocabulary tokens are decoded into
+memory. The four fixed-width corpus and posting arrays remain views into one
+read-only mmap. Opening validates metadata and every offset; `verify` additionally
+scans corpus symbols and postings for semantic consistency. Individual corpus
+sequences are checked when first accessed by a search even if `verify` was not
+called.
+
+Saving writes and synchronizes a temporary file in the destination directory,
+then atomically renames it. Published snapshots must never be modified or
+truncated in place while mapped. On Windows, replacing a snapshot that another
+process has mapped can fail; publish a new path or wait for readers to close it.
+
 ## Command-line search
 
 The `yurine-cli` package provides the `yurine` binary. It reads one source text

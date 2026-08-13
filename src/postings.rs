@@ -1,12 +1,16 @@
 //! Postings index mapping symbols to their occurrences in the corpus.
 
 use crate::errors::{Error, Result};
+#[cfg(feature = "persist")]
+use crate::persistence::storage::MappedSlice;
+use crate::storage::Storage;
+use crate::store::CorpusStore;
 use crate::types::{Posting, Symbol};
 
 /// Postings index mapping symbols to their occurrences in the corpus.
 pub(crate) struct PostingsIndex {
-    postings: Vec<Posting>,
-    posting_offsets: Vec<u64>,
+    postings: Storage<Posting>,
+    posting_offsets: Storage<u64>,
 }
 
 impl PostingsIndex {
@@ -20,6 +24,62 @@ impl PostingsIndex {
     /// Returns the total frequency of `symbol` in the corpus.
     pub(crate) fn frequency(&self, symbol: Symbol) -> usize {
         self.posting_slice(symbol).len()
+    }
+
+    pub(crate) fn alphabet(&self) -> Vec<Symbol> {
+        self.posting_offsets
+            .windows(2)
+            .enumerate()
+            .filter(|(_, pair)| pair[0] != pair[1])
+            .map(|(index, _)| Symbol::from_usize(index).unwrap())
+            .collect()
+    }
+
+    pub(crate) fn verify(&self, corpus: &CorpusStore) -> Result<()> {
+        if self.postings.len() != corpus.symbol_len() {
+            return Err(Error::InvalidFile(
+                "posting count does not match corpus symbol count",
+            ));
+        }
+        for (raw_symbol, bounds) in self.posting_offsets.windows(2).enumerate() {
+            let symbol = Symbol::from_usize(raw_symbol)?;
+            let postings = &self.postings[bounds[0] as usize..bounds[1] as usize];
+            if postings.windows(2).any(|pair| {
+                (pair[0].string_id, pair[0].position) >= (pair[1].string_id, pair[1].position)
+            }) {
+                return Err(Error::InvalidFile("postings are not strictly ordered"));
+            }
+            for posting in postings {
+                let string = corpus
+                    .string(posting.string_id)?
+                    .ok_or(Error::InvalidFile("posting sequence id is out of range"))?;
+                if string.get(posting.position.as_usize()) != Some(&symbol) {
+                    return Err(Error::InvalidFile("posting does not match the corpus"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "persist")]
+    pub(crate) fn from_mapped(
+        postings: MappedSlice<Posting>,
+        posting_offsets: MappedSlice<u64>,
+    ) -> Self {
+        Self {
+            postings: Storage::Mapped(postings),
+            posting_offsets: Storage::Mapped(posting_offsets),
+        }
+    }
+
+    #[cfg(feature = "persist")]
+    pub(crate) fn postings_slice(&self) -> &[Posting] {
+        &self.postings
+    }
+
+    #[cfg(feature = "persist")]
+    pub(crate) fn posting_offsets(&self) -> &[u64] {
+        &self.posting_offsets
     }
 
     fn posting_slice(&self, symbol: Symbol) -> &[Posting] {
@@ -90,8 +150,8 @@ impl PostingsIndexBuilder {
         postings.shrink_to_fit();
 
         PostingsIndex {
-            postings,
-            posting_offsets,
+            postings: Storage::Owned(postings.into_boxed_slice()),
+            posting_offsets: Storage::Owned(posting_offsets.into_boxed_slice()),
         }
     }
 }
@@ -144,13 +204,14 @@ mod tests {
 
         let index = builder.build();
 
-        assert_eq!(index.postings, [posting]);
-        assert_eq!(index.posting_offsets, [0, 0, 1, 1]);
+        assert_eq!(&*index.postings, [posting]);
+        assert_eq!(&*index.posting_offsets, [0, 0, 1, 1]);
         assert_eq!(index.frequency(Symbol::new(0)), 0);
         assert_eq!(index.frequency(Symbol::new(1)), 1);
         assert_eq!(index.frequency(Symbol::new(2)), 0);
         assert_eq!(index.frequency(Symbol::new(3)), 0);
         assert_eq!(index.frequency(Symbol::UNKNOWN), 0);
+        assert_eq!(index.alphabet(), [Symbol::new(1)]);
     }
 
     #[test]
@@ -184,7 +245,7 @@ mod tests {
 
         let index = builder.build();
 
-        assert_eq!(index.posting_offsets, [0, 1, 2, 4]);
+        assert_eq!(&*index.posting_offsets, [0, 1, 2, 4]);
         assert_eq!(
             index.postings(Symbol::new(0)).collect::<Vec<_>>(),
             [for_first]
@@ -221,7 +282,7 @@ mod tests {
     fn empty_vocabulary_has_no_postings() {
         let index = PostingsIndexBuilder::new(0).build();
 
-        assert_eq!(index.posting_offsets, [0]);
+        assert_eq!(&*index.posting_offsets, [0]);
         assert_eq!(index.postings(Symbol::new(0)).collect::<Vec<_>>(), []);
         assert_eq!(index.frequency(Symbol::new(0)), 0);
     }

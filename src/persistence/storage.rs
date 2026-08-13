@@ -83,39 +83,29 @@ impl<T> MappedSlice<T> {
         // alive by `self.mmap` for the returned borrow.
         unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.len) }
     }
-}
 
-impl<T> Deref for MappedSlice<T> {
-    type Target = [T];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
-    }
-}
-
-/// Either an in-memory array or a typed view into an immutable mapping.
-#[derive(Debug)]
-pub(crate) enum Storage<T> {
-    Owned(Box<[T]>),
-    Mapped(MappedSlice<T>),
-}
-
-impl<T> From<MappedSlice<T>> for Storage<T> {
-    fn from(values: MappedSlice<T>) -> Self {
-        Self::Mapped(values)
-    }
-}
-
-impl<T> Storage<T> {
-    pub(crate) fn as_slice(&self) -> &[T] {
-        match self {
-            Self::Owned(values) => values,
-            Self::Mapped(values) => values,
+    /// Reinterprets a validated disk representation as an equivalent domain type.
+    ///
+    /// # Safety
+    ///
+    /// `U` must have the same size and alignment as `T`, and every bit pattern
+    /// accepted by `T` must also be valid for `U`.
+    pub(crate) unsafe fn cast<U>(self) -> MappedSlice<U> {
+        assert_eq!(size_of::<T>(), size_of::<U>());
+        assert_eq!(align_of::<T>(), align_of::<U>());
+        let Self {
+            mmap, pointer, len, ..
+        } = self;
+        MappedSlice {
+            mmap,
+            pointer: pointer.cast(),
+            len,
+            marker: PhantomData,
         }
     }
 }
 
-impl<T> Deref for Storage<T> {
+impl<T> Deref for MappedSlice<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -148,9 +138,9 @@ mod tests {
     use memmap2::MmapOptions;
     use tempfile::NamedTempFile;
 
-    use super::{MappedSlice, Storage};
+    use super::MappedSlice;
     use crate::errors::Error;
-    use crate::types::Symbol;
+    use crate::storage::Storage;
 
     fn test_map(bytes: &[u8]) -> Arc<memmap2::Mmap> {
         let mut mmap = MmapOptions::new().len(bytes.len()).map_anon().unwrap();
@@ -170,14 +160,6 @@ mod tests {
         let mapped = Storage::Mapped(mapped);
 
         assert_eq!(owned.as_slice(), mapped.as_slice());
-    }
-
-    #[test]
-    fn owned_storage_does_not_require_zerocopy_traits() {
-        let values = Storage::Owned(vec![Symbol::new(7)].into_boxed_slice());
-
-        assert_eq!(values[0].get(), 7);
-        assert!(format!("{values:?}").contains("Symbol"));
     }
 
     #[test]
