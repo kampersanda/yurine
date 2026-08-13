@@ -15,8 +15,8 @@ use crate::types::{Position, Symbol};
 /// are unique because selected positions, neighborhood symbols, and each
 /// symbol's postings are unique, and postings for distinct symbols do not
 /// overlap. If a future index can generate duplicate anchors, verification
-/// still consolidates identical result intervals; duplicates would add work but
-/// would not change search results.
+/// still consolidates identical result substrings; duplicates would add work
+/// but would not change search results.
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
 /// outside `query`.

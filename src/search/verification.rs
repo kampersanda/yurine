@@ -19,8 +19,8 @@ impl Verifier {
     /// Returns exactly the non-empty substrings whose distance is at most
     /// `threshold`.
     ///
-    /// Each interval must occur exactly once. Results must be ordered by
-    /// string ID, then range start, then range end.
+    /// Each substring must occur exactly once. Results must be ordered by data
+    /// string ID, then symbol-range start, then symbol-range end.
     pub(in crate::search) fn verify<C>(
         &self,
         query: &[Symbol],
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn bidirectional_trie_returns_each_anchored_interval_once_in_range_order() {
+    fn bidirectional_trie_returns_each_anchored_substring_once_in_symbol_range_order() {
         let a = Symbol::new(0);
         let b = Symbol::new(1);
         let x = Symbol::new(2);

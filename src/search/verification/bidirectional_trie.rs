@@ -127,7 +127,7 @@ where
     // query and cost policy, so sharing it across calls would be unsound.
     let mut forest = TrieForest::default();
     let mut directional_queries = BTreeMap::<usize, DirectionalQueries>::new();
-    let mut intervals = BTreeMap::<(StringId, usize, usize), f32>::new();
+    let mut substrings = BTreeMap::<(StringId, usize, usize), f32>::new();
 
     for candidate in candidates {
         // Candidates were validated before cache construction, so an
@@ -192,7 +192,7 @@ where
                 if distance < threshold {
                     let start = string_position - backward_len;
                     let end = string_position + forward_len + 1;
-                    intervals
+                    substrings
                         .entry((candidate.string_id, start, end))
                         .and_modify(|stored| *stored = (*stored).min(distance))
                         .or_insert(distance);
@@ -201,7 +201,7 @@ where
         }
     }
 
-    let matches = intervals
+    let matches = substrings
         .into_iter()
         .map(|((string_id, start, end), distance)| {
             create_match(string_id, start, end, Cost::new(distance)?)

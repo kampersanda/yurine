@@ -84,9 +84,10 @@ where
     T: Clone + Eq + Hash,
     C: EditCosts<T>,
 {
-    /// Finds non-empty substrings satisfying the configured range search.
+    /// Finds non-empty data segments satisfying the configured range search.
     ///
-    /// Results are ordered by string ID, then range start, then range end.
+    /// Results are ordered by data string ID, then token-range start, then
+    /// token-range end.
     ///
     /// When eta is not configured, it defaults to
     /// `threshold / query.len()`. This favors constructing a
@@ -102,7 +103,8 @@ where
     /// such a case.
     ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query length `m` and
-    /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` intervals.
+    /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` data
+    /// segments.
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
     ///

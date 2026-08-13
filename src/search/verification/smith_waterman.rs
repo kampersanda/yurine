@@ -12,7 +12,7 @@ use crate::types::{StringId, Symbol};
 /// Exact Smith-Waterman-based verification that preserves every start position.
 ///
 /// Unlike the usual `O(mn)` semi-global variant, this verifier's contract is to
-/// enumerate every interval below the threshold. Its intended baseline
+/// enumerate every substring below the threshold. Its intended baseline
 /// implementation therefore uses `O(n^2 m)` time and `O(m)` DP working space,
 /// as described in `docs/development/smith-waterman-verification.md`. It
 /// additionally uses `O(u)` space to deduplicate the `u` candidate-referenced
@@ -78,7 +78,7 @@ where
     let mut previous = Vec::with_capacity(query.len() + 1);
     let mut current = Vec::with_capacity(query.len() + 1);
 
-    // Fix the substring start so that each non-empty interval is considered
+    // Fix the substring start so that each non-empty substring is considered
     // exactly once. Starts and ends increase monotonically, which also gives
     // deterministic range ordering within a data string.
     for start in 0..string.len() {
@@ -124,7 +124,7 @@ where
 
             // The final cell is wed(query, string[start..=end]). Convert the
             // inclusive `end` used by this loop to the public end-exclusive
-            // range. The internal threshold is the strict upper bound
+            // token range. The internal threshold is the strict upper bound
             // immediately above the public inclusive threshold.
             if current[query.len()] < threshold {
                 matches.push(create_match(

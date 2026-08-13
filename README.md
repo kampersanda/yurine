@@ -1,6 +1,6 @@
 # yurine
 
-Fast and exact substring search under weighted edit distance
+Fast and exact search for sequence segments under weighted edit distance
 
 The reproducible performance baseline and compatibility workload for the
 persistent-index work are documented in [`benchmarks/`](benchmarks/README.md).
@@ -31,6 +31,8 @@ fn main() -> Result<()> {
 Yurine accepts token sequences and encodes them as internal symbol strings.
 Callers own source text, tokenization, and conversion from returned token ranges
 to source-text byte ranges. Token types remain generic for in-memory search.
+See the [glossary](docs/glossary.md) for the distinction between public token
+sequences and their internal symbol-string representations.
 
 ## Command-line search
 
@@ -113,8 +115,8 @@ For token-specific edit costs, use a custom configuration:
 }
 ```
 
-Rules are directed from the query to the corpus and are read one JSON object
-per line:
+Rules are directed from the query sequence to a data segment and are read one
+JSON object per line:
 
 ```json
 {"operation":"substitution","from":"colour","to":"color","cost":0.25}

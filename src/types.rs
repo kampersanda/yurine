@@ -3,7 +3,7 @@
 use crate::errors::{Error, Result};
 use std::fmt::Display;
 
-/// Identifies a string.
+/// Identifies a data string in a corpus.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringId(u32);
@@ -38,7 +38,11 @@ impl Display for StringId {
     }
 }
 
-/// A zero-based symbol position within a string.
+/// A zero-based position shared by a sequence and its encoded string.
+///
+/// Encoding replaces each token with exactly one symbol, so a token position
+/// in a sequence and the corresponding symbol position in its string have the
+/// same numeric value.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position(u32);
@@ -81,7 +85,7 @@ pub struct Posting {
     pub position: Position,
 }
 
-/// Identifies a token in a vocabulary.
+/// A compact integer identifier representing a token in a vocabulary.
 ///
 /// A symbol is meaningful only together with the vocabulary that assigned it.
 #[repr(transparent)]
