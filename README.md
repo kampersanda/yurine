@@ -10,13 +10,17 @@ use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
 
 fn main() -> Result<()> {
-    let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+    let mut builder = SearchEngineBuilder::new();
 
     let tokyo = builder.add_sequence(['東', '京'])?;
     builder.add_sequence(['京', '都'])?;
 
     let engine = builder.build()?;
-    let matches = engine.range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))?;
+    let matches = engine.range_search(
+        &['東', '京'],
+        &RangeSearchParams::new(Cost::ZERO),
+        &LevenshteinCosts::new(),
+    )?;
 
     assert_eq!(matches[0].sequence_id, tokyo);
     assert_eq!(matches[0].token_range.start.get(), 0);

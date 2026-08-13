@@ -14,7 +14,8 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
     embeddings.insert('あ', vec![0.8, 0.6]).unwrap();
     embeddings.insert('b', vec![0.0, 1.0]).unwrap();
 
-    let mut builder = SearchEngineBuilder::new(CosineEmbeddingCosts::new(embeddings));
+    let costs = CosineEmbeddingCosts::new(embeddings);
+    let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['あ', 'b']).unwrap();
     let engine = builder.build().unwrap();
 
@@ -22,6 +23,7 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
         .range_search(
             &['x'],
             &RangeSearchParams::new(Cost::new_const(0.25)).with_eta(Cost::new_const(0.25)),
+            &costs,
         )
         .unwrap();
 

@@ -79,12 +79,14 @@ pub fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost>
     }
 }
 
-impl<T, C> SearchEngine<T, C>
+impl<T> SearchEngine<T>
 where
     T: Clone + Eq + Hash,
-    C: EditCosts<T>,
 {
     /// Finds non-empty data segments satisfying the configured range search.
+    ///
+    /// `costs` defines the weighted edit distance for this search and is not
+    /// retained by the engine.
     ///
     /// Results are ordered by data sequence ID, then token-range start, then
     /// token-range end.
@@ -112,24 +114,32 @@ where
     /// than the normal filter-and-verify path.
     ///
     /// Searching takes `&self`, so one engine can serve concurrent queries.
-    pub fn range_search(
+    pub fn range_search<C>(
         &self,
         query_sequence: &[T],
         params: &RangeSearchParams,
-    ) -> Result<Vec<Match>> {
-        self.range_search_with_metrics(query_sequence, params)
+        costs: &C,
+    ) -> Result<Vec<Match>>
+    where
+        C: EditCosts<T>,
+    {
+        self.range_search_with_metrics(query_sequence, params, costs)
             .map(|(matches, _)| matches)
     }
 
     /// Finds matches and returns filtering measurements for reproducible
     /// performance comparisons.
-    pub fn range_search_with_metrics(
+    pub fn range_search_with_metrics<C>(
         &self,
         query_sequence: &[T],
         params: &RangeSearchParams,
-    ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
+        costs: &C,
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)>
+    where
+        C: EditCosts<T>,
+    {
         let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.vocabulary)?;
-        let costs = encoded_query.costs(&self.vocabulary, &self.costs);
+        let costs = encoded_query.costs(&self.vocabulary, costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
         let eta = match params.eta {
@@ -237,6 +247,7 @@ mod tests {
 
     use super::{MinCandidateSelector, RangeSearchParams, automatic_eta, verify_exhaustively};
     use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
+    use crate::costs::levenshtein::LevenshteinCosts;
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
@@ -273,7 +284,7 @@ mod tests {
         }
     }
 
-    fn engine() -> SearchEngine<char, CharacterCosts> {
+    fn engine() -> SearchEngine<char> {
         let mut vocabulary_builder = VocabularyBuilder::new();
         vocabulary_builder.insert('a');
         let vocabulary = vocabulary_builder.build().unwrap();
@@ -296,13 +307,7 @@ mod tests {
         store_builder.add_string(vec![symbol]);
         store_builder.add_string(vec![symbol]);
 
-        SearchEngine::from_parts(
-            vocabulary,
-            CharacterCosts,
-            index_builder.build(),
-            store_builder.build(),
-        )
-        .unwrap()
+        SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build()).unwrap()
     }
 
     fn expected_matches(distance: Cost) -> Vec<Match> {
@@ -323,7 +328,11 @@ mod tests {
     #[test]
     fn applies_substitution_cost_for_query_only_token() {
         let matches = engine()
-            .range_search(&['y'], &RangeSearchParams::new(Cost::new_const(0.4)))
+            .range_search(
+                &['y'],
+                &RangeSearchParams::new(Cost::new_const(0.4)),
+                &CharacterCosts,
+            )
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::new_const(0.4)));
@@ -332,7 +341,11 @@ mod tests {
     #[test]
     fn applies_deletion_cost_for_query_only_token() {
         let matches = engine()
-            .range_search(&['x', 'a'], &RangeSearchParams::new(Cost::new_const(0.25)))
+            .range_search(
+                &['x', 'a'],
+                &RangeSearchParams::new(Cost::new_const(0.25)),
+                &CharacterCosts,
+            )
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::new_const(0.25)));
@@ -345,14 +358,39 @@ mod tests {
         let deletion_params = RangeSearchParams::new(Cost::new_const(0.25));
 
         std::thread::scope(|scope| {
-            let substitution =
-                scope.spawn(|| engine.range_search(&['y'], &substitution_params).unwrap());
-            let deletion =
-                scope.spawn(|| engine.range_search(&['x', 'a'], &deletion_params).unwrap());
+            let substitution = scope.spawn(|| {
+                engine
+                    .range_search(&['y'], &substitution_params, &CharacterCosts)
+                    .unwrap()
+            });
+            let deletion = scope.spawn(|| {
+                engine
+                    .range_search(&['x', 'a'], &deletion_params, &CharacterCosts)
+                    .unwrap()
+            });
 
             assert_eq!(substitution.join().unwrap()[0].distance, 0.4);
             assert_eq!(deletion.join().unwrap()[0].distance, 0.25);
         });
+    }
+
+    #[test]
+    fn one_engine_accepts_different_cost_policies() {
+        let engine = engine();
+        let params = RangeSearchParams::new(Cost::new_const(0.4));
+
+        assert_eq!(
+            engine
+                .range_search(&['y'], &params, &CharacterCosts)
+                .unwrap(),
+            expected_matches(Cost::new_const(0.4))
+        );
+        assert!(
+            engine
+                .range_search(&['y'], &params, &LevenshteinCosts::new())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -378,7 +416,7 @@ mod tests {
     #[test]
     fn falls_back_to_exhaustive_search_when_no_threshold_subsequence_exists() {
         let matches = engine()
-            .range_search(&['x'], &RangeSearchParams::new(Cost::ONE))
+            .range_search(&['x'], &RangeSearchParams::new(Cost::ONE), &CharacterCosts)
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::ONE));
@@ -386,7 +424,8 @@ mod tests {
 
     #[test]
     fn empty_query_sequence_reports_unavailable_threshold_subsequence() {
-        let result = engine().range_search(&[], &RangeSearchParams::new(Cost::ZERO));
+        let result =
+            engine().range_search(&[], &RangeSearchParams::new(Cost::ZERO), &CharacterCosts);
 
         assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
     }
@@ -400,7 +439,8 @@ mod tests {
         embeddings.insert('b', vec![0.0, 1.0]).unwrap();
         embeddings.insert('c', vec![-1.0, 0.0]).unwrap();
 
-        let mut builder = SearchEngineBuilder::new(CosineEmbeddingCosts::new(embeddings));
+        let costs = CosineEmbeddingCosts::new(embeddings);
+        let mut builder = SearchEngineBuilder::new();
         builder.add_sequence(['a', 'b']).unwrap();
         builder.add_sequence(['b', 'a']).unwrap();
         builder.add_sequence(['a', 'c']).unwrap();
@@ -409,7 +449,7 @@ mod tests {
         let eta = Cost::new_const(0.25);
 
         let encoded_query = EncodedQuery::new(vec!['x', 'y'], &engine.vocabulary).unwrap();
-        let costs = encoded_query.costs(&engine.vocabulary, &engine.costs);
+        let encoded_costs = encoded_query.costs(&engine.vocabulary, &costs);
         assert!(
             MinCandidateSelector
                 .select(
@@ -417,7 +457,7 @@ mod tests {
                     threshold,
                     eta,
                     &engine.index,
-                    &costs,
+                    &encoded_costs,
                     &engine.neighborhood,
                 )
                 .is_ok()
@@ -427,10 +467,16 @@ mod tests {
             .range_search(
                 &['x', 'y'],
                 &RangeSearchParams::new(threshold).with_eta(eta),
+                &costs,
             )
             .unwrap();
-        let exhaustive =
-            verify_exhaustively(encoded_query.string(), threshold, &engine.store, &costs).unwrap();
+        let exhaustive = verify_exhaustively(
+            encoded_query.string(),
+            threshold,
+            &engine.store,
+            &encoded_costs,
+        )
+        .unwrap();
 
         assert_eq!(filtered, exhaustive);
         assert_eq!(filtered.len(), 1);

@@ -28,7 +28,7 @@ impl EditCosts<char> for CompatibilityCosts {
 
 #[test]
 fn range_search_result_contract_is_stable() {
-    let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
+    let mut builder = SearchEngineBuilder::new();
     for source_text in ["x東京y", "東京", "東亰", "東京東京", "京都"] {
         builder.add_sequence(source_text.chars()).unwrap();
     }
@@ -38,6 +38,7 @@ fn range_search_result_contract_is_stable() {
         .range_search(
             &['東', '京'],
             &RangeSearchParams::new(Cost::new_const(0.25)).with_eta(Cost::new_const(0.25)),
+            &CompatibilityCosts,
         )
         .unwrap();
 
@@ -75,14 +76,18 @@ fn range_search_result_contract_is_stable() {
 
 #[test]
 fn repeated_postings_report_candidate_count_without_deduplication() {
-    let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
+    let mut builder = SearchEngineBuilder::new();
     for _ in 0..128 {
         builder.add_sequence("aaaaaaaa".chars()).unwrap();
     }
     let engine = builder.build().unwrap();
 
     let (_, metrics) = engine
-        .range_search_with_metrics(&['a', 'a'], &RangeSearchParams::new(Cost::ONE))
+        .range_search_with_metrics(
+            &['a', 'a'],
+            &RangeSearchParams::new(Cost::ONE),
+            &CompatibilityCosts,
+        )
         .unwrap();
 
     assert_eq!(metrics.selected_query_positions, 2);
@@ -91,13 +96,17 @@ fn repeated_postings_report_candidate_count_without_deduplication() {
 
 #[test]
 fn exhaustive_fallback_result_contract_is_stable() {
-    let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
+    let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['a']).unwrap();
     builder.add_sequence([]).unwrap();
     let engine = builder.build().unwrap();
 
     let (matches, metrics) = engine
-        .range_search_with_metrics(&['a'], &RangeSearchParams::new(Cost::ONE))
+        .range_search_with_metrics(
+            &['a'],
+            &RangeSearchParams::new(Cost::ONE),
+            &CompatibilityCosts,
+        )
         .unwrap();
 
     assert!(metrics.used_exhaustive_verification);
@@ -113,14 +122,18 @@ fn exhaustive_fallback_result_contract_is_stable() {
 
 #[test]
 fn empty_query_sequence_error_contract_is_stable() {
-    let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
+    let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['a']).unwrap();
     let engine = builder.build().unwrap();
 
     // This intentionally fixes the current error variant. Replacing it with a
     // dedicated empty-query error should be treated as an explicit API change.
     assert_eq!(
-        engine.range_search(&[], &RangeSearchParams::new(Cost::ZERO)),
+        engine.range_search(
+            &[],
+            &RangeSearchParams::new(Cost::ZERO),
+            &CompatibilityCosts,
+        ),
         Err(Error::ThresholdSubsequenceUnavailable)
     );
 }

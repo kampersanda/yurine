@@ -7,7 +7,7 @@ mod verification;
 use std::hash::Hash;
 use std::ops::Range;
 
-use crate::costs::{Cost, EditCosts};
+use crate::costs::Cost;
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
@@ -37,25 +37,26 @@ pub struct Match {
     pub distance: Cost,
 }
 
-/// Coordinates threshold-subsequence filtering and exact verification.
+/// A reusable search index built from data sequences.
 ///
-/// Create an engine with [`SearchEngineBuilder`].
-pub struct SearchEngine<T, C> {
+/// The index owns the vocabulary, encoded corpus, and postings needed for
+/// filtering and verification. Edit costs are supplied for each search, so
+/// one index can be reused with different cost policies.
+///
+/// Create an index with [`SearchEngineBuilder`].
+pub struct SearchEngine<T> {
     vocabulary: Vocabulary<T>,
-    costs: C,
     index: PostingsIndex,
     store: CorpusStore,
     neighborhood: SubstitutionNeighborhood,
 }
 
-impl<T, C> SearchEngine<T, C>
+impl<T> SearchEngine<T>
 where
     T: Clone + Eq + Hash,
-    C: EditCosts<T>,
 {
     pub(crate) fn from_parts(
         vocabulary: Vocabulary<T>,
-        costs: C,
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {
@@ -67,7 +68,6 @@ where
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
         Ok(Self {
             vocabulary,
-            costs,
             index,
             store,
             neighborhood,
@@ -78,7 +78,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::SearchEngine;
-    use crate::costs::levenshtein::LevenshteinCosts;
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::store::CorpusStoreBuilder;
@@ -97,7 +96,6 @@ mod tests {
 
         let result = SearchEngine::from_parts(
             vocabulary,
-            LevenshteinCosts::new(),
             PostingsIndexBuilder::new(1).build(),
             store_builder.build(),
         );
