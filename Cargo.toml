@@ -19,3 +19,4 @@ zerocopy = { version = "0.8.54", features = ["derive"], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
+tempfile = "3.27.0"

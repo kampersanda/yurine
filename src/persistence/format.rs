@@ -452,11 +452,12 @@ fn checked_range(bytes: &[u8], offset: u64, len: u64) -> Result<&[u8]> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::io::Write;
     use std::path::Path;
     use std::sync::Arc;
 
     use memmap2::MmapOptions;
+    use tempfile::{NamedTempFile, tempdir};
     use zerocopy::IntoBytes;
 
     use super::{
@@ -649,13 +650,14 @@ mod tests {
     #[test]
     fn open_checks_file_length_before_mapping() {
         let fixture = Fixture::valid();
-        let path =
-            std::env::temp_dir().join(format!("yurine-format-{}-{}", std::process::id(), line!()));
-        fs::write(&path, &fixture.bytes).unwrap();
-        PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec).unwrap();
-        fs::write(&path, &fixture.bytes[..fixture.bytes.len() - 1]).unwrap();
-        let result = PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec);
-        fs::remove_file(path).unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&fixture.bytes).unwrap();
+        file.flush().unwrap();
+        PersistedFile::open(file.path(), FileKind::SearchEngine, &CharCodec).unwrap();
+        file.as_file_mut()
+            .set_len((fixture.bytes.len() - 1) as u64)
+            .unwrap();
+        let result = PersistedFile::open(file.path(), FileKind::SearchEngine, &CharCodec);
         assert!(matches!(
             result,
             Err(Error::InvalidFile("recorded file length does not match"))
@@ -664,11 +666,8 @@ mod tests {
 
     #[test]
     fn open_io_error_identifies_the_file() {
-        let path = std::env::temp_dir().join(format!(
-            "yurine-missing-format-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("missing.yurine");
 
         assert!(matches!(
             PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec),

@@ -143,10 +143,10 @@ pub(crate) fn map_file(file: &File, path: &Path) -> Result<Arc<Mmap>> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, File};
     use std::sync::Arc;
 
     use memmap2::MmapOptions;
+    use tempfile::NamedTempFile;
 
     use super::{MappedSlice, Storage};
     use crate::errors::Error;
@@ -195,15 +195,8 @@ mod tests {
 
     #[test]
     fn empty_file_is_rejected_before_mapping() {
-        let path = std::env::temp_dir().join(format!(
-            "yurine-empty-map-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        fs::write(&path, []).unwrap();
-        let file = File::open(&path).unwrap();
-        let result = super::map_file(&file, &path);
-        fs::remove_file(path).unwrap();
+        let file = NamedTempFile::new().unwrap();
+        let result = super::map_file(file.as_file(), file.path());
 
         assert!(matches!(result, Err(Error::InvalidFile("file is empty"))));
     }
