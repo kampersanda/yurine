@@ -2,7 +2,7 @@
 
 | Term                      | Definition                                                                                                    |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Token**                 | A caller-provided value that Yurine treats as one indivisible unit for comparison and indexing.               |
+| **Token**                 | A user-provided value treated as an indivisible unit of comparison and indexing.                              |
 | **Sequence**              | A finite, ordered list of tokens.                                                                             |
 | **Segment**               | A non-empty contiguous portion of a sequence, identified by a range of token positions.                       |
 | **Vocabulary**            | The mapping between each distinct token in the data sequences and the symbol assigned to it.                  |
