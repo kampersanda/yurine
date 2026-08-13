@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufWriter, Read, Write};
 use std::mem::{align_of, size_of};
 use std::path::Path;
 use std::sync::Arc;
@@ -28,6 +28,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 use super::TokenCodec;
 use super::storage::{MappedSlice, map_file};
 use crate::errors::{Error, Result};
+use crate::types::{Posting, Symbol};
 
 pub(crate) const MAGIC: [u8; 8] = *b"YURINE\0\0";
 pub(crate) const FORMAT_VERSION: u32 = 1;
@@ -209,6 +210,187 @@ pub(crate) struct PersistedFile {
     sections: BTreeMap<SectionKind, SectionDescriptor>,
 }
 
+pub(crate) enum SectionData<'a> {
+    Bytes { bytes: &'a [u8], element_count: u64 },
+    U64(&'a [u64]),
+    Symbols(&'a [Symbol]),
+    Postings(&'a [Posting]),
+}
+
+impl SectionData<'_> {
+    fn byte_len(&self) -> u64 {
+        match self {
+            Self::Bytes { bytes, .. } => bytes.len() as u64,
+            Self::U64(values) => std::mem::size_of_val(*values) as u64,
+            Self::Symbols(values) => std::mem::size_of_val(*values) as u64,
+            Self::Postings(values) => std::mem::size_of_val(*values) as u64,
+        }
+    }
+
+    fn element_count(&self) -> u64 {
+        match self {
+            Self::Bytes { element_count, .. } => *element_count,
+            Self::U64(values) => values.len() as u64,
+            Self::Symbols(values) => values.len() as u64,
+            Self::Postings(values) => values.len() as u64,
+        }
+    }
+
+    fn write_to(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        match self {
+            Self::Bytes { bytes, .. } => writer.write_all(bytes),
+            Self::U64(values) => values
+                .iter()
+                .try_for_each(|value| writer.write_all(&value.to_le_bytes())),
+            Self::Symbols(values) => values
+                .iter()
+                .try_for_each(|value| writer.write_all(&value.get().to_le_bytes())),
+            Self::Postings(values) => values.iter().try_for_each(|value| {
+                writer.write_all(&value.string_id.get().to_le_bytes())?;
+                writer.write_all(&value.position.get().to_le_bytes())
+            }),
+        }
+    }
+}
+
+/// Writes a complete immutable snapshot and atomically publishes it at `path`.
+///
+/// Section descriptors are derived from `sections`, so the bytes and metadata
+/// cannot disagree. The temporary file and destination share a directory to
+/// keep the final rename atomic.
+pub(crate) fn write_file<T, C: TokenCodec<T>>(
+    path: &Path,
+    kind: FileKind,
+    codec: &C,
+    sections: &[(SectionKind, SectionData<'_>)],
+) -> Result<()> {
+    validate_codec_id_len(codec.id())?;
+    if cfg!(target_endian = "big") {
+        return Err(Error::UnsupportedHostEndianness);
+    }
+
+    let codec_offset = HEADER_LEN as u64;
+    let codec_len = codec.id().len() as u64;
+    let section_table_offset = align_up(codec_offset + codec_len, 8)?;
+    let table_len = (sections.len() as u64)
+        .checked_mul(SECTION_ENTRY_LEN as u64)
+        .ok_or(Error::InvalidFile("section table length overflows"))?;
+    let mut cursor = section_table_offset + table_len;
+    let mut descriptors = Vec::with_capacity(sections.len());
+    for (section_kind, data) in sections {
+        let alignment = section_kind
+            .element_layout()
+            .map_or(1, |(_, alignment)| alignment as u64);
+        cursor = align_up(cursor, alignment)?;
+        let descriptor = SectionDescriptor {
+            kind: *section_kind,
+            offset: cursor,
+            byte_len: data.byte_len(),
+            element_count: data.element_count(),
+        };
+        cursor = cursor
+            .checked_add(descriptor.byte_len)
+            .ok_or(Error::InvalidFile("file length overflows"))?;
+        descriptors.push(descriptor);
+    }
+
+    let header = DiskHeader {
+        magic: MAGIC,
+        format_version: U32::new(FORMAT_VERSION),
+        endian_marker: U32::new(ENDIAN_MARKER),
+        file_kind: U32::new(kind as u32),
+        header_len: U32::new(HEADER_LEN as u32),
+        codec_version: U32::new(codec.version()),
+        section_count: U32::new(sections.len() as u32),
+        codec_offset: U64::new(codec_offset),
+        codec_len: U64::new(codec_len),
+        section_table_offset: U64::new(section_table_offset),
+        file_len: U64::new(cursor),
+    };
+
+    // A bare relative filename has an empty parent rather than no parent.
+    // Normalize it to `.` so the durability sync opens the current directory.
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).map_err(|error| Error::io(path, error))?;
+    {
+        let mut writer = BufWriter::new(temporary.as_file_mut());
+        writer
+            .write_all(header.as_bytes())
+            .and_then(|_| writer.write_all(codec.id().as_bytes()))
+            .map_err(|error| Error::io(path, error))?;
+        write_padding(
+            &mut writer,
+            section_table_offset - codec_offset - codec_len,
+            path,
+        )?;
+        for descriptor in &descriptors {
+            let entry = DiskSectionEntry {
+                kind: U32::new(descriptor.kind as u32),
+                flags: U32::ZERO,
+                offset: U64::new(descriptor.offset),
+                byte_len: U64::new(descriptor.byte_len),
+                element_count: U64::new(descriptor.element_count),
+            };
+            writer
+                .write_all(entry.as_bytes())
+                .map_err(|error| Error::io(path, error))?;
+        }
+        let mut written = section_table_offset + table_len;
+        for ((_, data), descriptor) in sections.iter().zip(&descriptors) {
+            write_padding(&mut writer, descriptor.offset - written, path)?;
+            data.write_to(&mut writer)
+                .map_err(|error| Error::io(path, error))?;
+            written = descriptor.offset + descriptor.byte_len;
+        }
+        writer.flush().map_err(|error| Error::io(path, error))?;
+    }
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|error| Error::io(path, error))?;
+    temporary
+        .persist(path)
+        .map_err(|error| Error::io(path, error.error))?;
+    sync_parent(parent, path)?;
+    Ok(())
+}
+
+fn align_up(value: u64, alignment: u64) -> Result<u64> {
+    let remainder = value % alignment;
+    value
+        .checked_add((alignment - remainder) % alignment)
+        .ok_or(Error::InvalidFile("file alignment overflows"))
+}
+
+fn write_padding(writer: &mut impl Write, len: u64, path: &Path) -> Result<()> {
+    const ZEROS: [u8; 64] = [0; 64];
+    let mut remaining = len;
+    while remaining != 0 {
+        let chunk_len = usize::try_from(remaining.min(ZEROS.len() as u64)).unwrap();
+        writer
+            .write_all(&ZEROS[..chunk_len])
+            .map_err(|error| Error::io(path, error))?;
+        remaining -= chunk_len as u64;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_parent(parent: &Path, path: &Path) -> Result<()> {
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| Error::io(path, error))
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_: &Path, _: &Path) -> Result<()> {
+    Ok(())
+}
+
 impl PersistedFile {
     /// Opens a file while enforcing the mmap safety precondition on file size.
     ///
@@ -372,6 +554,33 @@ impl PersistedFile {
             section.byte_len,
             section.element_count,
         )
+    }
+
+    /// Returns a mapped symbol view after structural section validation.
+    ///
+    /// Symbol membership in the decoded vocabulary is a semantic property and
+    /// is deliberately checked by CorpusStore when the range is accessed.
+    pub(crate) fn mapped_symbols(&self, kind: SectionKind) -> Result<MappedSlice<Symbol>> {
+        let values = self.mapped_slice::<DiskSymbol>(kind)?;
+        // SAFETY: both types are transparent u32 wrappers and all u32 bit
+        // patterns are valid. Semantic symbol validation happens lazily.
+        Ok(unsafe { values.cast() })
+    }
+
+    /// Returns a mapped posting view after structural section validation.
+    ///
+    /// Sequence IDs, positions, ordering, and correspondence with the corpus
+    /// are checked only by SearchEngine::verify.
+    pub(crate) fn mapped_postings(&self, kind: SectionKind) -> Result<MappedSlice<Posting>> {
+        let values = self.mapped_slice::<DiskPosting>(kind)?;
+        // SAFETY: both representations are two consecutive u32 values and all
+        // bit patterns are valid for SequenceId and Position.
+        Ok(unsafe { values.cast() })
+    }
+
+    pub(crate) fn bytes(&self, kind: SectionKind) -> Result<&[u8]> {
+        let section = self.section(kind)?;
+        checked_range(&self.mmap, section.offset, section.byte_len)
     }
 
     fn validate_structure(&self) -> Result<()> {
@@ -538,7 +747,7 @@ mod tests {
     use super::{
         DiskHeader, DiskPosting, DiskSectionEntry, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION,
         FileKind, HEADER_LEN, MAGIC, MAX_CODEC_ID_LEN, PersistedFile, SECTION_ENTRY_LEN,
-        SectionKind, U32, U64,
+        SectionKind, U32, U64, write_padding,
     };
     use crate::errors::Error;
     use crate::persistence::{CharCodec, TokenCodec};
@@ -913,5 +1122,14 @@ mod tests {
         assert_eq!(align_of::<DiskSymbol>(), 4);
         assert_eq!(size_of::<DiskPosting>(), 8);
         assert_eq!(align_of::<DiskPosting>(), 4);
+    }
+
+    #[test]
+    fn writes_padding_larger_than_the_internal_zero_buffer() {
+        let mut output = Vec::new();
+
+        write_padding(&mut output, 129, Path::new("unused")).unwrap();
+
+        assert_eq!(output, vec![0; 129]);
     }
 }

@@ -1,7 +1,7 @@
 use yurine::costs::{Cost, EditCosts};
 use yurine::errors::Error;
-use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
+use yurine::search::{SearchEngine, SearchEngineBuilder};
 use yurine::types::{Position, SequenceId};
 
 struct CompatibilityCosts;
@@ -28,11 +28,31 @@ impl EditCosts<char> for CompatibilityCosts {
 
 #[test]
 fn range_search_result_contract_is_stable() {
+    assert_range_search_result_contract(build_compatibility_engine());
+}
+
+#[cfg(feature = "persist")]
+#[test]
+fn mmap_range_search_result_contract_is_stable() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("compatibility.yurine");
+    build_compatibility_engine()
+        .save_with(&path, &yurine::persistence::CharCodec)
+        .unwrap();
+    assert_range_search_result_contract(
+        SearchEngine::open_with(&path, &yurine::persistence::CharCodec).unwrap(),
+    );
+}
+
+fn build_compatibility_engine() -> SearchEngine<char> {
     let mut builder = SearchEngineBuilder::new();
     for source_text in ["x東京y", "東京", "東亰", "東京東京", "京都"] {
         builder.add_sequence(source_text.chars()).unwrap();
     }
-    let engine = builder.build().unwrap();
+    builder.build().unwrap()
+}
+
+fn assert_range_search_result_contract(engine: SearchEngine<char>) {
     let searcher = engine.range_searcher(CompatibilityCosts);
 
     let matches = searcher

@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 use clap::{Args, Parser, Subcommand};
 use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
-use yurine::search::SearchEngineBuilder;
+use yurine::persistence::StringCodec;
 use yurine::search::range_search::RangeSearchParams;
+use yurine::search::{SearchEngine, SearchEngineBuilder};
 use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY_SOURCE_TEXT, write_data_sequences};
 
 struct TrackingAllocator;
@@ -117,6 +118,10 @@ struct MeasureOptions {
 
     #[arg(long, default_value = "5")]
     warm_runs: NonZeroUsize,
+
+    /// Save and reopen the engine from this mmap-backed snapshot path.
+    #[arg(long)]
+    persistent_index: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -163,12 +168,34 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     for source_text in &source_texts {
         builder.add_sequence(source_text.split_whitespace().map(str::to_owned))?;
     }
-    let engine = builder.build()?;
+    let owned_engine = builder.build()?;
     let build_elapsed = build_start.elapsed();
     let build_heap_peak = heap_peak();
+    let peak_rss_after_build = peak_rss_bytes();
+    let mut save_elapsed = Duration::ZERO;
+    let mut open_elapsed = Duration::ZERO;
+    let mut open_heap_start = 0;
+    let mut open_heap_peak = 0;
+    let persistent_index_bytes;
+    let engine: SearchEngine<String> = if let Some(path) = &options.persistent_index {
+        let save_start = Instant::now();
+        owned_engine.save_with(path, &StringCodec)?;
+        save_elapsed = save_start.elapsed();
+        persistent_index_bytes = fs::metadata(path)?.len();
+        drop(owned_engine);
+        open_heap_start = reset_heap_peak();
+        let open_start = Instant::now();
+        let engine = SearchEngine::open_with(path, &StringCodec)?;
+        open_elapsed = open_start.elapsed();
+        open_heap_peak = heap_peak();
+        engine
+    } else {
+        persistent_index_bytes = 0;
+        owned_engine
+    };
     drop(source_texts);
     drop(source_contents);
-    let peak_rss_after_build = peak_rss_bytes();
+    let file_backed_rss_after_open = file_backed_rss_bytes();
 
     let mut params = RangeSearchParams::new(options.threshold);
     if let Some(eta) = options.eta {
@@ -187,6 +214,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
+    let file_backed_rss_after_cold = file_backed_rss_bytes();
     let cold_match_count = cold_matches.len();
     drop(cold_matches);
 
@@ -201,15 +229,14 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     }
     let warm_heap_peak = heap_peak();
     let peak_rss_after_warm = peak_rss_bytes();
+    let file_backed_rss_after_warm = file_backed_rss_bytes();
 
     metric(
         "source_corpus_bytes",
         fs::metadata(options.corpus)?.len(),
         "bytes",
     );
-    // The in-memory baseline has no persistent index. Replace this when the
-    // persistent-index benchmark is added.
-    metric("persistent_index_bytes", 0, "bytes");
+    metric("persistent_index_bytes", persistent_index_bytes, "bytes");
     metric("corpus_strings", data_sequence_count, "count");
     metric("corpus_load_elapsed", load_elapsed.as_nanos(), "ns");
     heap_metrics("corpus_load", load_heap_start, load_heap_peak);
@@ -217,9 +244,22 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     heap_metrics("build", build_heap_start, build_heap_peak);
     metric("peak_rss_after_build", peak_rss_after_build, "bytes");
     metric("engine_resident_heap", engine_resident_heap, "bytes");
+    metric("save_elapsed", save_elapsed.as_nanos(), "ns");
+    metric("open_elapsed", open_elapsed.as_nanos(), "ns");
+    heap_metrics("open", open_heap_start, open_heap_peak);
+    metric(
+        "file_backed_rss_after_open",
+        file_backed_rss_after_open,
+        "bytes",
+    );
     metric("cold_search_elapsed", cold_elapsed.as_nanos(), "ns");
     heap_metrics("cold_search", cold_heap_start, cold_heap_peak);
     metric("peak_rss_after_cold_search", peak_rss_after_cold, "bytes");
+    metric(
+        "file_backed_rss_after_cold_search",
+        file_backed_rss_after_cold,
+        "bytes",
+    );
     metric(
         "warm_search_mean_elapsed",
         warm_elapsed.as_nanos() / warm_runs as u128,
@@ -227,6 +267,11 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     );
     heap_metrics("warm_search", warm_heap_start, warm_heap_peak);
     metric("peak_rss_after_warm_search", peak_rss_after_warm, "bytes");
+    metric(
+        "file_backed_rss_after_warm_search",
+        file_backed_rss_after_warm,
+        "bytes",
+    );
     metric("cold_match_count", cold_match_count, "count");
     metric("warm_match_count", warm_matches, "count");
     metric(
@@ -281,6 +326,33 @@ fn peak_rss_bytes() -> u64 {
     } else {
         rss * 1024
     }
+}
+
+#[cfg(target_os = "linux")]
+fn file_backed_rss_bytes() -> u64 {
+    let Ok(status) = fs::read_to_string("/proc/self/smaps_rollup") else {
+        return 0;
+    };
+    let kilobytes = |name: &str| {
+        status
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix(name)?
+                    .split_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()
+            })
+            .unwrap_or(0)
+    };
+    kilobytes("Rss:")
+        .saturating_sub(kilobytes("Anonymous:"))
+        .saturating_mul(1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn file_backed_rss_bytes() -> u64 {
+    0
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

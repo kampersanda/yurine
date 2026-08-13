@@ -313,7 +313,7 @@ mod tests {
         store_builder.add_string(vec![symbol]);
         store_builder.add_string(vec![symbol]);
 
-        SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build()).unwrap()
+        SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build(2)).unwrap()
     }
 
     fn expected_matches(distance: Cost) -> Vec<Match> {

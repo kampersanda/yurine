@@ -4,6 +4,7 @@ pub mod errors;
 pub mod persistence;
 mod postings;
 pub mod search;
+mod storage;
 mod store;
 pub mod types;
 mod vocabulary;

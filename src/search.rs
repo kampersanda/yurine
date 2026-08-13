@@ -1,6 +1,8 @@
 mod builder;
 mod encoding;
 mod filtering;
+#[cfg(feature = "persist")]
+mod persistence;
 pub mod range_search;
 mod verification;
 
@@ -8,7 +10,7 @@ use std::hash::Hash;
 use std::ops::Range;
 
 use crate::costs::Cost;
-use crate::errors::{Error, Result};
+use crate::errors::Result;
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
 use crate::types::{Position, SequenceId};
@@ -60,18 +62,39 @@ where
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {
-        for symbol in store.alphabet() {
-            if vocabulary.token(*symbol).is_none() {
-                return Err(Error::UnknownStringSymbol(symbol.get()));
-            }
-        }
-        let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
+        // Builder-produced engines pay the complete corpus validation cost once
+        // here, after which owned search access does not need to rescan symbols.
+        store.verify()?;
+        Self::from_unverified_parts(vocabulary, index, store)
+    }
+
+    /// Assembles an engine without scanning corpus and posting payloads.
+    ///
+    /// This is the mmap open path: file metadata and offset arrays have already
+    /// passed structural validation, but large payload semantics are checked
+    /// lazily during search or completely through [`Self::verify`].
+    pub(crate) fn from_unverified_parts(
+        vocabulary: Vocabulary<T>,
+        index: PostingsIndex,
+        store: CorpusStore,
+    ) -> Result<Self> {
+        let alphabet = index.alphabet();
+        let neighborhood = SubstitutionNeighborhood::new(alphabet)?;
         Ok(Self {
             vocabulary,
             index,
             store,
             neighborhood,
         })
+    }
+
+    /// Fully validates corpus symbols and postings against each other.
+    ///
+    /// The ordering matters: corpus validation establishes the precondition
+    /// that lets posting validation access each string without rescanning it.
+    pub fn verify(&self) -> Result<()> {
+        self.store.verify()?;
+        self.index.verify(&self.store)
     }
 }
 
@@ -97,7 +120,7 @@ mod tests {
         let result = SearchEngine::from_parts(
             vocabulary,
             PostingsIndexBuilder::new(1).build(),
-            store_builder.build(),
+            store_builder.build(1),
         );
 
         assert!(matches!(
