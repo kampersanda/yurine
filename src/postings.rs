@@ -26,6 +26,10 @@ impl PostingsIndex {
         self.posting_slice(symbol).len()
     }
 
+    /// Derives the corpus alphabet from non-empty posting lists.
+    ///
+    /// This avoids persisting a second copy of information already represented
+    /// by posting offsets.
     pub(crate) fn alphabet(&self) -> Vec<Symbol> {
         self.posting_offsets
             .windows(2)
@@ -37,6 +41,11 @@ impl PostingsIndex {
             .collect()
     }
 
+    /// Validates postings against a corpus whose symbols were already checked.
+    ///
+    /// [`SearchEngine::verify`](crate::search::SearchEngine::verify) establishes
+    /// that precondition before calling this method. Consequently each corpus
+    /// symbol and posting is visited a constant number of times.
     pub(crate) fn verify(&self, corpus: &CorpusStore) -> Result<()> {
         if self.postings.len() != corpus.symbol_len() {
             return Err(Error::InvalidFile(
@@ -56,7 +65,7 @@ impl PostingsIndex {
                     // SearchEngine::verify validates every corpus symbol once
                     // before checking postings, so rescanning here would make
                     // verification quadratic in each sequence length.
-                    .string_unvalidated(posting.string_id)?
+                    .string_without_symbol_validation(posting.string_id)?
                     .ok_or(Error::InvalidFile("posting sequence id is out of range"))?;
                 if string.get(posting.position.as_usize()) != Some(&symbol) {
                     return Err(Error::InvalidFile("posting does not match the corpus"));
@@ -67,6 +76,10 @@ impl PostingsIndex {
     }
 
     #[cfg(feature = "persist")]
+    /// Creates an index whose fixed-width arrays remain snapshot-backed.
+    ///
+    /// Offset safety is established while opening the persisted file; posting
+    /// payload semantics remain the responsibility of explicit verification.
     pub(crate) fn from_mapped(
         postings: MappedSlice<Posting>,
         posting_offsets: MappedSlice<u64>,

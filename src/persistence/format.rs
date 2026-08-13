@@ -253,6 +253,11 @@ impl SectionData<'_> {
     }
 }
 
+/// Writes a complete immutable snapshot and atomically publishes it at `path`.
+///
+/// Section descriptors are derived from `sections`, so the bytes and metadata
+/// cannot disagree. The temporary file and destination share a directory to
+/// keep the final rename atomic.
 pub(crate) fn write_file<T, C: TokenCodec<T>>(
     path: &Path,
     kind: FileKind,
@@ -303,6 +308,8 @@ pub(crate) fn write_file<T, C: TokenCodec<T>>(
         file_len: U64::new(cursor),
     };
 
+    // A bare relative filename has an empty parent rather than no parent.
+    // Normalize it to `.` so the durability sync opens the current directory.
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -549,6 +556,10 @@ impl PersistedFile {
         )
     }
 
+    /// Returns a mapped symbol view after structural section validation.
+    ///
+    /// Symbol membership in the decoded vocabulary is a semantic property and
+    /// is deliberately checked by CorpusStore when the range is accessed.
     pub(crate) fn mapped_symbols(&self, kind: SectionKind) -> Result<MappedSlice<Symbol>> {
         let values = self.mapped_slice::<DiskSymbol>(kind)?;
         // SAFETY: both types are transparent u32 wrappers and all u32 bit
@@ -556,6 +567,10 @@ impl PersistedFile {
         Ok(unsafe { values.cast() })
     }
 
+    /// Returns a mapped posting view after structural section validation.
+    ///
+    /// Sequence IDs, positions, ordering, and correspondence with the corpus
+    /// are checked only by SearchEngine::verify.
     pub(crate) fn mapped_postings(&self, kind: SectionKind) -> Result<MappedSlice<Posting>> {
         let values = self.mapped_slice::<DiskPosting>(kind)?;
         // SAFETY: both representations are two consecutive u32 values and all

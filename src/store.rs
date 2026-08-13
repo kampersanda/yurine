@@ -56,11 +56,15 @@ pub(crate) struct CorpusStore {
 /// Read access to indexed strings.
 impl CorpusStore {
     /// Returns the string identified by `id`, or `None` when it is unknown.
+    ///
+    /// Builder-produced strings are already known to contain vocabulary
+    /// symbols. Mapped strings come from an external file, so every returned
+    /// range is checked before search code can use it as trusted symbols.
     pub(crate) fn string(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
-        let Some(string) = self.string_unvalidated(id)? else {
+        let Some(string) = self.string_without_symbol_validation(id)? else {
             return Ok(None);
         };
-        if self.symbols.requires_validation() {
+        if self.symbols.is_mapped() {
             self.validate_symbols(string)?;
         }
         Ok(Some(string))
@@ -77,17 +81,30 @@ impl CorpusStore {
         self.len() == 0
     }
 
+    /// Validates the symbol domain of every stored string exactly once.
+    ///
+    /// Posting verification may use unchecked symbol access after this method
+    /// succeeds, avoiding a full string scan for every posting.
     pub(crate) fn verify(&self) -> Result<()> {
         for raw_id in 0..self.len() {
             let string = self
-                .string_unvalidated(SequenceId::from_usize(raw_id)?)?
-                .unwrap();
+                .string_without_symbol_validation(SequenceId::from_usize(raw_id)?)?
+                .expect("sequence IDs below len are present");
             self.validate_symbols(string)?;
         }
         Ok(())
     }
 
-    pub(crate) fn string_unvalidated(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
+    /// Returns a string without checking whether its symbols belong to the vocabulary.
+    ///
+    /// Offset bounds remain safe because builders create them directly and
+    /// persisted files validate the complete offset array during `open_with`.
+    /// Callers processing mapped data must first establish symbol validity,
+    /// normally by calling [`Self::verify`].
+    pub(crate) fn string_without_symbol_validation(
+        &self,
+        id: SequenceId,
+    ) -> Result<Option<&[Symbol]>> {
         let Some((start, end)) = self.string_bounds(id)? else {
             return Ok(None);
         };
@@ -99,6 +116,10 @@ impl CorpusStore {
     }
 
     #[cfg(feature = "persist")]
+    /// Creates a store whose large arrays remain backed by the snapshot mmap.
+    ///
+    /// The offset array has already passed structural validation, while corpus
+    /// symbols are intentionally left for range-local or explicit validation.
     pub(crate) fn from_mapped(
         symbols: MappedSlice<Symbol>,
         string_offsets: MappedSlice<u64>,

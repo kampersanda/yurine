@@ -62,10 +62,17 @@ where
         index: PostingsIndex,
         store: CorpusStore,
     ) -> Result<Self> {
+        // Builder-produced engines pay the complete corpus validation cost once
+        // here, after which owned search access does not need to rescan symbols.
         store.verify()?;
         Self::from_unverified_parts(vocabulary, index, store)
     }
 
+    /// Assembles an engine without scanning corpus and posting payloads.
+    ///
+    /// This is the mmap open path: file metadata and offset arrays have already
+    /// passed structural validation, but large payload semantics are checked
+    /// lazily during search or completely through [`Self::verify`].
     pub(crate) fn from_unverified_parts(
         vocabulary: Vocabulary<T>,
         index: PostingsIndex,
@@ -82,6 +89,9 @@ where
     }
 
     /// Fully validates corpus symbols and postings against each other.
+    ///
+    /// The ordering matters: corpus validation establishes the precondition
+    /// that lets posting validation access each string without rescanning it.
     pub fn verify(&self) -> Result<()> {
         self.store.verify()?;
         self.index.verify(&self.store)

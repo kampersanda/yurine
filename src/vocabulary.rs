@@ -85,6 +85,10 @@ where
     T: Eq + Hash,
 {
     #[cfg(feature = "persist")]
+    /// Reconstructs symbol mappings from tokens decoded in persisted order.
+    ///
+    /// Duplicate decoded tokens are rejected because they would otherwise map
+    /// multiple persisted symbols to one application token.
     pub(crate) fn from_tokens(tokens: Vec<T>) -> Result<Self>
     where
         T: Clone,

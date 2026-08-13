@@ -6,12 +6,15 @@ use crate::persistence::storage::MappedSlice;
 /// Either an in-memory array or a typed view into an immutable mapping.
 #[derive(Debug)]
 pub(crate) enum Storage<T> {
+    /// Values produced and validated by an in-memory builder.
     Owned(Box<[T]>),
+    /// Values read from an external snapshot whose payload is validated lazily.
     #[cfg(feature = "persist")]
     Mapped(MappedSlice<T>),
 }
 
 impl<T> Storage<T> {
+    /// Returns the values independently of their backing storage.
     pub(crate) fn as_slice(&self) -> &[T] {
         match self {
             Self::Owned(values) => values,
@@ -20,7 +23,11 @@ impl<T> Storage<T> {
         }
     }
 
-    pub(crate) fn requires_validation(&self) -> bool {
+    /// Returns whether the values originate from an external mapped snapshot.
+    ///
+    /// Callers use this distinction to avoid repeating semantic checks for
+    /// owned values that were already validated during construction.
+    pub(crate) fn is_mapped(&self) -> bool {
         match self {
             Self::Owned(_) => false,
             #[cfg(feature = "persist")]
@@ -48,6 +55,6 @@ mod tests {
 
         assert_eq!(values[0].get(), 7);
         assert!(format!("{values:?}").contains("Symbol"));
-        assert!(!values.requires_validation());
+        assert!(!values.is_mapped());
     }
 }
