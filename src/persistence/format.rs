@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Read;
 use std::mem::{align_of, size_of};
 use std::path::Path;
 use std::sync::Arc;
@@ -13,6 +15,7 @@ use crate::errors::{Error, Result};
 
 pub(crate) const MAGIC: [u8; 8] = *b"YURINE\0\0";
 pub(crate) const FORMAT_VERSION: u32 = 1;
+pub(crate) const MAX_CODEC_ID_LEN: usize = 255;
 const ENDIAN_MARKER: u32 = 0x0102_0304;
 
 #[repr(C)]
@@ -70,42 +73,43 @@ impl FileKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub(crate) enum SectionKind {
-    Vocabulary = 1,
-    Alphabet = 2,
+    VocabularyTokenOffsets = 1,
+    VocabularyTokenBlob = 2,
     SequenceOffsets = 3,
     CorpusSymbols = 4,
     PostingOffsets = 5,
     Postings = 6,
-    EmbeddingTokens = 7,
-    Embeddings = 8,
-    CostMetadata = 9,
+    EmbeddingTokenOffsets = 7,
+    EmbeddingTokenBlob = 8,
+    Embeddings = 9,
+    CostMetadata = 10,
 }
 
 impl SectionKind {
     fn from_raw(raw: u32) -> Result<Self> {
         match raw {
-            1 => Ok(Self::Vocabulary),
-            2 => Ok(Self::Alphabet),
+            1 => Ok(Self::VocabularyTokenOffsets),
+            2 => Ok(Self::VocabularyTokenBlob),
             3 => Ok(Self::SequenceOffsets),
             4 => Ok(Self::CorpusSymbols),
             5 => Ok(Self::PostingOffsets),
             6 => Ok(Self::Postings),
-            7 => Ok(Self::EmbeddingTokens),
-            8 => Ok(Self::Embeddings),
-            9 => Ok(Self::CostMetadata),
+            7 => Ok(Self::EmbeddingTokenOffsets),
+            8 => Ok(Self::EmbeddingTokenBlob),
+            9 => Ok(Self::Embeddings),
+            10 => Ok(Self::CostMetadata),
             _ => Err(Error::InvalidFile("unknown section kind")),
         }
     }
 
     fn element_layout(self) -> Option<(usize, usize)> {
         match self {
-            Self::Vocabulary | Self::EmbeddingTokens | Self::CostMetadata => None,
-            Self::Alphabet | Self::CorpusSymbols => {
-                Some((size_of::<DiskSymbol>(), align_of::<DiskSymbol>()))
-            }
-            Self::SequenceOffsets | Self::PostingOffsets => {
-                Some((size_of::<u64>(), align_of::<u64>()))
-            }
+            Self::VocabularyTokenBlob | Self::EmbeddingTokenBlob | Self::CostMetadata => None,
+            Self::VocabularyTokenOffsets
+            | Self::EmbeddingTokenOffsets
+            | Self::SequenceOffsets
+            | Self::PostingOffsets => Some((size_of::<u64>(), align_of::<u64>())),
+            Self::CorpusSymbols => Some((size_of::<DiskSymbol>(), align_of::<DiskSymbol>())),
             Self::Postings => Some((size_of::<DiskPosting>(), align_of::<DiskPosting>())),
             Self::Embeddings => Some((size_of::<f32>(), align_of::<f32>())),
         }
@@ -124,40 +128,11 @@ pub(crate) struct SectionDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout)]
 pub(crate) struct DiskSymbol(u32);
 
-impl DiskSymbol {
-    #[cfg(test)]
-    pub(crate) const fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    pub(crate) const fn get(self) -> u32 {
-        self.0
-    }
-}
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout)]
 pub(crate) struct DiskPosting {
     sequence_id: u32,
     position: u32,
-}
-
-impl DiskPosting {
-    #[cfg(test)]
-    pub(crate) const fn new(sequence_id: u32, position: u32) -> Self {
-        Self {
-            sequence_id,
-            position,
-        }
-    }
-
-    pub(crate) const fn sequence_id(self) -> u32 {
-        self.sequence_id
-    }
-
-    pub(crate) const fn position(self) -> u32 {
-        self.position
-    }
 }
 
 pub(crate) struct PersistedFile {
@@ -172,7 +147,25 @@ impl PersistedFile {
         expected_kind: FileKind,
         codec: &C,
     ) -> Result<Self> {
-        let mmap = map_file(path)?;
+        validate_codec_id_len(codec.id())?;
+
+        let mut file = File::open(path)?;
+        let mut header_bytes = [0; HEADER_LEN];
+        if let Err(error) = file.read_exact(&mut header_bytes) {
+            return if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                Err(Error::InvalidFile("header is truncated"))
+            } else {
+                Err(error.into())
+            };
+        }
+        let header = DiskHeader::ref_from_bytes(&header_bytes)
+            .map_err(|_| Error::InvalidFile("header has an invalid layout"))?;
+        validate_header(header, expected_kind)?;
+        if header.file_len.get() != file.metadata()?.len() {
+            return Err(Error::InvalidFile("recorded file length does not match"));
+        }
+
+        let mmap = map_file(&file)?;
         Self::parse(mmap, expected_kind, codec.id(), codec.version())
     }
 
@@ -182,41 +175,21 @@ impl PersistedFile {
         expected_codec: &str,
         expected_codec_version: u32,
     ) -> Result<Self> {
+        validate_codec_id_len(expected_codec)?;
         let bytes: &[u8] = &mmap;
         let header = DiskHeader::ref_from_prefix(bytes)
             .map_err(|_| Error::InvalidFile("header is truncated"))?
             .0;
-        if header.magic != MAGIC {
-            return Err(Error::InvalidFile("magic does not match"));
-        }
-        if header.format_version.get() != FORMAT_VERSION {
-            return Err(Error::UnsupportedFormatVersion(header.format_version.get()));
-        }
-        if header.endian_marker.get() != ENDIAN_MARKER {
-            return Err(Error::EndiannessMismatch);
-        }
-        if cfg!(target_endian = "big") {
-            return Err(Error::UnsupportedHostEndianness);
-        }
-
-        let kind = FileKind::from_raw(header.file_kind.get())?;
-        if kind != expected_kind {
-            return Err(Error::InvalidFile("file kind does not match"));
-        }
-        if header.header_len.get() as usize != HEADER_LEN {
-            return Err(Error::InvalidFile("header size does not match"));
-        }
-
-        let codec_version = header.codec_version.get();
-        let section_count = u64::from(header.section_count.get());
-        let codec_offset = header.codec_offset.get();
-        let codec_len = header.codec_len.get();
-        let section_table_offset = header.section_table_offset.get();
-        let recorded_file_len = header.file_len.get();
-        if recorded_file_len != u64::try_from(bytes.len()).unwrap() {
+        let kind = validate_header(header, expected_kind)?;
+        if header.file_len.get() != u64::try_from(bytes.len()).unwrap() {
             return Err(Error::InvalidFile("recorded file length does not match"));
         }
 
+        let codec_len = header.codec_len.get();
+        if codec_len > MAX_CODEC_ID_LEN as u64 {
+            return Err(Error::InvalidFile("codec identifier is too long"));
+        }
+        let codec_offset = header.codec_offset.get();
         let codec_bytes = checked_range(bytes, codec_offset, codec_len)?;
         let actual_codec = std::str::from_utf8(codec_bytes)
             .map_err(|_| Error::InvalidFile("codec identifier is not UTF-8"))?;
@@ -226,6 +199,7 @@ impl PersistedFile {
                 actual: actual_codec.to_owned(),
             });
         }
+        let codec_version = header.codec_version.get();
         if codec_version != expected_codec_version {
             return Err(Error::CodecVersionMismatch {
                 expected: expected_codec_version,
@@ -233,13 +207,16 @@ impl PersistedFile {
             });
         }
 
+        let section_count = u64::from(header.section_count.get());
         let table_len = section_count
             .checked_mul(SECTION_ENTRY_LEN as u64)
             .ok_or(Error::InvalidFile("section table length overflows"))?;
+        let section_table_offset = header.section_table_offset.get();
         let table = checked_range(bytes, section_table_offset, table_len)?;
-        let mut sections = BTreeMap::new();
         let entries = <[DiskSectionEntry]>::ref_from_bytes(table)
             .map_err(|_| Error::InvalidFile("section table has an invalid length"))?;
+
+        let mut sections = BTreeMap::new();
         for entry in entries {
             let kind = SectionKind::from_raw(entry.kind.get())?;
             if entry.flags.get() != 0 {
@@ -298,108 +275,67 @@ impl PersistedFile {
         if self.kind != FileKind::SearchEngine {
             return Ok(());
         }
-        let vocabulary = self.section(SectionKind::Vocabulary)?;
-        let alphabet = self.mapped_slice::<DiskSymbol>(SectionKind::Alphabet)?;
+
+        let vocabulary_offsets = self.mapped_slice::<u64>(SectionKind::VocabularyTokenOffsets)?;
+        let vocabulary_blob = self.section(SectionKind::VocabularyTokenBlob)?;
         let sequence_offsets = self.mapped_slice::<u64>(SectionKind::SequenceOffsets)?;
         let corpus = self.section(SectionKind::CorpusSymbols)?;
         let posting_offsets = self.mapped_slice::<u64>(SectionKind::PostingOffsets)?;
         let postings = self.section(SectionKind::Postings)?;
 
-        if sequence_offsets.is_empty() || posting_offsets.is_empty() {
-            return Err(Error::InvalidFile("offset section is empty"));
-        }
-        validate_offset_endpoints(&sequence_offsets, corpus.element_count)?;
-        validate_offset_endpoints(&posting_offsets, postings.element_count)?;
-        let expected_posting_offsets = vocabulary
+        validate_offsets(&vocabulary_offsets, vocabulary_blob.byte_len)?;
+        validate_offsets(&sequence_offsets, corpus.element_count)?;
+        validate_offsets(&posting_offsets, postings.element_count)?;
+
+        let expected_vocabulary_offsets = vocabulary_blob
             .element_count
             .checked_add(1)
-            .ok_or(Error::InvalidFile("posting offset count overflows"))?;
-        if posting_offsets.len() as u64 != expected_posting_offsets {
+            .ok_or(Error::InvalidFile("vocabulary offset count overflows"))?;
+        if vocabulary_offsets.len() as u64 != expected_vocabulary_offsets {
+            return Err(Error::InvalidFile(
+                "vocabulary offset count does not match token count",
+            ));
+        }
+        if posting_offsets.len() as u64 != expected_vocabulary_offsets {
             return Err(Error::InvalidFile(
                 "posting offset count does not match vocabulary",
             ));
-        }
-        validate_alphabet(&alphabet, vocabulary.element_count)?;
-        Ok(())
-    }
-
-    /// Fully scans large SearchEngine sections for semantic consistency.
-    pub(crate) fn verify(&self) -> Result<()> {
-        if self.kind != FileKind::SearchEngine {
-            return Ok(());
-        }
-        let vocabulary_len = self.section(SectionKind::Vocabulary)?.element_count;
-        let alphabet = self.mapped_slice::<DiskSymbol>(SectionKind::Alphabet)?;
-        let sequence_offsets = self.mapped_slice::<u64>(SectionKind::SequenceOffsets)?;
-        let corpus = self.mapped_slice::<DiskSymbol>(SectionKind::CorpusSymbols)?;
-        let posting_offsets = self.mapped_slice::<u64>(SectionKind::PostingOffsets)?;
-        let postings = self.mapped_slice::<DiskPosting>(SectionKind::Postings)?;
-
-        validate_offsets(&sequence_offsets, corpus.len() as u64)?;
-        validate_offsets(&posting_offsets, postings.len() as u64)?;
-        if corpus
-            .iter()
-            .any(|symbol| u64::from(symbol.get()) >= vocabulary_len)
-        {
-            return Err(Error::InvalidFile(
-                "corpus symbol is outside the vocabulary",
-            ));
-        }
-        let mut alphabet_seen = vec![false; alphabet.len()];
-        for symbol in corpus.iter().map(|symbol| symbol.get()) {
-            let index = alphabet
-                .binary_search_by_key(&symbol, |candidate| candidate.get())
-                .map_err(|_| Error::InvalidFile("corpus symbol is absent from the alphabet"))?;
-            alphabet_seen[index] = true;
-        }
-        if alphabet_seen.iter().any(|seen| !seen) {
-            return Err(Error::InvalidFile("alphabet contains an unused symbol"));
-        }
-        if postings.len() != corpus.len() {
-            return Err(Error::InvalidFile(
-                "posting count does not match corpus symbol count",
-            ));
-        }
-
-        for symbol in 0..vocabulary_len {
-            let symbol_index = usize::try_from(symbol).map_err(|_| Error::PlatformSizeOverflow)?;
-            let (&start, &end) = adjacent(&posting_offsets, symbol_index)
-                .ok_or(Error::InvalidFile("posting offset is missing"))?;
-            let start = usize::try_from(start).map_err(|_| Error::PlatformSizeOverflow)?;
-            let end = usize::try_from(end).map_err(|_| Error::PlatformSizeOverflow)?;
-            let mut previous = None;
-            for posting in &postings[start..end] {
-                let key = (posting.sequence_id(), posting.position());
-                if previous.is_some_and(|previous| previous >= key) {
-                    return Err(Error::InvalidFile("postings are not strictly ordered"));
-                }
-                previous = Some(key);
-
-                let sequence_id = posting.sequence_id() as usize;
-                let Some((&sequence_start, &sequence_end)) =
-                    adjacent(&sequence_offsets, sequence_id)
-                else {
-                    return Err(Error::InvalidFile("posting has an unknown sequence id"));
-                };
-                let position = u64::from(posting.position());
-                let corpus_index = sequence_start
-                    .checked_add(position)
-                    .filter(|index| *index < sequence_end)
-                    .ok_or(Error::InvalidFile(
-                        "posting position is outside its sequence",
-                    ))?;
-                if u64::from(corpus[corpus_index as usize].get()) != symbol {
-                    return Err(Error::InvalidFile("posting does not match the corpus"));
-                }
-            }
         }
         Ok(())
     }
 }
 
-fn adjacent<T>(values: &[T], index: usize) -> Option<(&T, &T)> {
-    let next = index.checked_add(1)?;
-    values.get(index).zip(values.get(next))
+fn validate_header(header: &DiskHeader, expected_kind: FileKind) -> Result<FileKind> {
+    if header.magic != MAGIC {
+        return Err(Error::InvalidFile("magic does not match"));
+    }
+    if header.format_version.get() != FORMAT_VERSION {
+        return Err(Error::UnsupportedFormatVersion(header.format_version.get()));
+    }
+    if header.endian_marker.get() != ENDIAN_MARKER {
+        return Err(Error::EndiannessMismatch);
+    }
+    if cfg!(target_endian = "big") {
+        return Err(Error::UnsupportedHostEndianness);
+    }
+    let kind = FileKind::from_raw(header.file_kind.get())?;
+    if kind != expected_kind {
+        return Err(Error::InvalidFile("file kind does not match"));
+    }
+    if header.header_len.get() as usize != HEADER_LEN {
+        return Err(Error::InvalidFile("header size does not match"));
+    }
+    Ok(kind)
+}
+
+fn validate_codec_id_len(codec_id: &str) -> Result<()> {
+    if codec_id.len() > MAX_CODEC_ID_LEN {
+        return Err(Error::CodecIdTooLong {
+            length: codec_id.len(),
+            max: MAX_CODEC_ID_LEN,
+        });
+    }
+    Ok(())
 }
 
 fn validate_section(bytes: &[u8], section: SectionDescriptor) -> Result<()> {
@@ -448,34 +384,12 @@ fn validate_non_overlapping(
     Ok(())
 }
 
-fn validate_offset_endpoints(offsets: &[u64], payload_len: u64) -> Result<()> {
+fn validate_offsets(offsets: &[u64], payload_len: u64) -> Result<()> {
     if offsets.first() != Some(&0) || offsets.last() != Some(&payload_len) {
         return Err(Error::InvalidFile("offset endpoints do not match payload"));
     }
-    Ok(())
-}
-
-fn validate_offsets(offsets: &[u64], payload_len: u64) -> Result<()> {
-    validate_offset_endpoints(offsets, payload_len)?;
     if offsets.windows(2).any(|pair| pair[0] > pair[1]) {
         return Err(Error::InvalidFile("offsets are not monotonic"));
-    }
-    Ok(())
-}
-
-fn validate_alphabet(alphabet: &[DiskSymbol], vocabulary_len: u64) -> Result<()> {
-    let mut previous = None;
-    for symbol in alphabet {
-        let value = symbol.get();
-        if u64::from(value) >= vocabulary_len {
-            return Err(Error::InvalidFile(
-                "alphabet symbol is outside the vocabulary",
-            ));
-        }
-        if previous.is_some_and(|previous| previous >= value) {
-            return Err(Error::InvalidFile("alphabet is not sorted and unique"));
-        }
-        previous = Some(value);
     }
     Ok(())
 }
@@ -494,6 +408,7 @@ fn checked_range(bytes: &[u8], offset: u64, len: u64) -> Result<&[u8]> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::sync::Arc;
 
     use memmap2::MmapOptions;
@@ -501,11 +416,11 @@ mod tests {
 
     use super::{
         DiskHeader, DiskPosting, DiskSectionEntry, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION,
-        FileKind, HEADER_LEN, MAGIC, PersistedFile, SECTION_ENTRY_LEN, SectionKind, U32, U64,
-        adjacent,
+        FileKind, HEADER_LEN, MAGIC, MAX_CODEC_ID_LEN, PersistedFile, SECTION_ENTRY_LEN,
+        SectionKind, U32, U64,
     };
     use crate::errors::Error;
-    use crate::persistence::CharCodec;
+    use crate::persistence::{CharCodec, TokenCodec};
 
     struct Fixture {
         bytes: Vec<u8>,
@@ -516,8 +431,8 @@ mod tests {
         fn valid() -> Self {
             let codec = b"yurine:char:u32le";
             let section_kinds = [
-                SectionKind::Vocabulary,
-                SectionKind::Alphabet,
+                SectionKind::VocabularyTokenOffsets,
+                SectionKind::VocabularyTokenBlob,
                 SectionKind::SequenceOffsets,
                 SectionKind::CorpusSymbols,
                 SectionKind::PostingOffsets,
@@ -534,18 +449,18 @@ mod tests {
             append_section(
                 &mut bytes,
                 &mut sections,
-                SectionKind::Vocabulary,
-                2,
-                1,
-                |bytes| bytes.extend_from_slice(b"ab"),
+                SectionKind::VocabularyTokenOffsets,
+                3,
+                8,
+                |bytes| append_u64s(bytes, [0, 1, 2]),
             );
             append_section(
                 &mut bytes,
                 &mut sections,
-                SectionKind::Alphabet,
+                SectionKind::VocabularyTokenBlob,
                 2,
-                4,
-                |bytes| append_u32s(bytes, [0, 1]),
+                1,
+                |bytes| bytes.extend_from_slice(b"ab"),
             );
             append_section(
                 &mut bytes,
@@ -577,9 +492,7 @@ mod tests {
                 SectionKind::Postings,
                 3,
                 4,
-                |bytes| {
-                    append_u32s(bytes, [0, 0, 0, 1, 1, 0]);
-                },
+                |bytes| append_u32s(bytes, [0, 0, 0, 1, 1, 0]),
             );
 
             let header = DiskHeader {
@@ -611,7 +524,6 @@ mod tests {
                     .copy_from_slice(entry.as_bytes());
                 entries.push((kind, entry_offset));
             }
-
             Self { bytes, entries }
         }
 
@@ -679,39 +591,34 @@ mod tests {
     }
 
     #[test]
-    fn valid_file_passes_structural_and_complete_verification() {
+    fn valid_file_passes_structural_validation() {
         let file = Fixture::valid().parse().unwrap();
-
         assert_eq!(
-            file.mapped_slice::<DiskSymbol>(SectionKind::CorpusSymbols)
+            file.mapped_slice::<u64>(SectionKind::PostingOffsets)
                 .unwrap()
-                .iter()
-                .map(|symbol| symbol.get())
-                .collect::<Vec<_>>(),
-            [0, 1, 1]
+                .as_slice(),
+            [0, 1, 3]
         );
-        assert_eq!(
-            file.mapped_slice::<DiskPosting>(SectionKind::Postings)
-                .unwrap()[2],
-            DiskPosting::new(1, 0)
-        );
-        file.verify().unwrap();
     }
 
     #[test]
-    fn open_maps_a_file_and_checks_the_codec() {
+    fn open_checks_file_length_before_mapping() {
         let fixture = Fixture::valid();
         let path =
             std::env::temp_dir().join(format!("yurine-format-{}-{}", std::process::id(), line!()));
-        fs::write(&path, fixture.bytes).unwrap();
-        let file = PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec).unwrap();
+        fs::write(&path, &fixture.bytes).unwrap();
+        PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec).unwrap();
+        fs::write(&path, &fixture.bytes[..fixture.bytes.len() - 1]).unwrap();
+        let result = PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec);
         fs::remove_file(path).unwrap();
-
-        file.verify().unwrap();
+        assert!(matches!(
+            result,
+            Err(Error::InvalidFile("recorded file length does not match"))
+        ));
     }
 
     #[test]
-    fn rejects_corrupt_magic_and_truncated_files() {
+    fn rejects_corrupt_magic_and_truncated_header() {
         let mut corrupt = Fixture::valid();
         corrupt.bytes[0] ^= 0xff;
         assert!(matches!(corrupt.parse(), Err(Error::InvalidFile(_))));
@@ -727,7 +634,7 @@ mod tests {
         write_u32(&mut version.bytes, 8, FORMAT_VERSION + 1);
         assert_eq!(
             version.parse().err(),
-            Some(Error::UnsupportedFormatVersion(FORMAT_VERSION + 1))
+            Some(Error::UnsupportedFormatVersion(2))
         );
 
         let mut endian = Fixture::valid();
@@ -740,7 +647,7 @@ mod tests {
                 test_map(&fixture.bytes),
                 FileKind::SearchEngine,
                 "another-codec",
-                1,
+                1
             ),
             Err(Error::CodecMismatch { .. })
         ));
@@ -749,7 +656,7 @@ mod tests {
                 test_map(&fixture.bytes),
                 FileKind::SearchEngine,
                 "yurine:char:u32le",
-                2,
+                2
             ),
             Err(Error::CodecVersionMismatch { .. })
         ));
@@ -770,48 +677,93 @@ mod tests {
 
         let mut overlap = Fixture::valid();
         let corpus_entry = overlap.entry(SectionKind::CorpusSymbols);
-        let alphabet_offset = overlap.section_offset(SectionKind::Alphabet);
-        write_u64(&mut overlap.bytes, corpus_entry + 8, alphabet_offset as u64);
+        let blob_offset = overlap.section_offset(SectionKind::VocabularyTokenBlob);
+        write_u64(&mut overlap.bytes, corpus_entry + 8, blob_offset as u64);
         assert!(matches!(overlap.parse(), Err(Error::InvalidFile(_))));
     }
 
     #[test]
-    fn rejects_vocabulary_count_that_overflows_offset_count() {
+    fn open_rejects_non_monotonic_offsets() {
+        for kind in [
+            SectionKind::VocabularyTokenOffsets,
+            SectionKind::SequenceOffsets,
+            SectionKind::PostingOffsets,
+        ] {
+            let mut fixture = Fixture::valid();
+            let offset = fixture.section_offset(kind);
+            write_u64(&mut fixture.bytes, offset + 8, u64::MAX);
+            assert!(matches!(
+                fixture.parse(),
+                Err(Error::InvalidFile("offsets are not monotonic"))
+            ));
+        }
+    }
+
+    #[test]
+    fn open_rejects_offset_endpoint_and_count_mismatches() {
+        let mut endpoint = Fixture::valid();
+        let offset = endpoint.section_offset(SectionKind::SequenceOffsets);
+        write_u64(&mut endpoint.bytes, offset + 16, 2);
+        assert!(matches!(
+            endpoint.parse(),
+            Err(Error::InvalidFile("offset endpoints do not match payload"))
+        ));
+
+        let mut vocabulary_count = Fixture::valid();
+        let entry = vocabulary_count.entry(SectionKind::VocabularyTokenBlob);
+        write_u64(&mut vocabulary_count.bytes, entry + 24, 1);
+        assert!(matches!(
+            vocabulary_count.parse(),
+            Err(Error::InvalidFile(
+                "vocabulary offset count does not match token count"
+            ))
+        ));
+
+        let mut posting_count = Fixture::valid();
+        let entry = posting_count.entry(SectionKind::PostingOffsets);
+        let offset = posting_count.section_offset(SectionKind::PostingOffsets);
+        write_u64(&mut posting_count.bytes, offset + 8, 3);
+        write_u64(&mut posting_count.bytes, entry + 24, 2);
+        write_u64(&mut posting_count.bytes, entry + 16, 16);
+        assert!(matches!(
+            posting_count.parse(),
+            Err(Error::InvalidFile(
+                "posting offset count does not match vocabulary"
+            ))
+        ));
+    }
+
+    #[test]
+    fn open_does_not_validate_payload_semantics() {
         let mut fixture = Fixture::valid();
-        let vocabulary_entry = fixture.entry(SectionKind::Vocabulary);
-        write_u64(&mut fixture.bytes, vocabulary_entry + 24, u64::MAX);
+        let corpus = fixture.section_offset(SectionKind::CorpusSymbols);
+        write_u32(&mut fixture.bytes, corpus, u32::MAX);
+        let postings = fixture.section_offset(SectionKind::Postings);
+        write_u32(&mut fixture.bytes, postings, u32::MAX);
 
-        assert!(matches!(fixture.parse(), Err(Error::InvalidFile(_))));
+        fixture.parse().unwrap();
     }
 
     #[test]
-    fn adjacent_rejects_an_index_whose_successor_overflows() {
-        assert_eq!(adjacent(&[1], usize::MAX), None);
-    }
-
-    #[test]
-    fn normal_open_skips_full_payload_but_verify_finds_bad_symbols() {
-        let mut fixture = Fixture::valid();
-        let corpus_offset = fixture.section_offset(SectionKind::CorpusSymbols);
-        write_u32(&mut fixture.bytes, corpus_offset + 8, 99);
-
-        let file = fixture.parse().unwrap();
-        assert!(matches!(file.verify(), Err(Error::InvalidFile(_))));
-    }
-
-    #[test]
-    fn verify_rejects_non_monotonic_offsets_and_inconsistent_postings() {
-        let mut offsets = Fixture::valid();
-        let sequence_offsets = offsets.section_offset(SectionKind::SequenceOffsets);
-        write_u64(&mut offsets.bytes, sequence_offsets + 8, 4);
-        let file = offsets.parse().unwrap();
-        assert!(matches!(file.verify(), Err(Error::InvalidFile(_))));
-
-        let mut postings = Fixture::valid();
-        let posting_offset = postings.section_offset(SectionKind::Postings);
-        write_u32(&mut postings.bytes, posting_offset + 4, 1);
-        let file = postings.parse().unwrap();
-        assert!(matches!(file.verify(), Err(Error::InvalidFile(_))));
+    fn rejects_oversized_codec_identifiers() {
+        struct LargeCodec(String);
+        impl TokenCodec<char> for LargeCodec {
+            fn id(&self) -> &str {
+                &self.0
+            }
+            fn encode(&self, _: &char, _: &mut Vec<u8>) -> crate::errors::Result<()> {
+                Ok(())
+            }
+            fn decode(&self, _: &[u8]) -> crate::errors::Result<char> {
+                Ok('a')
+            }
+        }
+        let path = Path::new("unused");
+        let codec = LargeCodec("x".repeat(MAX_CODEC_ID_LEN + 1));
+        assert!(matches!(
+            PersistedFile::open(path, FileKind::SearchEngine, &codec),
+            Err(Error::CodecIdTooLong { .. })
+        ));
     }
 
     #[test]
@@ -822,10 +774,7 @@ mod tests {
         assert_eq!(align_of::<DiskSectionEntry>(), 1);
         assert_eq!(size_of::<DiskSymbol>(), 4);
         assert_eq!(align_of::<DiskSymbol>(), 4);
-        assert_eq!(DiskSymbol::new(7).get(), 7);
         assert_eq!(size_of::<DiskPosting>(), 8);
         assert_eq!(align_of::<DiskPosting>(), 4);
-        assert_eq!(DiskPosting::new(3, 5).sequence_id(), 3);
-        assert_eq!(DiskPosting::new(3, 5).position(), 5);
     }
 }

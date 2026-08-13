@@ -7,8 +7,13 @@ use crate::types::{Position, SequenceId};
 #[non_exhaustive]
 pub enum Error {
     /// An operating-system I/O operation failed.
-    #[error("I/O error: {0}")]
-    Io(String),
+    #[error("I/O error ({kind:?}): {message}")]
+    Io {
+        /// The portable category of the I/O failure.
+        kind: std::io::ErrorKind,
+        /// The operating-system error message.
+        message: String,
+    },
 
     /// A persisted file is malformed or internally inconsistent.
     #[error("invalid persisted file: {0}")]
@@ -42,6 +47,15 @@ pub enum Error {
         expected: u32,
         /// The version recorded in the file.
         actual: u32,
+    },
+
+    /// A token codec identifier exceeds the persisted format's limit.
+    #[error("token codec identifier is {length} bytes, maximum is {max}")]
+    CodecIdTooLong {
+        /// The supplied identifier length in bytes.
+        length: usize,
+        /// The maximum identifier length accepted by the format.
+        max: usize,
     },
 
     /// A token's persisted bytes are invalid for the selected codec.
@@ -138,9 +152,30 @@ pub enum Error {
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
-        Self::Io(error.to_string())
+        Self::Io {
+            kind: error.kind(),
+            message: error.to_string(),
+        }
     }
 }
 
 /// A specialized `Result` type for errors.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn io_conversion_preserves_kind_and_message() {
+        let source = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not allowed");
+
+        assert_eq!(
+            Error::from(source),
+            Error::Io {
+                kind: std::io::ErrorKind::PermissionDenied,
+                message: "not allowed".to_owned(),
+            }
+        );
+    }
+}

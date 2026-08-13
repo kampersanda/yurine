@@ -1,13 +1,12 @@
 //! Postings index mapping symbols to their occurrences in the corpus.
 
 use crate::errors::{Error, Result};
-use crate::persistence::storage::Storage;
 use crate::types::{Posting, Symbol};
 
 /// Postings index mapping symbols to their occurrences in the corpus.
 pub(crate) struct PostingsIndex {
-    postings: Storage<Posting>,
-    posting_offsets: Storage<u64>,
+    postings: Vec<Posting>,
+    posting_offsets: Vec<u64>,
 }
 
 impl PostingsIndex {
@@ -91,8 +90,8 @@ impl PostingsIndexBuilder {
         postings.shrink_to_fit();
 
         PostingsIndex {
-            postings: Storage::Owned(postings.into_boxed_slice()),
-            posting_offsets: Storage::Owned(posting_offsets.into_boxed_slice()),
+            postings,
+            posting_offsets,
         }
     }
 }
@@ -145,8 +144,8 @@ mod tests {
 
         let index = builder.build();
 
-        assert_eq!(index.postings.as_slice(), [posting]);
-        assert_eq!(index.posting_offsets.as_slice(), [0, 0, 1, 1]);
+        assert_eq!(index.postings, [posting]);
+        assert_eq!(index.posting_offsets, [0, 0, 1, 1]);
         assert_eq!(index.frequency(Symbol::new(0)), 0);
         assert_eq!(index.frequency(Symbol::new(1)), 1);
         assert_eq!(index.frequency(Symbol::new(2)), 0);
@@ -185,7 +184,7 @@ mod tests {
 
         let index = builder.build();
 
-        assert_eq!(index.posting_offsets.as_slice(), [0, 1, 2, 4]);
+        assert_eq!(index.posting_offsets, [0, 1, 2, 4]);
         assert_eq!(
             index.postings(Symbol::new(0)).collect::<Vec<_>>(),
             [for_first]
@@ -222,7 +221,7 @@ mod tests {
     fn empty_vocabulary_has_no_postings() {
         let index = PostingsIndexBuilder::new(0).build();
 
-        assert_eq!(index.posting_offsets.as_slice(), [0]);
+        assert_eq!(index.posting_offsets, [0]);
         assert_eq!(index.postings(Symbol::new(0)).collect::<Vec<_>>(), []);
         assert_eq!(index.frequency(Symbol::new(0)), 0);
     }

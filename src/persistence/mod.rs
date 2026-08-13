@@ -9,6 +9,7 @@ mod codec;
 // unit 2. Keeping it internal avoids committing those APIs prematurely.
 #[allow(dead_code)]
 pub(crate) mod format;
+#[allow(dead_code)]
 pub(crate) mod storage;
 
 pub use codec::{CharCodec, StringCodec, TokenCodec};

@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 use memmap2::{Mmap, MmapOptions};
@@ -12,17 +12,21 @@ use crate::errors::{Error, Result};
 /// A typed slice backed by one immutable, read-only file mapping.
 pub(crate) struct MappedSlice<T> {
     mmap: Arc<Mmap>,
-    offset: usize,
-    byte_len: usize,
+    pointer: NonNull<T>,
+    len: usize,
     marker: PhantomData<T>,
 }
+
+// The pointer refers to an immutable mapping kept alive by `mmap`.
+unsafe impl<T: Sync> Send for MappedSlice<T> {}
+unsafe impl<T: Sync> Sync for MappedSlice<T> {}
 
 impl<T> Clone for MappedSlice<T> {
     fn clone(&self) -> Self {
         Self {
             mmap: Arc::clone(&self.mmap),
-            offset: self.offset,
-            byte_len: self.byte_len,
+            pointer: self.pointer,
+            len: self.len,
             marker: PhantomData,
         }
     }
@@ -56,22 +60,24 @@ where
         let bytes = mmap
             .get(offset..end)
             .ok_or(Error::InvalidFile("section lies outside the file"))?;
-        <[T]>::ref_from_bytes(bytes)
+        let values = <[T]>::ref_from_bytes(bytes)
             .map_err(|_| Error::InvalidFile("section has invalid length or alignment"))?;
+        let len = values.len();
+        let pointer = NonNull::new(values.as_ptr().cast_mut()).unwrap_or_else(NonNull::dangling);
 
         Ok(Self {
             mmap,
-            offset,
-            byte_len,
+            pointer,
+            len,
             marker: PhantomData,
         })
     }
 
     pub(crate) fn as_slice(&self) -> &[T] {
-        let bytes = &self.mmap[self.offset..self.offset + self.byte_len];
-        // Construction validated this exact range and the immutable mapping
-        // cannot change through this type.
-        <[T]>::ref_from_bytes(bytes).unwrap()
+        // SAFETY: `new` validated the typed slice and stored its pointer and
+        // length. The mapping is immutable, has a stable address, and is kept
+        // alive by `self.mmap` for the returned borrow.
+        unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.len) }
     }
 }
 
@@ -122,8 +128,7 @@ where
 }
 
 /// Maps an immutable snapshot file once for all of its section views.
-pub(crate) fn map_file(path: &Path) -> Result<Arc<Mmap>> {
-    let file = File::open(path)?;
+pub(crate) fn map_file(file: &File) -> Result<Arc<Mmap>> {
     if file.metadata()?.len() == 0 {
         return Err(Error::InvalidFile("file is empty"));
     }
@@ -132,13 +137,13 @@ pub(crate) fn map_file(path: &Path) -> Result<Arc<Mmap>> {
     // or truncates a published file in place; replacements are published by
     // atomic rename. Callers must uphold the same rule, documented on the
     // persistence module and future open APIs.
-    let mmap = unsafe { MmapOptions::new().map(&file)? };
+    let mmap = unsafe { MmapOptions::new().map(file)? };
     Ok(Arc::new(mmap))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::fs::{self, File};
     use std::sync::Arc;
 
     use memmap2::MmapOptions;
@@ -187,7 +192,8 @@ mod tests {
             line!()
         ));
         fs::write(&path, []).unwrap();
-        let result = super::map_file(&path);
+        let file = File::open(&path).unwrap();
+        let result = super::map_file(&file);
         fs::remove_file(path).unwrap();
 
         assert!(matches!(result, Err(Error::InvalidFile("file is empty"))));

@@ -5,6 +5,11 @@ use crate::errors::{Error, Result};
 /// The identifier and version are recorded in the file and checked when it is
 /// opened. Each call encodes exactly one token; framing is handled by the file
 /// format.
+///
+/// Implementations must ensure that `decode(encode(token)) == token` and that
+/// decoded values preserve the original [`Eq`] and [`Hash`](std::hash::Hash)
+/// behavior. Identifiers beginning with `yurine:` are reserved for built-in
+/// codecs.
 pub trait TokenCodec<T> {
     /// Returns the stable identifier written to persisted files.
     fn id(&self) -> &str;

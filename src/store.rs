@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use crate::errors::Result;
-use crate::persistence::storage::Storage;
 use crate::types::{SequenceId, Symbol};
 
 /// A builder for a [`CorpusStore`].
@@ -45,16 +44,16 @@ impl CorpusStoreBuilder {
         let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
         alphabet.sort_unstable();
         CorpusStore {
-            symbols: Storage::Owned(self.symbols.into_boxed_slice()),
-            string_offsets: Storage::Owned(self.string_offsets.into_boxed_slice()),
+            symbols: self.symbols,
+            string_offsets: self.string_offsets,
             alphabet,
         }
     }
 }
 
 pub(crate) struct CorpusStore {
-    symbols: Storage<Symbol>,
-    string_offsets: Storage<u64>,
+    symbols: Vec<Symbol>,
+    string_offsets: Vec<u64>,
     alphabet: Vec<Symbol>,
 }
 
@@ -145,8 +144,8 @@ mod tests {
 
         let store = builder.build();
 
-        assert_eq!(store.symbols.as_slice(), [first, second, second]);
-        assert_eq!(store.string_offsets.as_slice(), [0, 2, 2, 3]);
+        assert_eq!(store.symbols, [first, second, second]);
+        assert_eq!(store.string_offsets, [0, 2, 2, 3]);
         assert_eq!(store.string(SequenceId::new(1)).unwrap(), Some(&[][..]));
     }
 
