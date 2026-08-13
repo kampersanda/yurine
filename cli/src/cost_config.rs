@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use yurine::costs::custom::CustomCosts;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore, EmbeddingStoreBuilder};
-use yurine::costs::levenshtein::LevenshteinCosts;
-use yurine::costs::{Cost, EditCosts};
+use yurine::costs::{
+    CosineEmbeddingCosts, Cost, CustomCosts, EditCosts, EmbeddingStore, EmbeddingStoreBuilder,
+    LevenshteinCosts,
+};
 
 use crate::tokenization::Tokenizer;
 

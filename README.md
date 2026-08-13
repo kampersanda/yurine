@@ -29,8 +29,8 @@ Edit:                        district -> town (cost 0.25)
 ## Usage
 
 ```rust
-use yurine::costs::{Cost, custom::CustomCosts};
-use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+use yurine::costs::{Cost, CustomCosts};
+use yurine::search::{RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
@@ -66,8 +66,8 @@ similar tokens can match without an explicit rule:
 
 ```rust
 use std::num::NonZeroUsize;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+use yurine::search::{RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();

@@ -1,7 +1,6 @@
 use yurine::costs::{Cost, EditCosts};
 use yurine::errors::Error;
-use yurine::search::range_search::RangeSearchParams;
-use yurine::search::{SearchEngine, SearchEngineBuilder};
+use yurine::search::{RangeSearchParams, SearchEngine, SearchEngineBuilder};
 
 struct CompatibilityCosts;
 

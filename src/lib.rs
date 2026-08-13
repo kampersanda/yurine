@@ -10,8 +10,8 @@
 //! # Quick start
 //!
 //! ```
-//! use yurine::costs::{Cost, custom::CustomCosts};
-//! use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+//! use yurine::costs::{Cost, CustomCosts};
+//! use yurine::search::{RangeSearchParams, SearchEngineBuilder};
 //!
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
@@ -42,14 +42,14 @@
 //!
 //! # Embedding-based search
 //!
-//! [`CosineEmbeddingCosts`](costs::embedding::CosineEmbeddingCosts) derives
+//! [`CosineEmbeddingCosts`](costs::CosineEmbeddingCosts) derives
 //! substitution costs from static token embeddings. Tokens with similar
 //! vectors can therefore match without an explicit substitution rule.
 //!
 //! ```
 //! use std::num::NonZeroUsize;
-//! use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-//! use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+//! use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+//! use yurine::search::{RangeSearchParams, SearchEngineBuilder};
 //!
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
@@ -89,10 +89,9 @@
 //! # #[cfg(feature = "persist")]
 //! # fn example() -> yurine::errors::Result<()> {
 //! use tempfile::tempdir;
-//! use yurine::costs::levenshtein::LevenshteinCosts;
+//! use yurine::costs::LevenshteinCosts;
 //! use yurine::persistence::StringCodec;
-//! use yurine::search::{SearchEngine, SearchEngineBuilder};
-//! use yurine::search::range_search::RangeSearchParams;
+//! use yurine::search::{RangeSearchParams, SearchEngine, SearchEngineBuilder};
 //!
 //! let directory = tempdir().expect("create temporary directory");
 //! let path = directory.path().join("jinbocho.yurine");
@@ -127,9 +126,9 @@
 //! untrusted snapshot, and never modify or truncate a file while it is mapped.
 //!
 //! Build an index once, then create any number of searchers with
-//! [`levenshtein::LevenshteinCosts`](costs::levenshtein::LevenshteinCosts),
-//! [`custom::CustomCosts`](costs::custom::CustomCosts), or
-//! [`embedding::CosineEmbeddingCosts`](costs::embedding::CosineEmbeddingCosts).
+//! [`LevenshteinCosts`](costs::LevenshteinCosts),
+//! [`CustomCosts`](costs::CustomCosts), or
+//! [`CosineEmbeddingCosts`](costs::CosineEmbeddingCosts).
 #![warn(missing_docs)]
 
 pub mod costs;

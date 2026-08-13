@@ -24,7 +24,7 @@ mod persistence;
 ///
 /// ```
 /// use std::num::NonZeroUsize;
-/// use yurine::costs::embedding::EmbeddingStoreBuilder;
+/// use yurine::costs::EmbeddingStoreBuilder;
 ///
 /// let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
 /// builder.insert("cat", [3.0, 4.0])?;
@@ -261,8 +261,7 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 ///
 /// ```
 /// use std::num::NonZeroUsize;
-/// use yurine::costs::{Cost, EditCosts};
-/// use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+/// use yurine::costs::{Cost, CosineEmbeddingCosts, EditCosts, EmbeddingStoreBuilder};
 ///
 /// let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
 /// builder.insert("literature", [1.0, 0.0])?;
