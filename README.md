@@ -26,6 +26,20 @@ Edit:                        district -> town (cost 0.25)
 - **Reusable indexes:** supports generic token types, multiple cost policies,
   and memory-mapped persistence.
 
+## Algorithm
+
+Yurine implements the search algorithm proposed by Koide et al. [1]. Their
+filtering–verification framework selects a query subsequence that minimizes the
+number of candidates (the two-approximation `MinCand` selection), collects
+candidate anchors from an inverted index, and verifies them with a
+bidirectional trie. Yurine applies that algorithm to sequences of arbitrary
+tokens rather than to road-network trajectories.
+
+1. Satoshi Koide, Chuan Xiao, and Yoshiharu Ishikawa. Fast Subtrajectory
+   Similarity Search in Road Networks under Weighted Edit Distance Constraints.
+   *PVLDB*, 13(11): 2188–2201, 2020.
+   <https://doi.org/10.14778/3407790.3407818>
+
 ## Usage
 
 ```rust
