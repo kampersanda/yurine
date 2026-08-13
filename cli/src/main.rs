@@ -4,6 +4,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
@@ -42,6 +43,13 @@ struct Options {
     /// JSON file describing the edit-cost policy.
     #[arg(long)]
     costs: Option<PathBuf>,
+
+    /// Report the elapsed time of each stage on standard error.
+    ///
+    /// Each stage is measured once, without warm-up or repetition. Reading the
+    /// corpus from standard input includes waiting for the upstream process.
+    #[arg(long)]
+    timing: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -62,8 +70,10 @@ fn main() -> ExitCode {
 }
 
 fn run(options: Options) -> Result<()> {
+    let started = Instant::now();
     let source_texts = read_source_texts(options.corpus.as_deref())?;
-    let matches = match options.tokenizer {
+    let read = started.elapsed();
+    let (matches, mut timings) = match options.tokenizer {
         TokenizerKind::Character => {
             search_source_texts(&source_texts, &options, CharacterTokenizer)
         }
@@ -73,7 +83,15 @@ fn run(options: Options) -> Result<()> {
     }
     .context("search failed")?;
 
-    write_matches(io::stdout().lock(), &source_texts, &matches).context("failed to write results")
+    write_matches(io::stdout().lock(), &source_texts, &matches)
+        .context("failed to write results")?;
+
+    if options.timing {
+        timings.read = read;
+        timings.total = started.elapsed();
+        write_timings(io::stderr().lock(), &timings).context("failed to write timings")?;
+    }
+    Ok(())
 }
 
 fn parse_cost(text: &str) -> Result<Cost, String> {
@@ -112,14 +130,19 @@ fn search_source_texts<T>(
     source_texts: &[String],
     options: &Options,
     tokenizer: impl Tokenizer<Token = T>,
-) -> Result<Vec<LocatedMatch>>
+) -> Result<(Vec<LocatedMatch>, Timings)>
 where
     T: Clone + Eq + Hash,
 {
+    let mut timings = Timings::default();
+    let costs_start = Instant::now();
     let costs = match &options.costs {
         Some(path) => cost_config::load(path, &tokenizer)?,
         None => RuntimeCosts::levenshtein(),
     };
+    timings.costs = costs_start.elapsed();
+
+    let build_start = Instant::now();
     let mut builder = SearchEngineBuilder::new();
     let mut source_token_ranges = Vec::with_capacity(source_texts.len());
     for source_text in source_texts {
@@ -132,6 +155,9 @@ where
         source_token_ranges.push(ranges);
     }
     let engine = builder.build()?;
+    timings.build = build_start.elapsed();
+
+    let search_start = Instant::now();
     let mut params = RangeSearchParams::new(options.threshold.into());
     if let Some(eta) = options.eta {
         params = params.with_eta(eta.into());
@@ -144,10 +170,42 @@ where
     let matches = engine
         .range_searcher(costs)
         .search(&query_sequence, &params)?;
-    Ok(matches
+    timings.search = search_start.elapsed();
+
+    let located = matches
         .into_iter()
         .map(|matched| locate_match(matched, &source_token_ranges))
-        .collect())
+        .collect();
+    Ok((located, timings))
+}
+
+/// Elapsed time of each stage of a single run.
+///
+/// `read` and `total` are measured by the caller because they cover work
+/// outside the search itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Timings {
+    read: Duration,
+    costs: Duration,
+    build: Duration,
+    search: Duration,
+    total: Duration,
+}
+
+fn write_timings(mut output: impl Write, timings: &Timings) -> io::Result<()> {
+    writeln!(
+        output,
+        "timing: read={} costs={} build={} search={} total={}",
+        format_milliseconds(timings.read),
+        format_milliseconds(timings.costs),
+        format_milliseconds(timings.build),
+        format_milliseconds(timings.search),
+        format_milliseconds(timings.total),
+    )
+}
+
+fn format_milliseconds(elapsed: Duration) -> String {
+    format!("{:.3}ms", elapsed.as_secs_f64() * 1e3)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,12 +260,14 @@ mod tests {
     use std::io::Cursor;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use clap::{CommandFactory, Parser};
     use yurine::costs::Cost;
 
     use super::{
-        LocatedMatch, Options, TokenizerKind, read_lines, search_source_texts, write_matches,
+        LocatedMatch, Options, Timings, TokenizerKind, read_lines, search_source_texts,
+        write_matches, write_timings,
     };
     use crate::tokenization::{CharacterTokenizer, WhitespaceTokenizer};
 
@@ -256,6 +316,7 @@ mod tests {
             "whitespace",
             "--costs",
             "costs.json",
+            "--timing",
             "hello world",
             "corpus.txt",
         ])
@@ -270,8 +331,15 @@ mod tests {
                 eta: Some(Cost::new_const(0.25)),
                 tokenizer: TokenizerKind::Whitespace,
                 costs: Some(PathBuf::from("costs.json")),
+                timing: true,
             }
         );
+    }
+
+    #[test]
+    fn timing_defaults_to_disabled() {
+        let options = Options::try_parse_from(["yurine", "query"]).unwrap();
+        assert!(!options.timing);
     }
 
     #[test]
@@ -310,9 +378,11 @@ mod tests {
             eta: None,
             tokenizer: TokenizerKind::Character,
             costs: None,
+            timing: false,
         };
 
-        let matches = search_source_texts(&source_texts, &options, CharacterTokenizer).unwrap();
+        let (matches, _) =
+            search_source_texts(&source_texts, &options, CharacterTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].sequence_id, 0);
         assert_eq!(matches[0].byte_range, 0..6);
@@ -328,9 +398,11 @@ mod tests {
             eta: None,
             tokenizer: TokenizerKind::Whitespace,
             costs: None,
+            timing: false,
         };
 
-        let matches = search_source_texts(&source_texts, &options, WhitespaceTokenizer).unwrap();
+        let (matches, _) =
+            search_source_texts(&source_texts, &options, WhitespaceTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..8);
     }
@@ -360,9 +432,10 @@ mod tests {
             eta: Some(Cost::new_const(0.25)),
             tokenizer: TokenizerKind::Character,
             costs: Some(config),
+            timing: false,
         };
 
-        let matches =
+        let (matches, _) =
             search_source_texts(&["あ".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
@@ -394,9 +467,10 @@ mod tests {
             eta: Some(Cost::new_const(0.25)),
             tokenizer: TokenizerKind::Whitespace,
             costs: Some(config),
+            timing: false,
         };
 
-        let matches =
+        let (matches, _) =
             search_source_texts(&["color palette".to_owned()], &options, WhitespaceTokenizer)
                 .unwrap();
 
@@ -427,9 +501,11 @@ mod tests {
             eta: Some(Cost::new_const(0.25)),
             tokenizer: TokenizerKind::Character,
             costs: Some(config),
+            timing: false,
         };
 
-        let matches = search_source_texts(&["a".to_owned()], &options, CharacterTokenizer).unwrap();
+        let (matches, _) =
+            search_source_texts(&["a".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..1);
@@ -458,9 +534,10 @@ mod tests {
             eta: Some(Cost::new_const(0.25)),
             tokenizer: TokenizerKind::Whitespace,
             costs: Some(config),
+            timing: false,
         };
 
-        let matches =
+        let (matches, _) =
             search_source_texts(&["color palette".to_owned()], &options, WhitespaceTokenizer)
                 .unwrap();
 
@@ -482,5 +559,24 @@ mod tests {
         write_matches(&mut output, &source_texts, &matches).unwrap();
 
         assert_eq!(String::from_utf8(output).unwrap(), "0\t0\t0\t3\t\"a\tb\"\n");
+    }
+
+    #[test]
+    fn timings_are_reported_in_milliseconds() {
+        let timings = Timings {
+            read: Duration::from_micros(12_345),
+            costs: Duration::ZERO,
+            build: Duration::from_millis(234),
+            search: Duration::from_micros(1_234),
+            total: Duration::from_secs(2),
+        };
+        let mut output = Vec::new();
+
+        write_timings(&mut output, &timings).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "timing: read=12.345ms costs=0.000ms build=234.000ms search=1.234ms total=2000.000ms\n"
+        );
     }
 }
