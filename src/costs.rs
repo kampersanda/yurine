@@ -3,6 +3,8 @@
 pub mod custom;
 pub mod embedding;
 pub mod levenshtein;
+#[cfg(feature = "persist")]
+pub(crate) mod persistence;
 
 use std::cmp::Ordering;
 use std::fmt;

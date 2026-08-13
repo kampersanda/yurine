@@ -8,25 +8,30 @@ use std::num::NonZeroUsize;
 
 use super::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::storage::Storage;
 
-/// Stores fixed-dimensional, L2-normalized embeddings by token.
+#[cfg(feature = "persist")]
+mod costs_persistence;
+#[cfg(feature = "persist")]
+mod persistence;
+
+/// Builds a fixed-dimensional store of token embeddings.
 ///
 /// Embeddings are stored consecutively in insertion order. They are validated
-/// and normalized when inserted, so values returned by [`EmbeddingStore::get`]
-/// are always finite, non-zero unit vectors with the store's configured
-/// dimension.
+/// and normalized when inserted. Call [`EmbeddingStoreBuilder::build`] to make
+/// the store immutable and ready for searching or persistence.
 #[derive(Debug, Clone)]
-pub struct EmbeddingStore<T> {
+pub struct EmbeddingStoreBuilder<T> {
     dimension: NonZeroUsize,
     embedding_indices: HashMap<T, u32>,
     embeddings: Vec<f32>,
 }
 
-impl<T> EmbeddingStore<T>
+impl<T> EmbeddingStoreBuilder<T>
 where
     T: Eq + Hash,
 {
-    /// Creates an empty store for embeddings of `dimension` elements.
+    /// Creates an empty builder for embeddings of `dimension` elements.
     pub fn new(dimension: NonZeroUsize) -> Self {
         Self {
             dimension,
@@ -121,6 +126,101 @@ where
     pub fn is_empty(&self) -> bool {
         self.embedding_indices.is_empty()
     }
+
+    /// Finishes this builder as an immutable embedding store.
+    pub fn build(self) -> EmbeddingStore<T> {
+        EmbeddingStore {
+            dimension: self.dimension,
+            embedding_indices: self.embedding_indices,
+            embeddings: Storage::Owned(self.embeddings.into_boxed_slice()),
+        }
+    }
+}
+
+/// An immutable store of fixed-dimensional, L2-normalized token embeddings.
+///
+/// In-memory builders own their vector matrix. Stores opened from a persisted
+/// snapshot keep the matrix memory-mapped and rebuild only the token index on
+/// the heap.
+#[derive(Debug, Clone)]
+pub struct EmbeddingStore<T> {
+    dimension: NonZeroUsize,
+    embedding_indices: HashMap<T, u32>,
+    embeddings: Storage<f32>,
+}
+
+impl<T> EmbeddingStore<T>
+where
+    T: Eq + Hash,
+{
+    /// Returns the normalized embedding registered for `token`.
+    ///
+    /// A semantically invalid row from a corrupted mapped file is treated as
+    /// absent. [`EmbeddingStore::verify`] reports the precise validation error.
+    pub fn get<Q>(&self, token: &Q) -> Option<&[f32]>
+    where
+        T: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        let index = *self.embedding_indices.get(token)? as usize;
+        let start = index.checked_mul(self.dimension.get())?;
+        let row = self.embeddings.get(start..start + self.dimension.get())?;
+        if self.embeddings.is_mapped() && validate_embedding(row).is_err() {
+            return None;
+        }
+        Some(row)
+    }
+
+    /// Returns the required number of elements in every embedding.
+    pub const fn dimension(&self) -> NonZeroUsize {
+        self.dimension
+    }
+
+    /// Returns the number of registered tokens.
+    pub fn len(&self) -> usize {
+        self.embedding_indices.len()
+    }
+
+    /// Returns whether the store contains no embeddings.
+    pub fn is_empty(&self) -> bool {
+        self.embedding_indices.is_empty()
+    }
+
+    /// Fully validates every embedding row.
+    pub fn verify(&self) -> Result<()> {
+        let expected_len = self
+            .len()
+            .checked_mul(self.dimension.get())
+            .ok_or(Error::InvalidFile("embedding matrix length overflows"))?;
+        if self.embeddings.len() != expected_len {
+            return Err(Error::InvalidFile(
+                "embedding matrix length does not match its shape",
+            ));
+        }
+        for row in self.embeddings.chunks_exact(self.dimension.get()) {
+            validate_embedding(row)?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_embedding(embedding: &[f32]) -> Result<()> {
+    for (index, value) in embedding.iter().copied().enumerate() {
+        if !value.is_finite() {
+            return Err(Error::InvalidEmbeddingValue { index, value });
+        }
+    }
+    let squared_norm: f64 = embedding
+        .iter()
+        .map(|value| f64::from(*value).powi(2))
+        .sum();
+    if squared_norm == 0.0 {
+        return Err(Error::ZeroNormEmbedding);
+    }
+    if (squared_norm - 1.0).abs() > 1e-5 {
+        return Err(Error::InvalidFile("embedding is not L2-normalized"));
+    }
+    Ok(())
 }
 
 /// Edit costs derived from cosine distances between static token embeddings.
@@ -208,7 +308,7 @@ mod tests {
 
     use approx::assert_abs_diff_eq;
 
-    use super::{CosineEmbeddingCosts, EmbeddingStore};
+    use super::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
 
@@ -218,7 +318,7 @@ mod tests {
 
     #[test]
     fn stores_normalized_embeddings_and_reports_metadata() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         assert_eq!(store.dimension(), nonzero(2));
         assert_eq!(store.len(), 0);
         assert!(store.is_empty());
@@ -233,7 +333,7 @@ mod tests {
 
     #[test]
     fn stores_embeddings_in_a_flat_array() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
         store.insert('b', vec![0.0, 1.0]).unwrap();
 
@@ -249,7 +349,7 @@ mod tests {
 
     #[test]
     fn replacing_a_token_returns_its_previous_normalized_embedding() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert("東京".to_owned(), vec![3.0, 4.0]).unwrap();
 
         let previous = store
@@ -264,7 +364,7 @@ mod tests {
 
     #[test]
     fn rejects_wrong_dimension_without_changing_the_store() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
 
         assert_eq!(
@@ -280,7 +380,7 @@ mod tests {
     #[test]
     fn rejects_each_non_finite_value() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut store = EmbeddingStore::new(nonzero(2));
+            let mut store = EmbeddingStoreBuilder::new(nonzero(2));
             assert!(matches!(
                 store.insert('a', vec![1.0, value]),
                 Err(Error::InvalidEmbeddingValue { index: 1, value: actual })
@@ -292,7 +392,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_norm_embedding() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
 
         assert_eq!(
             store.insert('a', vec![0.0, -0.0]),
@@ -303,7 +403,7 @@ mod tests {
 
     #[test]
     fn normalizes_large_finite_values_without_overflow() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![f32::MAX, f32::MAX]).unwrap();
 
         let expected = 1.0 / 2.0_f32.sqrt();
@@ -312,10 +412,10 @@ mod tests {
 
     #[test]
     fn cosine_costs_use_unit_defaults() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
         store.insert('b', vec![0.0, 1.0]).unwrap();
-        let costs = CosineEmbeddingCosts::new(store);
+        let costs = CosineEmbeddingCosts::new(store.build());
 
         assert_eq!(costs.substitution(&'a', &'b'), Cost::ONE);
         assert_eq!(costs.substitution(&'a', &'x'), Cost::ONE);
@@ -325,21 +425,22 @@ mod tests {
 
     #[test]
     fn equal_tokens_cost_zero_even_without_an_embedding() {
-        let costs = CosineEmbeddingCosts::new(EmbeddingStore::<char>::new(nonzero(2)))
-            .with_missing_substitution_cost(Cost::new_const(0.75));
+        let costs =
+            CosineEmbeddingCosts::new(EmbeddingStoreBuilder::<char>::new(nonzero(2)).build())
+                .with_missing_substitution_cost(Cost::new_const(0.75));
 
         assert_eq!(costs.substitution(&'x', &'x'), Cost::ZERO);
     }
 
     #[test]
     fn cosine_distance_controls_substitution_cost() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
         store.insert('p', vec![2.0, 0.0]).unwrap();
         store.insert('s', vec![0.6, 0.8]).unwrap();
         store.insert('o', vec![0.0, 1.0]).unwrap();
         store.insert('n', vec![-1.0, 0.0]).unwrap();
-        let costs = CosineEmbeddingCosts::new(store);
+        let costs = CosineEmbeddingCosts::new(store.build());
 
         assert_abs_diff_eq!(costs.substitution(&'a', &'p').get(), 0.0);
         assert_abs_diff_eq!(costs.substitution(&'a', &'s').get(), 0.4);
@@ -349,10 +450,10 @@ mod tests {
 
     #[test]
     fn missing_embedding_cost_applies_if_either_embedding_is_absent() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
-        let costs =
-            CosineEmbeddingCosts::new(store).with_missing_substitution_cost(Cost::new_const(0.25));
+        let costs = CosineEmbeddingCosts::new(store.build())
+            .with_missing_substitution_cost(Cost::new_const(0.25));
 
         assert_eq!(costs.substitution(&'a', &'x'), Cost::new_const(0.25));
         assert_eq!(costs.substitution(&'x', &'y'), Cost::new_const(0.25));
@@ -360,9 +461,10 @@ mod tests {
 
     #[test]
     fn configures_deletion_and_insertion_independently() {
-        let costs = CosineEmbeddingCosts::new(EmbeddingStore::<char>::new(nonzero(2)))
-            .with_deletion_cost(Cost::new_const(0.25))
-            .with_insertion_cost(Cost::new_const(0.75));
+        let costs =
+            CosineEmbeddingCosts::new(EmbeddingStoreBuilder::<char>::new(nonzero(2)).build())
+                .with_deletion_cost(Cost::new_const(0.25))
+                .with_insertion_cost(Cost::new_const(0.75));
 
         assert_eq!(costs.deletion(&'a'), Cost::new_const(0.25));
         assert_eq!(costs.insertion(&'a'), Cost::new_const(0.75));
@@ -370,9 +472,9 @@ mod tests {
 
     #[test]
     fn exposes_its_embedding_store() {
-        let mut store = EmbeddingStore::new(nonzero(2));
+        let mut store = EmbeddingStoreBuilder::new(nonzero(2));
         store.insert('a', vec![1.0, 0.0]).unwrap();
-        let costs = CosineEmbeddingCosts::new(store);
+        let costs = CosineEmbeddingCosts::new(store.build());
 
         assert_eq!(costs.embeddings().dimension(), nonzero(2));
         assert_eq!(costs.embeddings().len(), 1);

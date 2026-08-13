@@ -212,6 +212,7 @@ pub(crate) struct PersistedFile {
 
 pub(crate) enum SectionData<'a> {
     Bytes { bytes: &'a [u8], element_count: u64 },
+    F32(&'a [f32]),
     U64(&'a [u64]),
     Symbols(&'a [Symbol]),
     Postings(&'a [Posting]),
@@ -221,6 +222,7 @@ impl SectionData<'_> {
     fn byte_len(&self) -> u64 {
         match self {
             Self::Bytes { bytes, .. } => bytes.len() as u64,
+            Self::F32(values) => std::mem::size_of_val(*values) as u64,
             Self::U64(values) => std::mem::size_of_val(*values) as u64,
             Self::Symbols(values) => std::mem::size_of_val(*values) as u64,
             Self::Postings(values) => std::mem::size_of_val(*values) as u64,
@@ -230,6 +232,7 @@ impl SectionData<'_> {
     fn element_count(&self) -> u64 {
         match self {
             Self::Bytes { element_count, .. } => *element_count,
+            Self::F32(values) => values.len() as u64,
             Self::U64(values) => values.len() as u64,
             Self::Symbols(values) => values.len() as u64,
             Self::Postings(values) => values.len() as u64,
@@ -239,6 +242,9 @@ impl SectionData<'_> {
     fn write_to(&self, writer: &mut impl Write) -> std::io::Result<()> {
         match self {
             Self::Bytes { bytes, .. } => writer.write_all(bytes),
+            Self::F32(values) => values
+                .iter()
+                .try_for_each(|value| writer.write_all(&value.to_le_bytes())),
             Self::U64(values) => values
                 .iter()
                 .try_for_each(|value| writer.write_all(&value.to_le_bytes())),
@@ -584,41 +590,56 @@ impl PersistedFile {
     }
 
     fn validate_structure(&self) -> Result<()> {
-        if self.kind != FileKind::SearchEngine {
-            return Ok(());
-        }
+        match self.kind {
+            FileKind::SearchEngine => {
+                // SearchEngine slicing depends only on these three offset arrays. They
+                // are small relative to their payloads and are scanned fully at open.
+                // Corpus symbols and postings themselves remain demand-paged and are
+                // reserved for lazy or explicit semantic validation.
+                let vocabulary_offsets =
+                    self.mapped_slice::<u64>(SectionKind::VocabularyTokenOffsets)?;
+                let vocabulary_blob = self.section(SectionKind::VocabularyTokenBlob)?;
+                let sequence_offsets = self.mapped_slice::<u64>(SectionKind::SequenceOffsets)?;
+                let corpus = self.section(SectionKind::CorpusSymbols)?;
+                let posting_offsets = self.mapped_slice::<u64>(SectionKind::PostingOffsets)?;
+                let postings = self.section(SectionKind::Postings)?;
 
-        // SearchEngine slicing depends only on these three offset arrays. They
-        // are small relative to their payloads and are scanned fully at open.
-        // Corpus symbols and postings themselves remain demand-paged and are
-        // reserved for lazy or explicit semantic validation.
-        let vocabulary_offsets = self.mapped_slice::<u64>(SectionKind::VocabularyTokenOffsets)?;
-        let vocabulary_blob = self.section(SectionKind::VocabularyTokenBlob)?;
-        let sequence_offsets = self.mapped_slice::<u64>(SectionKind::SequenceOffsets)?;
-        let corpus = self.section(SectionKind::CorpusSymbols)?;
-        let posting_offsets = self.mapped_slice::<u64>(SectionKind::PostingOffsets)?;
-        let postings = self.section(SectionKind::Postings)?;
+                validate_offsets(&vocabulary_offsets, vocabulary_blob.byte_len)?;
+                validate_offsets(&sequence_offsets, corpus.element_count)?;
+                validate_offsets(&posting_offsets, postings.element_count)?;
 
-        validate_offsets(&vocabulary_offsets, vocabulary_blob.byte_len)?;
-        validate_offsets(&sequence_offsets, corpus.element_count)?;
-        validate_offsets(&posting_offsets, postings.element_count)?;
-
-        // For token blobs, `element_count` is the number of encoded tokens,
-        // while `byte_len` is the terminal byte offset. Both values are needed
-        // because tokens are variable-width.
-        let expected_vocabulary_offsets = vocabulary_blob
-            .element_count
-            .checked_add(1)
-            .ok_or(Error::InvalidFile("vocabulary offset count overflows"))?;
-        if vocabulary_offsets.len() as u64 != expected_vocabulary_offsets {
-            return Err(Error::InvalidFile(
-                "vocabulary offset count does not match token count",
-            ));
-        }
-        if posting_offsets.len() as u64 != expected_vocabulary_offsets {
-            return Err(Error::InvalidFile(
-                "posting offset count does not match vocabulary",
-            ));
+                let expected_vocabulary_offsets = vocabulary_blob
+                    .element_count
+                    .checked_add(1)
+                    .ok_or(Error::InvalidFile("vocabulary offset count overflows"))?;
+                if vocabulary_offsets.len() as u64 != expected_vocabulary_offsets {
+                    return Err(Error::InvalidFile(
+                        "vocabulary offset count does not match token count",
+                    ));
+                }
+                if posting_offsets.len() as u64 != expected_vocabulary_offsets {
+                    return Err(Error::InvalidFile(
+                        "posting offset count does not match vocabulary",
+                    ));
+                }
+            }
+            FileKind::EmbeddingStore => {
+                let offsets = self.mapped_slice::<u64>(SectionKind::EmbeddingTokenOffsets)?;
+                let blob = self.section(SectionKind::EmbeddingTokenBlob)?;
+                self.section(SectionKind::Embeddings)?;
+                self.section(SectionKind::CostMetadata)?;
+                validate_offsets(&offsets, blob.byte_len)?;
+                let expected_offsets = blob
+                    .element_count
+                    .checked_add(1)
+                    .ok_or(Error::InvalidFile("embedding token offset count overflows"))?;
+                if offsets.len() as u64 != expected_offsets {
+                    return Err(Error::InvalidFile(
+                        "embedding token offset count does not match token count",
+                    ));
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
