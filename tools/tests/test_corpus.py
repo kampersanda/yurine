@@ -34,6 +34,15 @@ def test_worker_processes_reproduce_the_sequential_output() -> None:
     assert sequential.splitlines() == [f"line {index} ab" for index in range(2 * CHUNK_SIZE + 1)]
 
 
+def test_zero_workers_runs_one_worker_per_cpu() -> None:
+    lines = ["ＡＢ  c\n", "d\n"]
+    config = TokenizerConfig(kind="whitespace")
+
+    blocks = list(preprocess_blocks(lines, config, normalization="nfkc", workers=0))
+
+    assert blocks == ["AB c\nd\n"]
+
+
 def test_blocks_terminate_every_line_including_the_last() -> None:
     blocks = list(preprocess_blocks(["a b", ""], TokenizerConfig(kind="whitespace")))
 

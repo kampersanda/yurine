@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import unicodedata
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -141,8 +142,10 @@ def preprocess_blocks(
     """Stream preprocessed text blocks, keeping input order and line count.
 
     Blocks concatenate ``CHUNK_SIZE`` output lines so that a huge corpus costs
-    one write per chunk rather than one per line.
+    one write per chunk rather than one per line. ``workers`` may be ``0`` to
+    run one worker per CPU.
     """
+    workers = workers or os.cpu_count() or 1
     chunks = _chunked(lines, CHUNK_SIZE)
     if workers == 1:
         tokenizer = config.build()

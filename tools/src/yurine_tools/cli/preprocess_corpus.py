@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from typing import Literal
 
@@ -61,12 +60,10 @@ def run_command(args: PreprocessCorpusArgs) -> None:
         form=args.form,
         config_path=args.sudachi_config,
     )
-    workers = args.workers or os.cpu_count() or 1
-
     count = 0
     with open_text_input(args.input) as source, open_text_output(args.output) as destination:
         blocks = preprocess_blocks(
-            source, config, normalization=args.normalization, workers=workers
+            source, config, normalization=args.normalization, workers=args.workers
         )
         for block in blocks:
             destination.write(block)
