@@ -10,8 +10,8 @@
 //! # Quick start
 //!
 //! ```
-//! use yurine::costs::{Cost, CustomCosts};
-//! use yurine::search::{RangeSearchParams, SearchEngineBuilder};
+//! use yurine::costs::CustomCosts;
+//! use yurine::{Cost, RangeSearchParams, SearchEngineBuilder};
 //!
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
@@ -49,7 +49,7 @@
 //! ```
 //! use std::num::NonZeroUsize;
 //! use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-//! use yurine::search::{RangeSearchParams, SearchEngineBuilder};
+//! use yurine::{RangeSearchParams, SearchEngineBuilder};
 //!
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
@@ -91,7 +91,7 @@
 //! use tempfile::tempdir;
 //! use yurine::costs::LevenshteinCosts;
 //! use yurine::persistence::StringCodec;
-//! use yurine::search::{RangeSearchParams, SearchEngine, SearchEngineBuilder};
+//! use yurine::{RangeSearchParams, SearchEngine, SearchEngineBuilder};
 //!
 //! let directory = tempdir().expect("create temporary directory");
 //! let path = directory.path().join("jinbocho.yurine");
@@ -141,6 +141,9 @@ mod storage;
 mod store;
 mod types;
 mod vocabulary;
+
+pub use costs::Cost;
+pub use search::{Match, RangeSearchParams, SearchEngine, SearchEngineBuilder};
 
 // Keep README examples in the same doctest suite as the public API docs without
 // adding the README itself to the rendered crate documentation.

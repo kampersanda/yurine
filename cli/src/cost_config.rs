@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use yurine::Cost;
 use yurine::costs::{
-    CosineEmbeddingCosts, Cost, CustomCosts, EditCosts, EmbeddingStore, EmbeddingStoreBuilder,
+    CosineEmbeddingCosts, CustomCosts, EditCosts, EmbeddingStore, EmbeddingStoreBuilder,
     LevenshteinCosts,
 };
 

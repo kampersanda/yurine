@@ -29,8 +29,8 @@ Edit:                        district -> town (cost 0.25)
 ## Usage
 
 ```rust
-use yurine::costs::{Cost, CustomCosts};
-use yurine::search::{RangeSearchParams, SearchEngineBuilder};
+use yurine::costs::CustomCosts;
+use yurine::{Cost, RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
@@ -67,7 +67,7 @@ similar tokens can match without an explicit rule:
 ```rust
 use std::num::NonZeroUsize;
 use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-use yurine::search::{RangeSearchParams, SearchEngineBuilder};
+use yurine::{RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
@@ -103,7 +103,7 @@ engines, embedding stores, and edit-cost policies:
 ```rust
 use tempfile::tempdir;
 use yurine::persistence::StringCodec;
-use yurine::search::{SearchEngine, SearchEngineBuilder};
+use yurine::{SearchEngine, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let directory = tempdir().expect("create temporary directory");

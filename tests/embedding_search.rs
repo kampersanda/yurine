@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use approx::assert_abs_diff_eq;
 use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-use yurine::search::{RangeSearchParams, SearchEngineBuilder};
+use yurine::{RangeSearchParams, SearchEngineBuilder};
 
 #[test]
 fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {

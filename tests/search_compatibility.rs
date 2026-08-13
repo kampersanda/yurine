@@ -1,6 +1,6 @@
-use yurine::costs::{Cost, EditCosts};
+use yurine::costs::EditCosts;
 use yurine::errors::Error;
-use yurine::search::{RangeSearchParams, SearchEngine, SearchEngineBuilder};
+use yurine::{Cost, Match, RangeSearchParams, SearchEngine, SearchEngineBuilder};
 
 struct CompatibilityCosts;
 
@@ -60,27 +60,27 @@ fn assert_range_search_result_contract(engine: SearchEngine<char>) {
     assert_eq!(
         matches,
         [
-            yurine::search::Match {
+            Match {
                 sequence_id: 0,
                 token_range: 1..3,
                 distance: 0.0,
             },
-            yurine::search::Match {
+            Match {
                 sequence_id: 1,
                 token_range: 0..2,
                 distance: 0.0,
             },
-            yurine::search::Match {
+            Match {
                 sequence_id: 2,
                 token_range: 0..2,
                 distance: 0.25,
             },
-            yurine::search::Match {
+            Match {
                 sequence_id: 3,
                 token_range: 0..2,
                 distance: 0.0,
             },
-            yurine::search::Match {
+            Match {
                 sequence_id: 3,
                 token_range: 2..4,
                 distance: 0.0,
@@ -121,7 +121,7 @@ fn exhaustive_fallback_result_contract_is_stable() {
     assert!(metrics.used_exhaustive_verification);
     assert_eq!(
         matches,
-        [yurine::search::Match {
+        [Match {
             sequence_id: 0,
             token_range: 0..1,
             distance: 0.0,

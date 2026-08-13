@@ -8,8 +8,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use csv::{Terminator, WriterBuilder};
-use yurine::costs::Cost;
-use yurine::search::{Match, RangeSearchParams, SearchEngineBuilder};
+use yurine::{Cost, Match, RangeSearchParams, SearchEngineBuilder};
 
 mod cost_config;
 mod tokenization;
