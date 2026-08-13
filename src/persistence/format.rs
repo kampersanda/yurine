@@ -280,7 +280,11 @@ impl PersistedFile {
         }
         validate_offset_endpoints(&sequence_offsets, corpus.element_count)?;
         validate_offset_endpoints(&posting_offsets, postings.element_count)?;
-        if posting_offsets.len() as u64 != vocabulary.element_count + 1 {
+        let expected_posting_offsets = vocabulary
+            .element_count
+            .checked_add(1)
+            .ok_or(Error::InvalidFile("posting offset count overflows"))?;
+        if posting_offsets.len() as u64 != expected_posting_offsets {
             return Err(Error::InvalidFile(
                 "posting offset count does not match vocabulary",
             ));
@@ -329,8 +333,10 @@ impl PersistedFile {
 
         for symbol in 0..vocabulary_len {
             let symbol_index = usize::try_from(symbol).map_err(|_| Error::PlatformSizeOverflow)?;
-            let start = posting_offsets[symbol_index] as usize;
-            let end = posting_offsets[symbol_index + 1] as usize;
+            let (&start, &end) = adjacent(&posting_offsets, symbol_index)
+                .ok_or(Error::InvalidFile("posting offset is missing"))?;
+            let start = usize::try_from(start).map_err(|_| Error::PlatformSizeOverflow)?;
+            let end = usize::try_from(end).map_err(|_| Error::PlatformSizeOverflow)?;
             let mut previous = None;
             for posting in &postings[start..end] {
                 let key = (posting.sequence_id(), posting.position());
@@ -340,9 +346,8 @@ impl PersistedFile {
                 previous = Some(key);
 
                 let sequence_id = posting.sequence_id() as usize;
-                let Some((&sequence_start, &sequence_end)) = sequence_offsets
-                    .get(sequence_id)
-                    .zip(sequence_offsets.get(sequence_id + 1))
+                let Some((&sequence_start, &sequence_end)) =
+                    adjacent(&sequence_offsets, sequence_id)
                 else {
                     return Err(Error::InvalidFile("posting has an unknown sequence id"));
                 };
@@ -360,6 +365,11 @@ impl PersistedFile {
         }
         Ok(())
     }
+}
+
+fn adjacent<T>(values: &[T], index: usize) -> Option<(&T, &T)> {
+    let next = index.checked_add(1)?;
+    values.get(index).zip(values.get(next))
 }
 
 fn validate_section(bytes: &[u8], section: SectionDescriptor) -> Result<()> {
@@ -478,7 +488,7 @@ mod tests {
 
     use super::{
         DiskPosting, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION, FileKind, HEADER_LEN, MAGIC,
-        PersistedFile, SECTION_ENTRY_LEN, SectionKind,
+        PersistedFile, SECTION_ENTRY_LEN, SectionKind, adjacent,
     };
     use crate::errors::Error;
     use crate::persistence::CharCodec;
@@ -746,6 +756,20 @@ mod tests {
         let alphabet_offset = overlap.section_offset(SectionKind::Alphabet);
         write_u64(&mut overlap.bytes, corpus_entry + 8, alphabet_offset as u64);
         assert!(matches!(overlap.parse(), Err(Error::InvalidFile(_))));
+    }
+
+    #[test]
+    fn rejects_vocabulary_count_that_overflows_offset_count() {
+        let mut fixture = Fixture::valid();
+        let vocabulary_entry = fixture.entry(SectionKind::Vocabulary);
+        write_u64(&mut fixture.bytes, vocabulary_entry + 24, u64::MAX);
+
+        assert!(matches!(fixture.parse(), Err(Error::InvalidFile(_))));
+    }
+
+    #[test]
+    fn adjacent_rejects_an_index_whose_successor_overflows() {
+        assert_eq!(adjacent(&[1], usize::MAX), None);
     }
 
     #[test]
