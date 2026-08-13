@@ -1,9 +1,6 @@
 # yurine
 
-Fast and exact substring search under weighted edit distance
-
-The reproducible performance baseline and compatibility workload for the
-persistent-index work are documented in [`benchmarks/`](benchmarks/README.md).
+Fast and exact search for sequence segments under weighted edit distance
 
 ```rust
 use yurine::costs::Cost;
@@ -113,8 +110,8 @@ For token-specific edit costs, use a custom configuration:
 }
 ```
 
-Rules are directed from the query to the corpus and are read one JSON object
-per line:
+Rules are directed from the query sequence to a data segment and are read one
+JSON object per line:
 
 ```json
 {"operation":"substitution","from":"colour","to":"color","cost":0.25}

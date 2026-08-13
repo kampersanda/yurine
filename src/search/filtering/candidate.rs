@@ -15,7 +15,7 @@ impl MinCandidateSelector {
     /// `threshold`.
     pub fn select<C>(
         &self,
-        query: &[Symbol],
+        query_string: &[Symbol],
         threshold: Cost,
         eta: Cost,
         index: &PostingsIndex,
@@ -33,8 +33,8 @@ impl MinCandidateSelector {
             selected: bool,
         }
 
-        let mut items = Vec::with_capacity(query.len());
-        for symbol in query {
+        let mut items = Vec::with_capacity(query_string.len());
+        for symbol in query_string {
             let contribution = neighborhood.minimum_outside_cost(*symbol, eta, costs).get();
 
             let mut candidate_count = 0usize;

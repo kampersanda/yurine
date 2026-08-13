@@ -18,7 +18,7 @@ use filtering::neighborhood::SubstitutionNeighborhood;
 
 pub use builder::SearchEngineBuilder;
 
-/// A candidate match of a query in a string.
+/// A candidate match of a query string in a data string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Candidate {
     string_id: StringId,
@@ -26,14 +26,14 @@ struct Candidate {
     query_position: Position,
 }
 
-/// A verified substring satisfying the inclusive distance threshold.
+/// A verified data segment satisfying the inclusive distance threshold.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
-    /// The data string containing the match.
+    /// The encoded data string corresponding to the matched data sequence.
     pub string_id: StringId,
     /// The matched zero-based, end-exclusive token range.
     pub token_range: Range<Position>,
-    /// The weighted edit distance from the query to the substring.
+    /// The weighted edit distance from the query sequence to the data segment.
     pub distance: Cost,
 }
 

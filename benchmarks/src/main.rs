@@ -12,7 +12,7 @@ use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
-use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY, write_corpus};
+use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY_SOURCE_TEXT, write_data_sequences};
 
 struct TrackingAllocator;
 
@@ -84,10 +84,10 @@ struct GenerateOptions {
     /// Output corpus path.
     output: PathBuf,
 
-    #[arg(long, default_value_t = CorpusConfig::default().strings)]
-    strings: usize,
+    #[arg(long, default_value_t = CorpusConfig::default().sequences)]
+    sequences: usize,
 
-    #[arg(long, default_value_t = CorpusConfig::default().tokens_per_string)]
+    #[arg(long, default_value_t = CorpusConfig::default().tokens_per_sequence)]
     tokens: usize,
 
     /// Vocabulary size (4..=10000).
@@ -106,8 +106,8 @@ struct MeasureOptions {
     /// Input corpus path.
     corpus: PathBuf,
 
-    #[arg(long, default_value = DEFAULT_QUERY)]
-    query: String,
+    #[arg(long = "query", default_value = DEFAULT_QUERY_SOURCE_TEXT)]
+    query_source_text: String,
 
     #[arg(long, default_value = "0", value_parser = parse_cost)]
     threshold: Cost,
@@ -128,19 +128,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn generate(options: GenerateOptions) -> Result<(), Box<dyn Error>> {
     let config = CorpusConfig {
-        strings: options.strings,
-        tokens_per_string: options.tokens,
+        sequences: options.sequences,
+        tokens_per_sequence: options.tokens,
         vocabulary: options.vocabulary,
         hot_vocabulary: options.hot_vocabulary,
         seed: options.seed,
     };
     config.validate()?;
     let mut writer = BufWriter::new(File::create(&options.output)?);
-    write_corpus(&mut writer, config)?;
+    write_data_sequences(&mut writer, config)?;
     writer.flush()?;
     println!("generated\t{}\tbytes", fs::metadata(options.output)?.len());
-    println!("strings\t{}\tcount", config.strings);
-    println!("tokens_per_string\t{}\tcount", config.tokens_per_string);
+    println!("sequences\t{}\tcount", config.sequences);
+    println!("tokens_per_sequence\t{}\tcount", config.tokens_per_sequence);
     println!("vocabulary\t{}\tcount", config.vocabulary);
     println!("hot_vocabulary\t{}\tcount", config.hot_vocabulary);
     println!("seed\t{}\tu64", config.seed);
@@ -151,23 +151,23 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let warm_runs = options.warm_runs.get();
     let load_heap_start = reset_heap_peak();
     let load_start = Instant::now();
-    let contents = fs::read_to_string(&options.corpus)?;
-    let corpus: Vec<_> = contents.lines().map(str::to_owned).collect();
-    let corpus_strings = corpus.len();
+    let source_contents = fs::read_to_string(&options.corpus)?;
+    let source_texts: Vec<_> = source_contents.lines().map(str::to_owned).collect();
+    let data_sequence_count = source_texts.len();
     let load_elapsed = load_start.elapsed();
     let load_heap_peak = heap_peak();
 
     let build_heap_start = reset_heap_peak();
     let build_start = Instant::now();
     let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
-    for source_text in &corpus {
+    for source_text in &source_texts {
         builder.add_sequence(source_text.split_whitespace().map(str::to_owned))?;
     }
     let engine = builder.build()?;
     let build_elapsed = build_start.elapsed();
     let build_heap_peak = heap_peak();
-    drop(corpus);
-    drop(contents);
+    drop(source_texts);
+    drop(source_contents);
     let peak_rss_after_build = peak_rss_bytes();
 
     let mut params = RangeSearchParams::new(options.threshold);
@@ -177,12 +177,12 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let cold_heap_start = reset_heap_peak();
     let engine_resident_heap = cold_heap_start;
     let cold_start = Instant::now();
-    let query: Vec<_> = options
-        .query
+    let query_sequence: Vec<_> = options
+        .query_source_text
         .split_whitespace()
         .map(str::to_owned)
         .collect();
-    let (cold_matches, metrics) = engine.range_search_with_metrics(&query, &params)?;
+    let (cold_matches, metrics) = engine.range_search_with_metrics(&query_sequence, &params)?;
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
@@ -194,7 +194,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let mut warm_matches = 0usize;
     for _ in 0..warm_runs {
         let start = Instant::now();
-        let matches = engine.range_search(&query, &params)?;
+        let matches = engine.range_search(&query_sequence, &params)?;
         warm_elapsed += start.elapsed();
         warm_matches = matches.len();
     }
@@ -209,7 +209,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     // The in-memory baseline has no persistent index. Replace this when the
     // persistent-index benchmark is added.
     metric("persistent_index_bytes", 0, "bytes");
-    metric("corpus_strings", corpus_strings, "count");
+    metric("corpus_strings", data_sequence_count, "count");
     metric("corpus_load_elapsed", load_elapsed.as_nanos(), "ns");
     heap_metrics("corpus_load", load_heap_start, load_heap_peak);
     metric("build_elapsed", build_elapsed.as_nanos(), "ns");
@@ -295,7 +295,7 @@ mod tests {
 
     use super::{Command, GenerateOptions, Options, generate};
     use yurine::costs::Cost;
-    use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY};
+    use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY_SOURCE_TEXT};
 
     #[test]
     fn command_definition_is_valid() {
@@ -312,8 +312,8 @@ mod tests {
         let defaults = CorpusConfig::default();
 
         assert_eq!(options.output.to_string_lossy(), "corpus.txt");
-        assert_eq!(options.strings, defaults.strings);
-        assert_eq!(options.tokens, defaults.tokens_per_string);
+        assert_eq!(options.sequences, defaults.sequences);
+        assert_eq!(options.tokens, defaults.tokens_per_sequence);
         assert_eq!(options.vocabulary, defaults.vocabulary);
         assert_eq!(options.hot_vocabulary, defaults.hot_vocabulary);
         assert_eq!(options.seed, defaults.seed);
@@ -337,7 +337,7 @@ mod tests {
             panic!("expected measure command");
         };
 
-        assert_eq!(options.query, DEFAULT_QUERY);
+        assert_eq!(options.query_source_text, DEFAULT_QUERY_SOURCE_TEXT);
         assert_eq!(options.threshold, Cost::new_const(1.5));
         assert_eq!(options.eta, Some(Cost::new_const(0.25)));
         assert_eq!(options.warm_runs.get(), 3);
@@ -374,7 +374,7 @@ mod tests {
 
         let result = generate(GenerateOptions {
             output: output.clone(),
-            strings: 1,
+            sequences: 1,
             tokens: 1,
             vocabulary: 1,
             hot_vocabulary: 1,

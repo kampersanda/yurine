@@ -66,16 +66,16 @@ impl RangeSearchParams {
 
 /// Returns the default substitution-neighborhood radius for a query length.
 ///
-/// The radius is `threshold / query_len`. For an empty query, this returns zero
-/// rather than dividing by zero; searching an empty query retains its existing
-/// error behavior. [`Cost::MAX`] is rejected because it cannot be converted to
-/// a finite strict search bound.
-pub fn automatic_eta(threshold: Cost, query_len: usize) -> Result<Cost> {
+/// The radius is `threshold / query_sequence_len`. For an empty query sequence,
+/// this returns zero rather than dividing by zero; searching an empty query
+/// sequence retains its existing error behavior. [`Cost::MAX`] is rejected
+/// because it cannot be converted to a finite strict search bound.
+pub fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost> {
     // strict_threshold(threshold)?;
-    if query_len == 0 {
+    if query_sequence_len == 0 {
         Ok(Cost::ZERO)
     } else {
-        Cost::new(threshold.get() / query_len as f32)
+        Cost::new(threshold.get() / query_sequence_len as f32)
     }
 }
 
@@ -84,25 +84,30 @@ where
     T: Clone + Eq + Hash,
     C: EditCosts<T>,
 {
-    /// Finds non-empty substrings satisfying the configured range search.
+    /// Finds non-empty data segments satisfying the configured range search.
     ///
-    /// Results are ordered by string ID, then range start, then range end.
+    /// Results are ordered by data string ID, then token-range start, then
+    /// token-range end.
     ///
     /// When eta is not configured, it defaults to
-    /// `threshold / query.len()`. This favors constructing a
+    /// `threshold / query_sequence.len()`. This favors constructing a
     /// threshold subsequence for continuous substitution costs. An empty query
-    /// uses eta zero and retains the existing empty-query error behavior.
+    /// sequence uses eta zero and retains the existing empty-query error
+    /// behavior.
     ///
     /// If the selector cannot construct a complete threshold subsequence for
-    /// a non-empty query, the engine falls back to exhaustive Smith-Waterman
-    /// verification instead of returning
+    /// a non-empty query sequence, the engine falls back to exhaustive
+    /// Smith-Waterman verification instead of returning
     /// [`Error::ThresholdSubsequenceUnavailable`]. This occurs whenever the
-    /// query's total filtering contribution is less than or equal to the
-    /// threshold. With unit costs, `threshold >= query.len()` is
+    /// query sequence's total filtering contribution is less than or equal to
+    /// the threshold. With unit costs,
+    /// `threshold >= query_sequence.len()` is
     /// such a case.
     ///
-    /// The fallback takes `O(m * sum(n_i^2))` time for query length `m` and
-    /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` intervals.
+    /// The fallback takes `O(m * sum(n_i^2))` time for query-sequence length
+    /// `m` and
+    /// data string lengths `n_i`, and can return `O(sum(n_i^2))` data
+    /// segments.
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
     ///
@@ -123,20 +128,20 @@ where
         query_sequence: &[T],
         params: &RangeSearchParams,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
-        let query = EncodedQuery::new(query_sequence.to_vec(), &self.vocabulary)?;
-        let costs = query.costs(&self.vocabulary, &self.costs);
+        let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.vocabulary)?;
+        let costs = encoded_query.costs(&self.vocabulary, &self.costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
         let eta = match params.eta {
             Some(eta) => eta,
-            None => automatic_eta(threshold, query.symbols().len())?,
+            None => automatic_eta(threshold, encoded_query.string().len())?,
         };
-        self.search_all(query.symbols(), threshold, eta, &costs)
+        self.search_query_string(encoded_query.string(), threshold, eta, &costs)
     }
 
-    fn search_all<S>(
+    fn search_query_string<S>(
         &self,
-        query: &[Symbol],
+        query_string: &[Symbol],
         threshold: Cost,
         eta: Cost,
         costs: &S,
@@ -145,7 +150,7 @@ where
         S: EditCosts<Symbol>,
     {
         let selected = match MinCandidateSelector.select(
-            query,
+            query_string,
             threshold,
             eta,
             &self.index,
@@ -153,8 +158,8 @@ where
             &self.neighborhood,
         ) {
             Ok(selected) => selected,
-            Err(Error::ThresholdSubsequenceUnavailable) if !query.is_empty() => {
-                let matches = verify_exhaustively(query, threshold, &self.store, costs)?;
+            Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {
+                let matches = verify_exhaustively(query_string, threshold, &self.store, costs)?;
                 return Ok((
                     matches,
                     RangeSearchMetrics {
@@ -166,7 +171,7 @@ where
             Err(error) => return Err(error),
         };
         let candidates = generate_candidates(
-            query,
+            query_string,
             &selected,
             eta,
             &self.index,
@@ -174,7 +179,7 @@ where
             &self.neighborhood,
         )?;
         let matches = Verifier::BidirectionalTrie.verify(
-            query,
+            query_string,
             &candidates,
             &self.store,
             threshold,
@@ -198,7 +203,7 @@ where
 /// non-empty query. It is slower and can return more results than the normal
 /// filter-and-verify path, but is guaranteed to be correct.
 fn verify_exhaustively<C>(
-    query: &[Symbol],
+    query_string: &[Symbol],
     threshold: Cost,
     corpus: &CorpusStore,
     costs: &C,
@@ -223,7 +228,7 @@ where
             });
         }
     }
-    Verifier::SmithWaterman.verify(query, &candidates, corpus, threshold, costs)
+    Verifier::SmithWaterman.verify(query_string, &candidates, corpus, threshold, costs)
 }
 
 #[cfg(test)]
@@ -365,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_eta_divides_threshold_by_query_length() {
+    fn automatic_eta_divides_threshold_by_query_sequence_length() {
         assert_eq!(automatic_eta(Cost::new_const(0.75), 3).unwrap(), 0.25);
         assert_eq!(automatic_eta(Cost::ONE, 0).unwrap(), Cost::ZERO);
     }
@@ -380,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_reports_unavailable_threshold_subsequence() {
+    fn empty_query_sequence_reports_unavailable_threshold_subsequence() {
         let result = engine().range_search(&[], &RangeSearchParams::new(Cost::ZERO));
 
         assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
@@ -403,12 +408,12 @@ mod tests {
         let threshold = Cost::new_const(0.5);
         let eta = Cost::new_const(0.25);
 
-        let query = EncodedQuery::new(vec!['x', 'y'], &engine.vocabulary).unwrap();
-        let costs = query.costs(&engine.vocabulary, &engine.costs);
+        let encoded_query = EncodedQuery::new(vec!['x', 'y'], &engine.vocabulary).unwrap();
+        let costs = encoded_query.costs(&engine.vocabulary, &engine.costs);
         assert!(
             MinCandidateSelector
                 .select(
-                    query.symbols(),
+                    encoded_query.string(),
                     threshold,
                     eta,
                     &engine.index,
@@ -425,7 +430,7 @@ mod tests {
             )
             .unwrap();
         let exhaustive =
-            verify_exhaustively(query.symbols(), threshold, &engine.store, &costs).unwrap();
+            verify_exhaustively(encoded_query.string(), threshold, &engine.store, &costs).unwrap();
 
         assert_eq!(filtered, exhaustive);
         assert_eq!(filtered.len(), 1);

@@ -167,9 +167,9 @@ mod tests {
         builder.insert_all(['a', 'b', 'a']);
         let vocabulary = builder.build().unwrap();
 
-        let symbols = vocabulary.encode(['a', 'b', 'a']);
+        let string = vocabulary.encode(['a', 'b', 'a']);
 
-        assert_eq!(symbols, [Symbol::new(0), Symbol::new(1), Symbol::new(0)]);
+        assert_eq!(string, [Symbol::new(0), Symbol::new(1), Symbol::new(0)]);
     }
 
     #[test]

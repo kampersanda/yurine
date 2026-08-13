@@ -27,9 +27,9 @@ impl Tokenizer for CharacterTokenizer {
     fn tokenize(&self, source_text: &str) -> Vec<Tokenized<Self::Token>> {
         source_text
             .char_indices()
-            .map(|(start, token)| {
-                let end = start + token.len_utf8();
-                Tokenized::new(token, start..end)
+            .map(|(byte_start, token)| {
+                let byte_end = byte_start + token.len_utf8();
+                Tokenized::new(token, byte_start..byte_end)
             })
             .collect()
     }
@@ -43,25 +43,25 @@ impl Tokenizer for WhitespaceTokenizer {
 
     fn tokenize(&self, source_text: &str) -> Vec<Tokenized<Self::Token>> {
         let mut tokens = Vec::new();
-        let mut token_start = None;
+        let mut token_byte_start = None;
 
-        for (index, character) in source_text.char_indices() {
+        for (byte_index, character) in source_text.char_indices() {
             if character.is_whitespace() {
-                if let Some(start) = token_start.take() {
+                if let Some(byte_start) = token_byte_start.take() {
                     tokens.push(Tokenized::new(
-                        source_text[start..index].to_owned(),
-                        start..index,
+                        source_text[byte_start..byte_index].to_owned(),
+                        byte_start..byte_index,
                     ));
                 }
-            } else if token_start.is_none() {
-                token_start = Some(index);
+            } else if token_byte_start.is_none() {
+                token_byte_start = Some(byte_index);
             }
         }
 
-        if let Some(start) = token_start {
+        if let Some(byte_start) = token_byte_start {
             tokens.push(Tokenized::new(
-                source_text[start..].to_owned(),
-                start..source_text.len(),
+                source_text[byte_start..].to_owned(),
+                byte_start..source_text.len(),
             ));
         }
 
