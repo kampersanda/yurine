@@ -1,9 +1,8 @@
-//! Construction of consistent search engines from token sequences.
+//! Construction of reusable search indexes from token sequences.
 
 use std::hash::Hash;
 
 use super::SearchEngine;
-use crate::costs::EditCosts;
 use crate::errors::Result;
 use crate::postings::PostingsIndexBuilder;
 use crate::store::CorpusStoreBuilder;
@@ -11,21 +10,20 @@ use crate::types::{Position, Posting, SequenceId};
 use crate::vocabulary::VocabularyBuilder;
 
 /// Builds a [`SearchEngine`] from token sequences in insertion order.
+///
+/// Edit costs do not affect the index contents and are supplied when searching.
 #[derive(Debug)]
-pub struct SearchEngineBuilder<T, C> {
-    costs: C,
+pub struct SearchEngineBuilder<T> {
     sequences: Vec<Vec<T>>,
 }
 
-impl<T, C> SearchEngineBuilder<T, C>
+impl<T> SearchEngineBuilder<T>
 where
     T: Clone + Eq + Hash,
-    C: EditCosts<T>,
 {
     /// Creates an empty builder.
-    pub fn new(costs: C) -> Self {
+    pub fn new() -> Self {
         Self {
-            costs,
             sequences: Vec::new(),
         }
     }
@@ -55,8 +53,8 @@ where
     /// Returns [`crate::errors::Error::SymbolOverflow`] if the corpus has too
     /// many distinct tokens. Returns [`crate::errors::Error::UnknownStringSymbol`]
     /// if a string symbol is not present in the vocabulary.
-    pub fn build(self) -> Result<SearchEngine<T, C>> {
-        let Self { costs, sequences } = self;
+    pub fn build(self) -> Result<SearchEngine<T>> {
+        let Self { sequences } = self;
 
         let mut vocabulary_builder = VocabularyBuilder::new();
         for sequence in &sequences {
@@ -81,12 +79,16 @@ where
             store_builder.add_string(string);
         }
 
-        SearchEngine::from_parts(
-            vocabulary,
-            costs,
-            index_builder.build(),
-            store_builder.build(),
-        )
+        SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build())
+    }
+}
+
+impl<T> Default for SearchEngineBuilder<T>
+where
+    T: Clone + Eq + Hash,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -99,15 +101,22 @@ mod tests {
     use crate::search::range_search::RangeSearchParams;
     use crate::types::{Position, SequenceId};
 
+    #[derive(Clone, Eq, Hash, PartialEq)]
+    struct TokenWithoutDefault;
+
+    #[test]
+    fn default_does_not_require_token_default() {
+        let _: SearchEngineBuilder<TokenWithoutDefault> = SearchEngineBuilder::default();
+    }
+
     #[test]
     fn builds_an_empty_corpus() {
-        let engine = SearchEngineBuilder::<char, _>::new(LevenshteinCosts::new())
-            .build()
-            .unwrap();
+        let engine = SearchEngineBuilder::<char>::new().build().unwrap();
 
         assert!(
             engine
-                .range_search(&['a'], &RangeSearchParams::new(Cost::ZERO))
+                .range_searcher(LevenshteinCosts::new())
+                .search(&['a'], &RangeSearchParams::new(Cost::ZERO))
                 .unwrap()
                 .is_empty()
         );
@@ -115,7 +124,7 @@ mod tests {
 
     #[test]
     fn preserves_insertion_ordered_ids_for_sequences() {
-        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+        let mut builder = SearchEngineBuilder::new();
 
         assert_eq!(
             builder.add_sequence(['東', '京']).unwrap(),
@@ -134,7 +143,8 @@ mod tests {
         let matches = builder
             .build()
             .unwrap()
-            .range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))
+            .range_searcher(LevenshteinCosts::new())
+            .search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -156,13 +166,14 @@ mod tests {
 
     #[test]
     fn indexes_repeated_tokens_at_each_position() {
-        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+        let mut builder = SearchEngineBuilder::new();
         builder.add_sequence(['a', 'a', 'a']).unwrap();
 
         let matches = builder
             .build()
             .unwrap()
-            .range_search(&['a', 'a'], &RangeSearchParams::new(Cost::ZERO))
+            .range_searcher(LevenshteinCosts::new())
+            .search(&['a', 'a'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -184,13 +195,14 @@ mod tests {
 
     #[test]
     fn accepts_non_text_token_types() {
-        let mut builder = SearchEngineBuilder::new(LevenshteinCosts::new());
+        let mut builder = SearchEngineBuilder::new();
         builder.add_sequence([10_u16, 20, 30, 40]).unwrap();
 
         let matches = builder
             .build()
             .unwrap()
-            .range_search(&[20_u16, 30], &RangeSearchParams::new(Cost::ZERO))
+            .range_searcher(LevenshteinCosts::new())
+            .search(&[20_u16, 30], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));

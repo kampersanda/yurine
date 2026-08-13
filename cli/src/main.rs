@@ -123,7 +123,7 @@ where
         Some(path) => cost_config::load(path, &tokenizer)?,
         None => RuntimeCosts::levenshtein(),
     };
-    let mut builder = SearchEngineBuilder::new(costs);
+    let mut builder = SearchEngineBuilder::new();
     let mut source_token_ranges = Vec::with_capacity(source_texts.len());
     for source_text in source_texts {
         let (sequence, ranges): (Vec<_>, Vec<_>) = tokenizer
@@ -144,7 +144,9 @@ where
         .into_iter()
         .map(|token| token.value)
         .collect();
-    let matches = engine.range_search(&query_sequence, &params)?;
+    let matches = engine
+        .range_searcher(costs)
+        .search(&query_sequence, &params)?;
     Ok(matches
         .into_iter()
         .map(|matched| locate_match(matched, &source_token_ranges))
