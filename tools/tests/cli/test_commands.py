@@ -11,6 +11,12 @@ def test_chive_compatible_corpus_defaults() -> None:
     assert args.mode == "B"
     assert args.form == "normalized"
     assert args.sudachi_config is None
+    assert args.workers == 1
+
+
+def test_corpus_preprocessing_rejects_negative_workers() -> None:
+    with pytest.raises(ValueError, match="must not be negative"):
+        PreprocessCorpusArgs().parse_args(["input.txt", "output.txt", "--workers", "-1"])
 
 
 def test_embedding_conversion_defaults_are_generic() -> None:
