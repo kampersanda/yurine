@@ -12,7 +12,7 @@ use crate::vocabulary::VocabularyBuilder;
 /// Builds a [`SearchEngine`] from token sequences in insertion order.
 ///
 /// Edit costs do not affect the index contents and are supplied when searching.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SearchEngineBuilder<T> {
     sequences: Vec<Vec<T>>,
 }
@@ -83,6 +83,15 @@ where
     }
 }
 
+impl<T> Default for SearchEngineBuilder<T>
+where
+    T: Clone + Eq + Hash,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SearchEngineBuilder;
@@ -91,6 +100,14 @@ mod tests {
     use crate::search::Match;
     use crate::search::range_search::RangeSearchParams;
     use crate::types::{Position, SequenceId};
+
+    #[derive(Clone, Eq, Hash, PartialEq)]
+    struct TokenWithoutDefault;
+
+    #[test]
+    fn default_does_not_require_token_default() {
+        let _: SearchEngineBuilder<TokenWithoutDefault> = SearchEngineBuilder::default();
+    }
 
     #[test]
     fn builds_an_empty_corpus() {
