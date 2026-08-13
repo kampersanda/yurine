@@ -8,12 +8,12 @@ use crate::types::{Position, Symbol};
 
 /// The two-approximation MinCand selector described in the design material.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct MinCandidateSelector;
+pub(in crate::search) struct MinCandidateSelector;
 
 impl MinCandidateSelector {
     /// Selects a subsequence complete for matches with distance at most
     /// `threshold`.
-    pub fn select<C>(
+    pub(in crate::search) fn select<C>(
         &self,
         query_string: &[Symbol],
         threshold: Cost,

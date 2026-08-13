@@ -1,6 +1,6 @@
 //! Error types.
 
-use crate::types::{Position, SequenceId, Symbol};
+use crate::types::{Position, SequenceId};
 
 /// An error type for the library.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -24,7 +24,7 @@ pub enum Error {
 
     /// A string contains a symbol that is not present in its vocabulary.
     #[error("string symbol {0} is not present in the vocabulary")]
-    UnknownStringSymbol(Symbol),
+    UnknownStringSymbol(u32),
 
     /// A fixed-width identifier or position cannot be represented by this platform.
     #[error("fixed-width value exceeds platform size")]

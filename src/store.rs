@@ -7,7 +7,7 @@ use crate::types::{SequenceId, Symbol};
 
 /// A builder for a [`CorpusStore`].
 #[derive(Debug)]
-pub struct CorpusStoreBuilder {
+pub(crate) struct CorpusStoreBuilder {
     symbols: Vec<Symbol>,
     string_offsets: Vec<u64>,
     alphabet: HashSet<Symbol>,
@@ -21,7 +21,7 @@ impl Default for CorpusStoreBuilder {
 
 impl CorpusStoreBuilder {
     /// Creates a new builder.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             symbols: Vec::new(),
             string_offsets: vec![0],
@@ -30,7 +30,7 @@ impl CorpusStoreBuilder {
     }
 
     /// Adds a data string.
-    pub fn add_string(&mut self, string: Vec<Symbol>) {
+    pub(crate) fn add_string(&mut self, string: Vec<Symbol>) {
         let string_end = self.symbols.len() as u64 + string.len() as u64;
         self.alphabet.extend(string.iter().copied());
         self.symbols.extend(string);
@@ -38,7 +38,7 @@ impl CorpusStoreBuilder {
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].
-    pub fn build(mut self) -> CorpusStore {
+    pub(crate) fn build(mut self) -> CorpusStore {
         self.symbols.shrink_to_fit();
         self.string_offsets.shrink_to_fit();
         let mut alphabet: Vec<_> = self.alphabet.into_iter().collect();
@@ -51,7 +51,7 @@ impl CorpusStoreBuilder {
     }
 }
 
-pub struct CorpusStore {
+pub(crate) struct CorpusStore {
     symbols: Vec<Symbol>,
     string_offsets: Vec<u64>,
     alphabet: Vec<Symbol>,
@@ -60,7 +60,7 @@ pub struct CorpusStore {
 /// Read access to indexed strings.
 impl CorpusStore {
     /// Returns the string identified by `id`, or `None` when it is unknown.
-    pub fn string(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
+    pub(crate) fn string(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
         let Some((start, end)) = self.string_bounds(id)? else {
             return Ok(None);
         };
@@ -68,17 +68,18 @@ impl CorpusStore {
     }
 
     /// Returns the number of indexed strings.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.string_offsets.len() - 1
     }
 
     /// Returns whether this store contains no strings.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns the alphabet of symbols in the corpus.
-    pub fn alphabet(&self) -> &[Symbol] {
+    pub(crate) fn alphabet(&self) -> &[Symbol] {
         &self.alphabet
     }
 

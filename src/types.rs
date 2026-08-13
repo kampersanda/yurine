@@ -80,9 +80,9 @@ impl Display for Position {
 /// A posting in the corpus, consisting of a string identifier and a symbol position.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Posting {
-    pub string_id: SequenceId,
-    pub position: Position,
+pub(crate) struct Posting {
+    pub(crate) string_id: SequenceId,
+    pub(crate) position: Position,
 }
 
 /// A compact integer identifier representing a token in a vocabulary.
@@ -90,24 +90,25 @@ pub struct Posting {
 /// A symbol is meaningful only together with the vocabulary that assigned it.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Symbol(u32);
+pub(crate) struct Symbol(u32);
 
 impl Symbol {
     /// The symbol reserved for tokens absent from a vocabulary.
-    pub const UNKNOWN: Self = Self(u32::MAX);
+    pub(crate) const UNKNOWN: Self = Self(u32::MAX);
 
     /// Creates a symbol from its zero-based integer representation.
-    pub const fn new(value: u32) -> Self {
+    #[cfg(test)]
+    pub(crate) const fn new(value: u32) -> Self {
         Self(value)
     }
 
     /// Returns the zero-based integer representation.
-    pub const fn get(self) -> u32 {
+    pub(crate) const fn get(self) -> u32 {
         self.0
     }
 
     /// Creates a symbol from a usize value.
-    pub fn from_usize(value: usize) -> Result<Self> {
+    pub(crate) fn from_usize(value: usize) -> Result<Self> {
         let value = u32::try_from(value).map_err(|_| Error::SymbolOverflow)?;
         if value == Self::UNKNOWN.0 {
             Err(Error::SymbolOverflow)
@@ -117,12 +118,12 @@ impl Symbol {
     }
 
     /// Returns whether this is the reserved unknown-token symbol.
-    pub const fn is_unknown(self) -> bool {
+    pub(crate) const fn is_unknown(self) -> bool {
         self.0 == Self::UNKNOWN.0
     }
 
     /// Returns the symbol as a usize value.
-    pub fn as_usize(self) -> usize {
+    pub(crate) fn as_usize(self) -> usize {
         usize::try_from(self.0).unwrap()
     }
 }

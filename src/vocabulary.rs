@@ -9,7 +9,7 @@ use crate::types::Symbol;
 
 /// Collects token frequencies for building a [`Vocabulary`].
 #[derive(Debug, Clone)]
-pub struct VocabularyBuilder<T> {
+pub(crate) struct VocabularyBuilder<T> {
     tokens: Vec<T>,
     frequencies: HashMap<T, usize>,
 }
@@ -19,7 +19,7 @@ where
     T: Clone + Eq + Hash,
 {
     /// Creates an empty vocabulary builder.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tokens: Vec::new(),
             frequencies: HashMap::new(),
@@ -27,7 +27,7 @@ where
     }
 
     /// Records one occurrence of `token`.
-    pub fn insert(&mut self, token: T) {
+    pub(crate) fn insert(&mut self, token: T) {
         if let Some(frequency) = self.frequencies.get_mut(&token) {
             *frequency += 1;
         } else {
@@ -37,7 +37,7 @@ where
     }
 
     /// Records every token from `tokens`.
-    pub fn insert_all<I>(&mut self, tokens: I)
+    pub(crate) fn insert_all<I>(&mut self, tokens: I)
     where
         I: IntoIterator<Item = T>,
     {
@@ -49,7 +49,7 @@ where
     /// Assigns consecutive symbols by descending token frequency.
     ///
     /// Tokens with the same frequency retain their first-seen order.
-    pub fn build(self) -> Result<Vocabulary<T>> {
+    pub(crate) fn build(self) -> Result<Vocabulary<T>> {
         let mut tokens = self.tokens;
         tokens.sort_by_key(|token| Reverse(self.frequencies[token]));
 
@@ -73,7 +73,7 @@ where
 
 /// Read-only access to mappings between tokens and symbols.
 #[derive(Debug, Clone)]
-pub struct Vocabulary<T> {
+pub(crate) struct Vocabulary<T> {
     tokens: Vec<T>,
     symbols: HashMap<T, Symbol>,
 }
@@ -83,12 +83,12 @@ where
     T: Eq + Hash,
 {
     /// Returns the symbol assigned to `token`, or [`Symbol::UNKNOWN`].
-    pub fn symbol(&self, token: &T) -> Symbol {
+    pub(crate) fn symbol(&self, token: &T) -> Symbol {
         self.symbols.get(token).copied().unwrap_or(Symbol::UNKNOWN)
     }
 
     /// Returns the token assigned to `symbol`.
-    pub fn token(&self, symbol: Symbol) -> Option<&T> {
+    pub(crate) fn token(&self, symbol: Symbol) -> Option<&T> {
         if symbol.is_unknown() {
             None
         } else {
@@ -99,7 +99,7 @@ where
     /// Converts tokens to symbols in input order.
     ///
     /// Tokens absent from this vocabulary are mapped to [`Symbol::UNKNOWN`].
-    pub fn encode<I>(&self, tokens: I) -> Vec<Symbol>
+    pub(crate) fn encode<I>(&self, tokens: I) -> Vec<Symbol>
     where
         I: IntoIterator<Item = T>,
     {
@@ -110,12 +110,13 @@ where
     }
 
     /// Returns the number of distinct tokens.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.tokens.len()
     }
 
     /// Returns whether the vocabulary contains no tokens.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
 }

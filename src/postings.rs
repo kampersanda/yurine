@@ -4,7 +4,7 @@ use crate::errors::{Error, Result};
 use crate::types::{Posting, Symbol};
 
 /// Postings index mapping symbols to their occurrences in the corpus.
-pub struct PostingsIndex {
+pub(crate) struct PostingsIndex {
     postings: Vec<Posting>,
     posting_offsets: Vec<u64>,
 }
@@ -13,12 +13,12 @@ impl PostingsIndex {
     /// Returns indexed occurrences in `(SequenceId, Position)` order.
     ///
     /// The iterator does not emit duplicates.
-    pub fn postings(&self, symbol: Symbol) -> impl Iterator<Item = Posting> + '_ {
+    pub(crate) fn postings(&self, symbol: Symbol) -> impl Iterator<Item = Posting> + '_ {
         self.posting_slice(symbol).iter().copied()
     }
 
     /// Returns the total frequency of `symbol` in the corpus.
-    pub fn frequency(&self, symbol: Symbol) -> usize {
+    pub(crate) fn frequency(&self, symbol: Symbol) -> usize {
         self.posting_slice(symbol).len()
     }
 
@@ -39,14 +39,14 @@ impl PostingsIndex {
 
 /// Builds a postings index from symbols and their occurrences.
 #[derive(Debug)]
-pub struct PostingsIndexBuilder {
+pub(crate) struct PostingsIndexBuilder {
     symbol_count: usize,
     postings: Vec<(Symbol, Posting)>,
 }
 
 impl PostingsIndexBuilder {
     /// Creates a builder for a vocabulary containing `symbol_count` symbols.
-    pub fn new(symbol_count: usize) -> Self {
+    pub(crate) fn new(symbol_count: usize) -> Self {
         Self {
             symbol_count,
             postings: Vec::new(),
@@ -59,16 +59,16 @@ impl PostingsIndexBuilder {
     ///
     /// Returns [`Error::UnknownStringSymbol`] if `symbol` is not present in
     /// the configured vocabulary.
-    pub fn add_posting(&mut self, symbol: Symbol, posting: Posting) -> Result<()> {
+    pub(crate) fn add_posting(&mut self, symbol: Symbol, posting: Posting) -> Result<()> {
         if symbol.is_unknown() || symbol.as_usize() >= self.symbol_count {
-            return Err(Error::UnknownStringSymbol(symbol));
+            return Err(Error::UnknownStringSymbol(symbol.get()));
         }
         self.postings.push((symbol, posting));
         Ok(())
     }
 
     /// Builds an index whose postings are ordered and contain no duplicates.
-    pub fn build(mut self) -> PostingsIndex {
+    pub(crate) fn build(mut self) -> PostingsIndex {
         self.postings.sort_unstable_by_key(|(symbol, posting)| {
             (*symbol, posting.string_id, posting.position)
         });
@@ -209,11 +209,11 @@ mod tests {
 
         assert_eq!(
             builder.add_posting(Symbol::new(1), posting),
-            Err(Error::UnknownStringSymbol(Symbol::new(1)))
+            Err(Error::UnknownStringSymbol(1))
         );
         assert_eq!(
             builder.add_posting(Symbol::UNKNOWN, posting),
-            Err(Error::UnknownStringSymbol(Symbol::UNKNOWN))
+            Err(Error::UnknownStringSymbol(u32::MAX))
         );
     }
 

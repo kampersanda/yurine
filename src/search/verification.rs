@@ -1,7 +1,7 @@
 //! Verification of candidates against a distance threshold.
 
-pub mod bidirectional_trie;
-pub mod smith_waterman;
+mod bidirectional_trie;
+mod smith_waterman;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};

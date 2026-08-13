@@ -8,7 +8,7 @@ use crate::types::Symbol;
 
 /// A substitution neighborhood enumerated from a finite alphabet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubstitutionNeighborhood {
+pub(in crate::search) struct SubstitutionNeighborhood {
     alphabet: Vec<Symbol>,
 }
 
@@ -19,7 +19,7 @@ impl SubstitutionNeighborhood {
     ///
     /// Returns [`Error::DuplicateAlphabetSymbol`]
     /// if a symbol occurs more than once.
-    pub fn new<I>(alphabet: I) -> Result<Self>
+    pub(in crate::search) fn new<I>(alphabet: I) -> Result<Self>
     where
         I: IntoIterator<Item = Symbol>,
     {
@@ -39,7 +39,12 @@ impl SubstitutionNeighborhood {
     ///
     /// The returned symbols must be unique. The supplied edit-cost policy is
     /// the same policy that verification uses.
-    pub fn neighbors<C>(&self, symbol: Symbol, eta: Cost, costs: &C) -> Vec<Symbol>
+    pub(in crate::search) fn neighbors<C>(
+        &self,
+        symbol: Symbol,
+        eta: Cost,
+        costs: &C,
+    ) -> Vec<Symbol>
     where
         C: EditCosts<Symbol>,
     {
@@ -52,7 +57,12 @@ impl SubstitutionNeighborhood {
 
     /// Returns the minimum cost of deleting `symbol` or substituting it with a
     /// symbol outside its neighborhood.
-    pub fn minimum_outside_cost<C>(&self, symbol: Symbol, eta: Cost, costs: &C) -> Cost
+    pub(in crate::search) fn minimum_outside_cost<C>(
+        &self,
+        symbol: Symbol,
+        eta: Cost,
+        costs: &C,
+    ) -> Cost
     where
         C: EditCosts<Symbol>,
     {
