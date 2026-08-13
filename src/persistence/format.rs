@@ -1,3 +1,19 @@
+//! Reader and structural validator for the version 1 persistence format.
+//!
+//! A file consists of a fixed-width header, a codec identifier, a section
+//! table, and the section payloads. Offsets in the header and section table are
+//! absolute byte offsets from the beginning of the file.
+//!
+//! Opening a file deliberately validates it in three stages:
+//!
+//! 1. Read the fixed header and compare its recorded file length before mmap.
+//! 2. Map the file once, then validate metadata ranges, layouts, and overlap.
+//! 3. Scan offset arrays needed for safe slicing, without scanning the large
+//!    corpus-symbol and posting payloads.
+//!
+//! Token decoding and payload-level semantic validation belong to the open and
+//! verify APIs introduced in implementation unit 2.
+
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
@@ -20,6 +36,11 @@ pub(crate) const MAX_CODEC_ID_LEN: usize = 255;
 // native integer views, so big-endian hosts are rejected separately below.
 const ENDIAN_MARKER: u32 = 0x0102_0304;
 
+/// Fixed-size prefix that can be decoded before the file is memory-mapped.
+///
+/// Explicit little-endian wrappers make the on-disk byte order independent of
+/// the host. `Unaligned` keeps parsing safe even when the input byte slice has
+/// no stronger alignment than `u8`.
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 struct DiskHeader {
@@ -36,6 +57,10 @@ struct DiskHeader {
     file_len: U64,
 }
 
+/// One entry in the section table.
+///
+/// `byte_len` describes the occupied file range. `element_count` describes the
+/// logical number of fixed-width values, or format-specific records for blobs.
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
 struct DiskSectionEntry {
@@ -46,6 +71,10 @@ struct DiskSectionEntry {
     element_count: U64,
 }
 
+/// Host-native header values retained after the fixed prefix is validated.
+///
+/// Production `open` validates the header before mmap and passes this value to
+/// the mapped parser so the same header checks are not repeated.
 #[derive(Debug, Clone, Copy)]
 struct ValidatedHeader {
     kind: FileKind,
@@ -74,6 +103,7 @@ impl ValidatedHeader {
 pub(crate) const HEADER_LEN: usize = size_of::<DiskHeader>();
 pub(crate) const SECTION_ENTRY_LEN: usize = size_of::<DiskSectionEntry>();
 
+/// Identifies which persisted top-level object a file contains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum FileKind {
@@ -97,6 +127,7 @@ impl FileKind {
     }
 }
 
+/// Stable identifiers for section-table entries across all persisted objects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub(crate) enum SectionKind {
@@ -130,6 +161,9 @@ impl SectionKind {
     }
 
     fn element_layout(self) -> Option<(usize, usize)> {
+        // Blob sections are byte ranges whose logical record count cannot be
+        // derived from a fixed element width. Every other section can be
+        // checked generically before creating a typed view.
         match self {
             Self::VocabularyTokenBlob | Self::EmbeddingTokenBlob | Self::CostMetadata => None,
             Self::VocabularyTokenOffsets
@@ -143,6 +177,7 @@ impl SectionKind {
     }
 }
 
+/// Validated metadata for one section payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SectionDescriptor {
     pub(crate) kind: SectionKind,
@@ -151,10 +186,12 @@ pub(crate) struct SectionDescriptor {
     pub(crate) element_count: u64,
 }
 
+/// On-disk symbol representation, kept separate from the domain `Symbol` type.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout)]
 pub(crate) struct DiskSymbol(u32);
 
+/// On-disk posting representation, kept separate from the domain `Posting`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout)]
 pub(crate) struct DiskPosting {
@@ -162,6 +199,10 @@ pub(crate) struct DiskPosting {
     position: u32,
 }
 
+/// One immutable mmap plus the validated descriptors of its sections.
+///
+/// All typed section views clone the same `Arc<Mmap>`, so no section is mapped
+/// separately and each view keeps the backing bytes alive for its full life.
 pub(crate) struct PersistedFile {
     mmap: Arc<Mmap>,
     kind: FileKind,
@@ -169,6 +210,12 @@ pub(crate) struct PersistedFile {
 }
 
 impl PersistedFile {
+    /// Opens a file while enforcing the mmap safety precondition on file size.
+    ///
+    /// Reading the fixed header first detects a recorded-length mismatch before
+    /// entering the unsafe mmap boundary. It does not protect against callers
+    /// modifying or truncating an already mapped snapshot; that remains part of
+    /// the persistence API's safety contract.
     pub(crate) fn open<T, C: TokenCodec<T>>(
         path: &Path,
         expected_kind: FileKind,
@@ -176,6 +223,8 @@ impl PersistedFile {
     ) -> Result<Self> {
         validate_codec_id_len(codec.id())?;
 
+        // Keep this `File` open through mapping so the metadata check and mmap
+        // refer to the same opened file rather than two path lookups.
         let mut file = File::open(path).map_err(|error| Error::io(path, error))?;
         let mut header_bytes = [0; HEADER_LEN];
         if let Err(error) = file.read_exact(&mut header_bytes) {
@@ -207,6 +256,8 @@ impl PersistedFile {
         expected_codec: &str,
         expected_codec_version: u32,
     ) -> Result<Self> {
+        // Tests use anonymous mappings and therefore enter after the pre-mmap
+        // phase. They still exercise the same header and contents validation.
         validate_codec_id_len(expected_codec)?;
         let bytes: &[u8] = &mmap;
         let header = DiskHeader::ref_from_prefix(bytes)
@@ -228,6 +279,9 @@ impl PersistedFile {
         expected_codec_version: u32,
     ) -> Result<Self> {
         let bytes: &[u8] = &mmap;
+
+        // Codec metadata is outside the section table because it is required
+        // to decide whether the caller can interpret token blobs at all.
         let codec_len = header.codec_len;
         if codec_len > MAX_CODEC_ID_LEN as u64 {
             return Err(Error::InvalidFile("codec identifier is too long"));
@@ -250,6 +304,8 @@ impl PersistedFile {
             });
         }
 
+        // Interpret the section table only after proving its complete byte
+        // range is present. Individual payloads are validated in the loop.
         let section_count = u64::from(header.section_count);
         let table_len = section_count
             .checked_mul(SECTION_ENTRY_LEN as u64)
@@ -277,6 +333,8 @@ impl PersistedFile {
             }
         }
 
+        // A valid range alone is insufficient: aliases between metadata and
+        // payloads could make one byte sequence acquire conflicting meanings.
         validate_non_overlapping(
             codec_offset,
             codec_len,
@@ -305,6 +363,8 @@ impl PersistedFile {
     where
         T: FromBytes + Immutable + KnownLayout,
     {
+        // `MappedSlice::new` is the single boundary that turns validated bytes
+        // into a typed slice and keeps the mmap alive.
         let section = self.section(kind)?;
         MappedSlice::new(
             Arc::clone(&self.mmap),
@@ -319,6 +379,10 @@ impl PersistedFile {
             return Ok(());
         }
 
+        // SearchEngine slicing depends only on these three offset arrays. They
+        // are small relative to their payloads and are scanned fully at open.
+        // Corpus symbols and postings themselves remain demand-paged and are
+        // reserved for lazy or explicit semantic validation.
         let vocabulary_offsets = self.mapped_slice::<u64>(SectionKind::VocabularyTokenOffsets)?;
         let vocabulary_blob = self.section(SectionKind::VocabularyTokenBlob)?;
         let sequence_offsets = self.mapped_slice::<u64>(SectionKind::SequenceOffsets)?;
@@ -330,6 +394,9 @@ impl PersistedFile {
         validate_offsets(&sequence_offsets, corpus.element_count)?;
         validate_offsets(&posting_offsets, postings.element_count)?;
 
+        // For token blobs, `element_count` is the number of encoded tokens,
+        // while `byte_len` is the terminal byte offset. Both values are needed
+        // because tokens are variable-width.
         let expected_vocabulary_offsets = vocabulary_blob
             .element_count
             .checked_add(1)
@@ -384,6 +451,8 @@ fn validate_codec_id_len(codec_id: &str) -> Result<()> {
 }
 
 fn validate_section(bytes: &[u8], section: SectionDescriptor) -> Result<()> {
+    // Validate both the byte range and the typed interpretation advertised by
+    // the descriptor. Blob sections only have the former invariant.
     checked_range(bytes, section.offset, section.byte_len)?;
     if let Some((element_size, alignment)) = section.kind.element_layout() {
         let expected_len = section
@@ -409,6 +478,8 @@ fn validate_non_overlapping(
     table_len: u64,
     sections: impl Iterator<Item = SectionDescriptor>,
 ) -> Result<()> {
+    // Zero-length regions occupy no bytes and may legally share an offset with
+    // the following region, so they are omitted from overlap comparisons.
     let mut ranges = vec![
         (0, HEADER_LEN as u64),
         (codec_offset, codec_len),
@@ -430,6 +501,8 @@ fn validate_non_overlapping(
 }
 
 fn validate_offsets(offsets: &[u64], payload_len: u64) -> Result<()> {
+    // These conditions are exactly what later `payload[start..end]` slicing
+    // needs: every pair is ordered and the entire array stays in the payload.
     if offsets.first() != Some(&0) || offsets.last() != Some(&payload_len) {
         return Err(Error::InvalidFile("offset endpoints do not match payload"));
     }
@@ -440,6 +513,8 @@ fn validate_offsets(offsets: &[u64], payload_len: u64) -> Result<()> {
 }
 
 fn checked_range(bytes: &[u8], offset: u64, len: u64) -> Result<&[u8]> {
+    // Perform arithmetic in the file format's u64 domain before converting to
+    // the host's usize. This distinguishes corrupt ranges from platform limits.
     let end = offset
         .checked_add(len)
         .ok_or(Error::InvalidFile("file range overflows"))?;
