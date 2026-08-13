@@ -25,14 +25,13 @@
 //! let searcher = engine.range_searcher(costs);
 //! let matches = searcher.search(
 //!     &["book", "district", "known", "for", "curry"],
-//!     &RangeSearchParams::new(Cost::new_const(0.25)),
+//!     &RangeSearchParams::new(0.25),
 //! )?;
 //!
 //! assert_eq!(matches.len(), 1);
 //! assert_eq!(matches[0].sequence_id, jinbocho);
-//! assert_eq!(matches[0].distance, Cost::new_const(0.25));
-//! assert_eq!(matches[0].token_range.start.get(), 3);
-//! assert_eq!(matches[0].token_range.end.get(), 8);
+//! assert_eq!(matches[0].distance, 0.25);
+//! assert_eq!(matches[0].token_range, 3..8);
 //! # Ok(())
 //! # }
 //! ```
@@ -49,7 +48,6 @@
 //!
 //! ```
 //! use std::num::NonZeroUsize;
-//! use yurine::costs::Cost;
 //! use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
 //! use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 //!
@@ -67,14 +65,13 @@
 //!
 //! let matches = engine.range_searcher(costs).search(
 //!     &["literature", "and", "curry"],
-//!     &RangeSearchParams::new(Cost::new_const(0.2)),
+//!     &RangeSearchParams::new(0.2),
 //! )?;
 //!
 //! assert_eq!(matches.len(), 1);
 //! assert_eq!(matches[0].sequence_id, jinbocho);
-//! assert_eq!(matches[0].token_range.start.get(), 2);
-//! assert_eq!(matches[0].token_range.end.get(), 5);
-//! assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+//! assert_eq!(matches[0].token_range, 2..5);
+//! assert!((matches[0].distance - 0.2).abs() < 1e-6);
 //! # Ok(())
 //! # }
 //! ```
@@ -92,7 +89,7 @@
 //! # #[cfg(feature = "persist")]
 //! # fn example() -> yurine::errors::Result<()> {
 //! use tempfile::tempdir;
-//! use yurine::costs::{Cost, levenshtein::LevenshteinCosts};
+//! use yurine::costs::levenshtein::LevenshteinCosts;
 //! use yurine::persistence::StringCodec;
 //! use yurine::search::{SearchEngine, SearchEngineBuilder};
 //! use yurine::search::range_search::RangeSearchParams;
@@ -112,12 +109,11 @@
 //! let query = ["book", "town"].map(str::to_owned);
 //! let matches = engine.range_searcher(LevenshteinCosts::new()).search(
 //!     &query,
-//!     &RangeSearchParams::new(Cost::ZERO),
+//!     &RangeSearchParams::new(0.0),
 //! )?;
 //!
 //! assert_eq!(matches[0].sequence_id, jinbocho);
-//! assert_eq!(matches[0].token_range.start.get(), 3);
-//! assert_eq!(matches[0].token_range.end.get(), 5);
+//! assert_eq!(matches[0].token_range, 3..5);
 //! # Ok(())
 //! # }
 //! # #[cfg(feature = "persist")]
@@ -144,7 +140,7 @@ mod postings;
 pub mod search;
 mod storage;
 mod store;
-pub mod types;
+mod types;
 mod vocabulary;
 
 // Keep README examples in the same doctest suite as the public API docs without

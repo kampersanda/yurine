@@ -15,7 +15,6 @@ mod verification;
 use std::hash::Hash;
 use std::ops::Range;
 
-use crate::costs::Cost;
 use crate::errors::Result;
 use crate::postings::PostingsIndex;
 use crate::store::CorpusStore;
@@ -38,11 +37,11 @@ struct Candidate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
     /// The identifier returned when the matched data sequence was added.
-    pub sequence_id: SequenceId,
+    pub sequence_id: usize,
     /// The matched zero-based, end-exclusive token range.
-    pub token_range: Range<Position>,
+    pub token_range: Range<usize>,
     /// The weighted edit distance from the query sequence to the data segment.
-    pub distance: Cost,
+    pub distance: f32,
 }
 
 /// A reusable search index built from data sequences.

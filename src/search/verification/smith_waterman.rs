@@ -38,7 +38,7 @@ where
     for string_id in string_ids {
         let string = corpus
             .string(string_id)?
-            .ok_or(Error::UnknownString(string_id))?;
+            .ok_or(Error::UnknownString(string_id.as_usize()))?;
         enumerate_substring_matches(
             query_string,
             string,
@@ -144,7 +144,7 @@ where
                     symbol_start,
                     symbol_end + 1,
                     Cost::new(current[query_string.len()])?,
-                )?);
+                ));
             }
             std::mem::swap(&mut previous, &mut current);
         }

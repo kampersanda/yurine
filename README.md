@@ -45,13 +45,12 @@ fn main() -> yurine::errors::Result<()> {
         .range_searcher(costs)
         .search(
             &["book", "district", "known", "for", "curry"],
-            &RangeSearchParams::new(Cost::new_const(0.25)),
+            &RangeSearchParams::new(0.25),
         )?;
 
     assert_eq!(matches[0].sequence_id, jinbocho);
-    assert_eq!(matches[0].distance, Cost::new_const(0.25));
-    assert_eq!(matches[0].token_range.start.get(), 3);
-    assert_eq!(matches[0].token_range.end.get(), 8);
+    assert_eq!(matches[0].distance, 0.25);
+    assert_eq!(matches[0].token_range, 3..8);
     Ok(())
 }
 ```
@@ -67,7 +66,6 @@ similar tokens can match without an explicit rule:
 
 ```rust
 use std::num::NonZeroUsize;
-use yurine::costs::Cost;
 use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
 use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 
@@ -85,11 +83,10 @@ fn main() -> yurine::errors::Result<()> {
 
     let matches = engine.range_searcher(costs).search(
         &["literature", "and", "curry"],
-        &RangeSearchParams::new(Cost::new_const(0.2)),
+        &RangeSearchParams::new(0.2),
     )?;
 
-    assert_eq!(matches[0].token_range.start.get(), 2);
-    assert_eq!(matches[0].token_range.end.get(), 5);
+    assert_eq!(matches[0].token_range, 2..5);
     Ok(())
 }
 ```
