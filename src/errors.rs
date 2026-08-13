@@ -1,11 +1,73 @@
 //! Error types.
 
+#[cfg(feature = "persist")]
+use std::path::Path;
+use std::path::PathBuf;
+
 use crate::types::{Position, SequenceId};
 
 /// An error type for the library.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// An operating-system I/O operation failed.
+    #[error("I/O error for {path:?} ({kind:?}): {message}")]
+    Io {
+        /// The file or directory involved in the failed operation.
+        path: PathBuf,
+        /// The portable category of the I/O failure.
+        kind: std::io::ErrorKind,
+        /// The operating-system error message.
+        message: String,
+    },
+
+    /// A persisted file is malformed or internally inconsistent.
+    #[error("invalid persisted file: {0}")]
+    InvalidFile(&'static str),
+
+    /// A persisted file uses an unsupported format version.
+    #[error("unsupported format version: {0}")]
+    UnsupportedFormatVersion(u32),
+
+    /// A persisted file was written with a different byte order.
+    #[error("persisted file is not little-endian")]
+    EndiannessMismatch,
+
+    /// This target cannot zero-copy little-endian persisted values.
+    #[error("memory-mapped persistence requires a little-endian target")]
+    UnsupportedHostEndianness,
+
+    /// The supplied token codec does not match the persisted codec.
+    #[error("token codec mismatch: expected {expected}, found {actual}")]
+    CodecMismatch {
+        /// The codec requested by the caller.
+        expected: String,
+        /// The codec recorded in the file.
+        actual: String,
+    },
+
+    /// The supplied token codec version does not match the persisted version.
+    #[error("token codec version mismatch: expected {expected}, found {actual}")]
+    CodecVersionMismatch {
+        /// The version requested by the caller.
+        expected: u32,
+        /// The version recorded in the file.
+        actual: u32,
+    },
+
+    /// A token codec identifier exceeds the persisted format's limit.
+    #[error("token codec identifier is {length} bytes, maximum is {max}")]
+    CodecIdTooLong {
+        /// The supplied identifier length in bytes.
+        length: usize,
+        /// The maximum identifier length accepted by the format.
+        max: usize,
+    },
+
+    /// A token's persisted bytes are invalid for the selected codec.
+    #[error("invalid token encoding: {0}")]
+    InvalidTokenEncoding(String),
+
     /// The corpus contains too many sequences for a `u32` sequence identifier.
     #[error("sequence identifier exceeds u32")]
     SequenceIdOverflow,
@@ -94,5 +156,37 @@ pub enum Error {
     ThresholdSubsequenceUnavailable,
 }
 
+impl Error {
+    #[cfg(feature = "persist")]
+    pub(crate) fn io(path: &Path, error: std::io::Error) -> Self {
+        Self::Io {
+            path: path.to_owned(),
+            kind: error.kind(),
+            message: error.to_string(),
+        }
+    }
+}
+
 /// A specialized `Result` type for errors.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "persist")]
+    use super::Error;
+
+    #[test]
+    #[cfg(feature = "persist")]
+    fn io_error_preserves_path_kind_and_message() {
+        let source = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not allowed");
+
+        assert_eq!(
+            Error::io(std::path::Path::new("index.yurine"), source),
+            Error::Io {
+                path: "index.yurine".into(),
+                kind: std::io::ErrorKind::PermissionDenied,
+                message: "not allowed".to_owned(),
+            }
+        );
+    }
+}

@@ -8,8 +8,15 @@ name = "yurine"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+persist = ["dep:memmap2", "dep:zerocopy"]
+
 [dependencies]
+memmap2 = { version = "0.9.11", optional = true }
 thiserror = "2.0.20"
+zerocopy = { version = "0.8.54", features = ["derive"], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
+tempfile = "3.27.0"
