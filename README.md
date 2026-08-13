@@ -113,6 +113,10 @@ and reports the corruption. Call `verify` immediately after opening an
 untrusted embedding snapshot to avoid silently applying the configured
 missing-embedding cost.
 
+Saving retains only encoded token metadata and row indices in memory. Vector
+rows are streamed directly from the existing owned or mmap backing, so saving
+does not materialize a second copy of a multi-gigabyte matrix.
+
 `LevenshteinCosts::save`/`open`, `CustomCosts::save_with`/`open_with`, and
 `CosineEmbeddingCosts::save`/`open` use independent files. Cosine-cost files
 contain only their three constants: callers explicitly supply the separately

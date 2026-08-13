@@ -17,6 +17,10 @@ where
     T: Eq + Hash,
 {
     /// Saves this store independently from a search engine or cost policy.
+    ///
+    /// Rows are streamed from their existing owned or mapped backing in
+    /// deterministic token order; saving does not copy the vector matrix into
+    /// a second heap allocation.
     pub fn save_with<C: TokenCodec<T>>(&self, path: impl AsRef<Path>, codec: &C) -> Result<()> {
         self.verify()?;
 
@@ -40,13 +44,12 @@ where
 
         let mut token_offsets = Vec::with_capacity(rows.len() + 1);
         let mut token_blob = Vec::new();
-        let mut embeddings = Vec::with_capacity(self.embeddings.len());
+        let mut row_indices = Vec::with_capacity(rows.len());
         token_offsets.push(0);
         for (encoded, index) in rows {
             token_blob.extend_from_slice(&encoded);
             token_offsets.push(token_blob.len() as u64);
-            let start = index * self.dimension.get();
-            embeddings.extend_from_slice(&self.embeddings[start..start + self.dimension.get()]);
+            row_indices.push(index);
         }
 
         let mut metadata = Vec::with_capacity(12);
@@ -64,7 +67,14 @@ where
                     element_count: self.len() as u64,
                 },
             ),
-            (SectionKind::Embeddings, SectionData::F32(&embeddings)),
+            (
+                SectionKind::Embeddings,
+                SectionData::F32Rows {
+                    values: &self.embeddings,
+                    row_indices: &row_indices,
+                    row_len: self.dimension.get(),
+                },
+            ),
             (
                 SectionKind::CostMetadata,
                 SectionData::Bytes {

@@ -211,40 +211,63 @@ pub(crate) struct PersistedFile {
 }
 
 pub(crate) enum SectionData<'a> {
-    Bytes { bytes: &'a [u8], element_count: u64 },
-    F32(&'a [f32]),
+    Bytes {
+        bytes: &'a [u8],
+        element_count: u64,
+    },
+    F32Rows {
+        values: &'a [f32],
+        row_indices: &'a [usize],
+        row_len: usize,
+    },
     U64(&'a [u64]),
     Symbols(&'a [Symbol]),
     Postings(&'a [Posting]),
 }
 
 impl SectionData<'_> {
-    fn byte_len(&self) -> u64 {
+    fn byte_len(&self) -> Result<u64> {
         match self {
-            Self::Bytes { bytes, .. } => bytes.len() as u64,
-            Self::F32(values) => std::mem::size_of_val(*values) as u64,
-            Self::U64(values) => std::mem::size_of_val(*values) as u64,
-            Self::Symbols(values) => std::mem::size_of_val(*values) as u64,
-            Self::Postings(values) => std::mem::size_of_val(*values) as u64,
+            Self::Bytes { bytes, .. } => Ok(bytes.len() as u64),
+            Self::F32Rows { .. } => self
+                .element_count()?
+                .checked_mul(size_of::<f32>() as u64)
+                .ok_or(Error::InvalidFile("section byte length overflows")),
+            Self::U64(values) => Ok(std::mem::size_of_val(*values) as u64),
+            Self::Symbols(values) => Ok(std::mem::size_of_val(*values) as u64),
+            Self::Postings(values) => Ok(std::mem::size_of_val(*values) as u64),
         }
     }
 
-    fn element_count(&self) -> u64 {
+    fn element_count(&self) -> Result<u64> {
         match self {
-            Self::Bytes { element_count, .. } => *element_count,
-            Self::F32(values) => values.len() as u64,
-            Self::U64(values) => values.len() as u64,
-            Self::Symbols(values) => values.len() as u64,
-            Self::Postings(values) => values.len() as u64,
+            Self::Bytes { element_count, .. } => Ok(*element_count),
+            Self::F32Rows {
+                row_indices,
+                row_len,
+                ..
+            } => (row_indices.len() as u64)
+                .checked_mul(*row_len as u64)
+                .ok_or(Error::InvalidFile("section element count overflows")),
+            Self::U64(values) => Ok(values.len() as u64),
+            Self::Symbols(values) => Ok(values.len() as u64),
+            Self::Postings(values) => Ok(values.len() as u64),
         }
     }
 
     fn write_to(&self, writer: &mut impl Write) -> std::io::Result<()> {
         match self {
             Self::Bytes { bytes, .. } => writer.write_all(bytes),
-            Self::F32(values) => values
-                .iter()
-                .try_for_each(|value| writer.write_all(&value.to_le_bytes())),
+            Self::F32Rows {
+                values,
+                row_indices,
+                row_len,
+            } => row_indices.iter().try_for_each(|index| {
+                let start = index * row_len;
+                values[start..start + row_len]
+                    .iter()
+                    .try_for_each(|value| writer.write_all(&value.to_le_bytes()))
+            }),
             Self::U64(values) => values
                 .iter()
                 .try_for_each(|value| writer.write_all(&value.to_le_bytes())),
@@ -291,8 +314,8 @@ pub(crate) fn write_file<T, C: TokenCodec<T>>(
         let descriptor = SectionDescriptor {
             kind: *section_kind,
             offset: cursor,
-            byte_len: data.byte_len(),
-            element_count: data.element_count(),
+            byte_len: data.byte_len()?,
+            element_count: data.element_count()?,
         };
         cursor = cursor
             .checked_add(descriptor.byte_len)
