@@ -182,9 +182,8 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         .split_whitespace()
         .map(str::to_owned)
         .collect();
-    let costs = LevenshteinCosts::new();
-    let (cold_matches, metrics) =
-        engine.range_search_with_metrics(&query_sequence, &params, &costs)?;
+    let searcher = engine.range_searcher(LevenshteinCosts::new());
+    let (cold_matches, metrics) = searcher.search_with_metrics(&query_sequence, &params)?;
     let cold_elapsed = cold_start.elapsed();
     let cold_heap_peak = heap_peak();
     let peak_rss_after_cold = peak_rss_bytes();
@@ -196,7 +195,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     let mut warm_matches = 0usize;
     for _ in 0..warm_runs {
         let start = Instant::now();
-        let matches = engine.range_search(&query_sequence, &params, &costs)?;
+        let matches = searcher.search(&query_sequence, &params)?;
         warm_elapsed += start.elapsed();
         warm_matches = matches.len();
     }

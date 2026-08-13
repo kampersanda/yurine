@@ -144,7 +144,9 @@ where
         .into_iter()
         .map(|token| token.value)
         .collect();
-    let matches = engine.range_search(&query_sequence, &params, &costs)?;
+    let matches = engine
+        .range_searcher(costs)
+        .search(&query_sequence, &params)?;
     Ok(matches
         .into_iter()
         .map(|matched| locate_match(matched, &source_token_ranges))

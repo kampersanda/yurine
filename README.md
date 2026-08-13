@@ -16,10 +16,10 @@ fn main() -> Result<()> {
     builder.add_sequence(['京', '都'])?;
 
     let engine = builder.build()?;
-    let matches = engine.range_search(
+    let searcher = engine.range_searcher(LevenshteinCosts::new());
+    let matches = searcher.search(
         &['東', '京'],
         &RangeSearchParams::new(Cost::ZERO),
-        &LevenshteinCosts::new(),
     )?;
 
     assert_eq!(matches[0].sequence_id, tokyo);

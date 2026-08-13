@@ -40,7 +40,7 @@ pub struct Match {
 /// A reusable search index built from data sequences.
 ///
 /// The index owns the vocabulary, encoded corpus, and postings needed for
-/// filtering and verification. Edit costs are supplied for each search, so
+/// filtering and verification. Edit costs are owned by range searchers, so
 /// one index can be reused with different cost policies.
 ///
 /// Create an index with [`SearchEngineBuilder`].

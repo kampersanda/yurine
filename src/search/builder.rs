@@ -98,11 +98,8 @@ mod tests {
 
         assert!(
             engine
-                .range_search(
-                    &['a'],
-                    &RangeSearchParams::new(Cost::ZERO),
-                    &LevenshteinCosts::new(),
-                )
+                .range_searcher(LevenshteinCosts::new())
+                .search(&['a'], &RangeSearchParams::new(Cost::ZERO))
                 .unwrap()
                 .is_empty()
         );
@@ -129,11 +126,8 @@ mod tests {
         let matches = builder
             .build()
             .unwrap()
-            .range_search(
-                &['東', '京'],
-                &RangeSearchParams::new(Cost::ZERO),
-                &LevenshteinCosts::new(),
-            )
+            .range_searcher(LevenshteinCosts::new())
+            .search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -161,11 +155,8 @@ mod tests {
         let matches = builder
             .build()
             .unwrap()
-            .range_search(
-                &['a', 'a'],
-                &RangeSearchParams::new(Cost::ZERO),
-                &LevenshteinCosts::new(),
-            )
+            .range_searcher(LevenshteinCosts::new())
+            .search(&['a', 'a'], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(
@@ -193,11 +184,8 @@ mod tests {
         let matches = builder
             .build()
             .unwrap()
-            .range_search(
-                &[20_u16, 30],
-                &RangeSearchParams::new(Cost::ZERO),
-                &LevenshteinCosts::new(),
-            )
+            .range_searcher(LevenshteinCosts::new())
+            .search(&[20_u16, 30], &RangeSearchParams::new(Cost::ZERO))
             .unwrap();
 
         assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));

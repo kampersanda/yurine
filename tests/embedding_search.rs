@@ -18,12 +18,12 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['あ', 'b']).unwrap();
     let engine = builder.build().unwrap();
+    let searcher = engine.range_searcher(costs);
 
-    let matches = engine
-        .range_search(
+    let matches = searcher
+        .search(
             &['x'],
             &RangeSearchParams::new(Cost::new_const(0.25)).with_eta(Cost::new_const(0.25)),
-            &costs,
         )
         .unwrap();
 

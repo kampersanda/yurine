@@ -38,6 +38,16 @@ pub struct RangeSearchMetrics {
     pub generated_candidates: usize,
 }
 
+/// Executes range searches against one engine with a fixed edit-cost policy.
+///
+/// Create a searcher with [`SearchEngine::range_searcher`]. The searcher owns
+/// its edit costs and borrows the engine, so creating one does not copy or
+/// reference-count the index.
+pub struct RangeSearcher<'a, T, C> {
+    engine: &'a SearchEngine<T>,
+    costs: C,
+}
+
 impl RangeSearchParams {
     /// Creates parameters with automatic eta.
     pub const fn new(threshold: Cost) -> Self {
@@ -79,14 +89,22 @@ pub fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost>
     }
 }
 
-impl<T> SearchEngine<T>
+impl<T> SearchEngine<T> {
+    /// Creates a range searcher with the supplied edit-cost policy.
+    pub fn range_searcher<C>(&self, costs: C) -> RangeSearcher<'_, T, C> {
+        RangeSearcher {
+            engine: self,
+            costs,
+        }
+    }
+}
+
+impl<T, C> RangeSearcher<'_, T, C>
 where
     T: Clone + Eq + Hash,
+    C: EditCosts<T>,
 {
     /// Finds non-empty data segments satisfying the configured range search.
-    ///
-    /// `costs` defines the weighted edit distance for this search and is not
-    /// retained by the engine.
     ///
     /// Results are ordered by data sequence ID, then token-range start, then
     /// token-range end.
@@ -113,33 +131,21 @@ where
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
     ///
-    /// Searching takes `&self`, so one engine can serve concurrent queries.
-    pub fn range_search<C>(
-        &self,
-        query_sequence: &[T],
-        params: &RangeSearchParams,
-        costs: &C,
-    ) -> Result<Vec<Match>>
-    where
-        C: EditCosts<T>,
-    {
-        self.range_search_with_metrics(query_sequence, params, costs)
+    /// Searching takes `&self`, so one searcher can serve concurrent queries.
+    pub fn search(&self, query_sequence: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
+        self.search_with_metrics(query_sequence, params)
             .map(|(matches, _)| matches)
     }
 
     /// Finds matches and returns filtering measurements for reproducible
     /// performance comparisons.
-    pub fn range_search_with_metrics<C>(
+    pub fn search_with_metrics(
         &self,
         query_sequence: &[T],
         params: &RangeSearchParams,
-        costs: &C,
-    ) -> Result<(Vec<Match>, RangeSearchMetrics)>
-    where
-        C: EditCosts<T>,
-    {
-        let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.vocabulary)?;
-        let costs = encoded_query.costs(&self.vocabulary, costs);
+    ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
+        let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.engine.vocabulary)?;
+        let costs = encoded_query.costs(&self.engine.vocabulary, &self.costs);
         let threshold = params.threshold;
         // strict_threshold(threshold)?;
         let eta = match params.eta {
@@ -163,13 +169,14 @@ where
             query_string,
             threshold,
             eta,
-            &self.index,
+            &self.engine.index,
             costs,
-            &self.neighborhood,
+            &self.engine.neighborhood,
         ) {
             Ok(selected) => selected,
             Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {
-                let matches = verify_exhaustively(query_string, threshold, &self.store, costs)?;
+                let matches =
+                    verify_exhaustively(query_string, threshold, &self.engine.store, costs)?;
                 return Ok((
                     matches,
                     RangeSearchMetrics {
@@ -184,14 +191,14 @@ where
             query_string,
             &selected,
             eta,
-            &self.index,
+            &self.engine.index,
             costs,
-            &self.neighborhood,
+            &self.engine.neighborhood,
         )?;
         let matches = Verifier::BidirectionalTrie.verify(
             query_string,
             &candidates,
-            &self.store,
+            &self.engine.store,
             threshold,
             costs,
         )?;
@@ -327,12 +334,10 @@ mod tests {
 
     #[test]
     fn applies_substitution_cost_for_query_only_token() {
-        let matches = engine()
-            .range_search(
-                &['y'],
-                &RangeSearchParams::new(Cost::new_const(0.4)),
-                &CharacterCosts,
-            )
+        let engine = engine();
+        let matches = engine
+            .range_searcher(CharacterCosts)
+            .search(&['y'], &RangeSearchParams::new(Cost::new_const(0.4)))
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::new_const(0.4)));
@@ -340,34 +345,26 @@ mod tests {
 
     #[test]
     fn applies_deletion_cost_for_query_only_token() {
-        let matches = engine()
-            .range_search(
-                &['x', 'a'],
-                &RangeSearchParams::new(Cost::new_const(0.25)),
-                &CharacterCosts,
-            )
+        let engine = engine();
+        let matches = engine
+            .range_searcher(CharacterCosts)
+            .search(&['x', 'a'], &RangeSearchParams::new(Cost::new_const(0.25)))
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::new_const(0.25)));
     }
 
     #[test]
-    fn searches_can_share_an_engine() {
+    fn searcher_can_serve_concurrent_queries() {
         let engine = engine();
+        let searcher = engine.range_searcher(CharacterCosts);
         let substitution_params = RangeSearchParams::new(Cost::new_const(0.4));
         let deletion_params = RangeSearchParams::new(Cost::new_const(0.25));
 
         std::thread::scope(|scope| {
-            let substitution = scope.spawn(|| {
-                engine
-                    .range_search(&['y'], &substitution_params, &CharacterCosts)
-                    .unwrap()
-            });
-            let deletion = scope.spawn(|| {
-                engine
-                    .range_search(&['x', 'a'], &deletion_params, &CharacterCosts)
-                    .unwrap()
-            });
+            let substitution =
+                scope.spawn(|| searcher.search(&['y'], &substitution_params).unwrap());
+            let deletion = scope.spawn(|| searcher.search(&['x', 'a'], &deletion_params).unwrap());
 
             assert_eq!(substitution.join().unwrap()[0].distance, 0.4);
             assert_eq!(deletion.join().unwrap()[0].distance, 0.25);
@@ -378,19 +375,14 @@ mod tests {
     fn one_engine_accepts_different_cost_policies() {
         let engine = engine();
         let params = RangeSearchParams::new(Cost::new_const(0.4));
+        let character = engine.range_searcher(CharacterCosts);
+        let levenshtein = engine.range_searcher(LevenshteinCosts::new());
 
         assert_eq!(
-            engine
-                .range_search(&['y'], &params, &CharacterCosts)
-                .unwrap(),
+            character.search(&['y'], &params).unwrap(),
             expected_matches(Cost::new_const(0.4))
         );
-        assert!(
-            engine
-                .range_search(&['y'], &params, &LevenshteinCosts::new())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(levenshtein.search(&['y'], &params).unwrap().is_empty());
     }
 
     #[test]
@@ -415,8 +407,10 @@ mod tests {
 
     #[test]
     fn falls_back_to_exhaustive_search_when_no_threshold_subsequence_exists() {
-        let matches = engine()
-            .range_search(&['x'], &RangeSearchParams::new(Cost::ONE), &CharacterCosts)
+        let engine = engine();
+        let matches = engine
+            .range_searcher(CharacterCosts)
+            .search(&['x'], &RangeSearchParams::new(Cost::ONE))
             .unwrap();
 
         assert_eq!(matches, expected_matches(Cost::ONE));
@@ -424,8 +418,10 @@ mod tests {
 
     #[test]
     fn empty_query_sequence_reports_unavailable_threshold_subsequence() {
-        let result =
-            engine().range_search(&[], &RangeSearchParams::new(Cost::ZERO), &CharacterCosts);
+        let engine = engine();
+        let result = engine
+            .range_searcher(CharacterCosts)
+            .search(&[], &RangeSearchParams::new(Cost::ZERO));
 
         assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
     }
@@ -445,11 +441,12 @@ mod tests {
         builder.add_sequence(['b', 'a']).unwrap();
         builder.add_sequence(['a', 'c']).unwrap();
         let engine = builder.build().unwrap();
+        let searcher = engine.range_searcher(costs);
         let threshold = Cost::new_const(0.5);
         let eta = Cost::new_const(0.25);
 
         let encoded_query = EncodedQuery::new(vec!['x', 'y'], &engine.vocabulary).unwrap();
-        let encoded_costs = encoded_query.costs(&engine.vocabulary, &costs);
+        let encoded_costs = encoded_query.costs(&engine.vocabulary, &searcher.costs);
         assert!(
             MinCandidateSelector
                 .select(
@@ -463,11 +460,10 @@ mod tests {
                 .is_ok()
         );
 
-        let filtered = engine
-            .range_search(
+        let filtered = searcher
+            .search(
                 &['x', 'y'],
                 &RangeSearchParams::new(threshold).with_eta(eta),
-                &costs,
             )
             .unwrap();
         let exhaustive = verify_exhaustively(
