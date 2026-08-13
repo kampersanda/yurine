@@ -13,6 +13,22 @@ mod persistence;
 /// Each operation initially uses its default cost. Token-specific costs can be
 /// added or replaced with the setter methods.
 /// [`Default`] uses unit costs equivalent to the Levenshtein distance.
+///
+/// Rules are directional because edits transform the query into a data
+/// segment. For example, a substitution from `'a'` to `'A'` does not also set
+/// the cost from `'A'` to `'a'`.
+///
+/// ```
+/// use yurine::costs::{Cost, EditCosts, custom::CustomCosts};
+///
+/// let mut costs = CustomCosts::default();
+/// costs.set_substitution('a', 'A', Cost::new_const(0.25));
+/// costs.set_deletion('.', Cost::new_const(0.1));
+///
+/// assert_eq!(costs.substitution(&'a', &'A'), Cost::new_const(0.25));
+/// assert_eq!(costs.substitution(&'A', &'a'), Cost::ONE);
+/// assert_eq!(costs.deletion(&'.'), Cost::new_const(0.1));
+/// ```
 #[derive(Debug, Clone)]
 pub struct CustomCosts<T> {
     default_substitution: Cost,

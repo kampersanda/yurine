@@ -12,6 +12,8 @@ use crate::vocabulary::VocabularyBuilder;
 /// Builds a [`SearchEngine`] from token sequences in insertion order.
 ///
 /// Edit costs do not affect the index contents and are supplied when searching.
+/// The identifier returned by [`Self::add_sequence`] is stable for the lifetime
+/// of the built engine and appears in each matching [`crate::search::Match`].
 #[derive(Debug)]
 pub struct SearchEngineBuilder<T> {
     sequences: Vec<Vec<T>>,
@@ -29,6 +31,9 @@ where
     }
 
     /// Adds a data sequence and returns its identifier.
+    ///
+    /// Empty sequences are accepted but cannot produce a match because search
+    /// results always identify non-empty segments.
     ///
     /// # Errors
     ///

@@ -1,4 +1,8 @@
-//! Weighted edit-operation cost abstractions.
+//! Weighted edit-operation costs used during search.
+//!
+//! Start with [`levenshtein::LevenshteinCosts`] for ordinary edit distance.
+//! Use [`custom::CustomCosts`] for token-specific rules, or implement
+//! [`EditCosts`] when costs must be computed dynamically.
 
 pub mod custom;
 pub mod embedding;
@@ -13,7 +17,7 @@ use std::ops::Sub;
 use crate::errors::{Error, Result};
 /// Supplies the costs that define a weighted edit distance.
 ///
-/// The search direction is always from the query sequence to a data segment
+/// The search direction is always from the query sequence to a data segment.
 /// Thus, deletion consumes a query token and insertion consumes a
 /// data token.
 pub trait EditCosts<T> {
@@ -30,6 +34,18 @@ pub trait EditCosts<T> {
 }
 
 /// A finite, non-negative, single-precision edit cost or search threshold.
+///
+/// Use [`Cost::new`] for runtime values and [`Cost::new_const`] for constants.
+/// Both reject negative and non-finite values.
+///
+/// ```
+/// use yurine::costs::Cost;
+///
+/// let threshold = Cost::new(0.75)?;
+/// assert_eq!(threshold.get(), 0.75);
+/// assert!(Cost::new(f32::NAN).is_err());
+/// # Ok::<(), yurine::errors::Error>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cost(f32);
 

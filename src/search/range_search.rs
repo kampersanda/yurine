@@ -13,6 +13,11 @@ use crate::store::CorpusStore;
 use crate::types::{Position, SequenceId, Symbol};
 
 /// Parameters for threshold range search.
+///
+/// The threshold is inclusive: a result is returned when its distance is less
+/// than or equal to [`Self::threshold`]. Most callers only need [`Self::new`];
+/// [`Self::with_eta`] is a filtering-performance tuning control and does not
+/// change which results are correct.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RangeSearchParams {
     threshold: Cost,
@@ -56,7 +61,11 @@ impl RangeSearchParams {
         }
     }
 
-    /// Uses an explicit substitution-neighborhood radius.
+    /// Uses an explicit substitution-neighborhood radius for filtering.
+    ///
+    /// Leave this unset unless profiling shows that the automatic value is a
+    /// bottleneck. The radius affects candidate generation, not the distance
+    /// threshold used to verify results.
     pub const fn with_eta(mut self, eta: Cost) -> Self {
         self.eta = Some(eta);
         self
@@ -131,6 +140,11 @@ where
     /// than the normal filter-and-verify path.
     ///
     /// Searching takes `&self`, so one searcher can serve concurrent queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an empty query or if the configured costs cannot be
+    /// represented safely by the search algorithm.
     pub fn search(&self, query_sequence: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
         self.search_with_metrics(query_sequence, params)
             .map(|(matches, _)| matches)
