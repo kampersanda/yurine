@@ -20,6 +20,7 @@ const METADATA_FILE: &str = "metadata.json";
 const ENGINE_FILE: &str = "engine.yurine";
 const SOURCES_FILE: &str = "sources.txt";
 const OFFSETS_FILE: &str = "sources.idx";
+const TEMPORARY_SUFFIX: &str = ".tmp";
 
 /// Description of an index directory, stored as `metadata.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,8 +69,12 @@ pub(crate) fn read_metadata(directory: &Path) -> Result<Metadata> {
 }
 
 /// Writer of the source-text copy and its line-offset table.
+///
+/// Both files are written under temporary names and only renamed into place by
+/// [`SourceWriter::publish`], so a failed run leaves the previous index intact.
 #[derive(Debug)]
 pub(crate) struct SourceWriter {
+    directory: PathBuf,
     texts: BufWriter<File>,
     offsets: BufWriter<File>,
     end: u64,
@@ -79,10 +84,11 @@ pub(crate) struct SourceWriter {
 impl SourceWriter {
     /// Creates both files, starting the offset table at the first line.
     pub(crate) fn create(directory: &Path) -> Result<Self> {
-        let texts = create(&directory.join(SOURCES_FILE))?;
-        let mut offsets = create(&directory.join(OFFSETS_FILE))?;
+        let texts = create(&temporary(directory, SOURCES_FILE))?;
+        let mut offsets = create(&temporary(directory, OFFSETS_FILE))?;
         offsets.write_all(&0_u64.to_le_bytes())?;
         Ok(Self {
+            directory: directory.to_path_buf(),
             texts,
             offsets,
             end: 0,
@@ -99,12 +105,37 @@ impl SourceWriter {
         Ok(())
     }
 
-    /// Flushes both files and returns the number of stored source texts.
-    pub(crate) fn finish(mut self) -> Result<usize> {
+    /// Flushes both files and returns the number of written source texts.
+    pub(crate) fn finish(&mut self) -> Result<usize> {
         self.texts.flush()?;
         self.offsets.flush()?;
         Ok(self.count)
     }
+
+    /// Renames both files into place, replacing the ones of a previous index.
+    ///
+    /// Call it only after [`SourceWriter::finish`] and after every other stage
+    /// of the run has succeeded.
+    pub(crate) fn publish(self) -> Result<()> {
+        let Self {
+            directory,
+            texts,
+            offsets,
+            ..
+        } = self;
+        drop(texts);
+        drop(offsets);
+        for name in [SOURCES_FILE, OFFSETS_FILE] {
+            let path = directory.join(name);
+            fs::rename(temporary(&directory, name), &path)
+                .with_context(|| format!("failed to publish '{}'", path.display()))?;
+        }
+        Ok(())
+    }
+}
+
+fn temporary(directory: &Path, name: &str) -> PathBuf {
+    directory.join(format!("{name}{TEMPORARY_SUFFIX}"))
 }
 
 fn create(path: &Path) -> Result<BufWriter<File>> {
@@ -118,21 +149,31 @@ fn create(path: &Path) -> Result<BufWriter<File>> {
 pub(crate) struct SourceReader {
     texts: File,
     offsets: File,
+    length: u64,
 }
 
 impl SourceReader {
     pub(crate) fn open(directory: &Path, sequence_count: usize) -> Result<Self> {
         let texts = open(&directory.join(SOURCES_FILE))?;
+        let length = texts.metadata()?.len();
         let path = directory.join(OFFSETS_FILE);
         let offsets = open(&path)?;
-        let expected = (sequence_count as u64 + 1) * size_of::<u64>() as u64;
-        if offsets.metadata()?.len() != expected {
+        // The table holds one offset per source text plus the end of the last
+        // one. A count that cannot describe any file rules the table out.
+        let expected = (sequence_count as u64)
+            .checked_add(1)
+            .and_then(|entries| entries.checked_mul(size_of::<u64>() as u64));
+        if Some(offsets.metadata()?.len()) != expected {
             bail!(
                 "'{}' does not describe {sequence_count} source texts",
                 path.display()
             );
         }
-        Ok(Self { texts, offsets })
+        Ok(Self {
+            texts,
+            offsets,
+            length,
+        })
     }
 
     /// Reads the source text with the given sequence ID.
@@ -144,12 +185,13 @@ impl SourceReader {
         self.offsets.read_exact(&mut bounds)?;
         let start = u64::from_le_bytes(bounds[..size_of::<u64>()].try_into().unwrap());
         let end = u64::from_le_bytes(bounds[size_of::<u64>()..].try_into().unwrap());
-        // The stored line ends with a newline that is not part of the text.
-        let length = end
-            .checked_sub(start + 1)
-            .context("index has invalid source offsets")?;
+        // The stored line ends with a newline that is not part of the text, so
+        // it spans at least one byte and stays within the file.
+        if end <= start || end > self.length {
+            bail!("index has invalid source offsets");
+        }
 
-        let mut buffer = vec![0_u8; usize::try_from(length)?];
+        let mut buffer = vec![0_u8; usize::try_from(end - start - 1)?];
         self.texts.seek(SeekFrom::Start(start))?;
         self.texts.read_exact(&mut buffer)?;
         String::from_utf8(buffer).context("index has a source text that is not valid UTF-8")
@@ -162,6 +204,8 @@ fn open(path: &Path) -> Result<File> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::{Metadata, SourceReader, SourceWriter, read_metadata, write_metadata};
     use crate::tests::TestDirectory;
     use crate::tokenization::TokenizerKind;
@@ -209,6 +253,7 @@ mod tests {
             writer.push(source_text).unwrap();
         }
         assert_eq!(writer.finish().unwrap(), 3);
+        writer.publish().unwrap();
 
         let mut reader = SourceReader::open(directory.path(), 3).unwrap();
         assert_eq!(reader.read(2).unwrap(), "a\tb");
@@ -217,11 +262,63 @@ mod tests {
     }
 
     #[test]
+    fn source_files_appear_only_once_published() {
+        let directory = TestDirectory::new();
+        let mut writer = SourceWriter::create(directory.path()).unwrap();
+        writer.push("東京都").unwrap();
+        assert_eq!(writer.finish().unwrap(), 1);
+        assert!(!directory.path().join("sources.txt").exists());
+
+        writer.publish().unwrap();
+
+        assert!(directory.path().join("sources.txt").exists());
+        assert_eq!(
+            SourceReader::open(directory.path(), 1)
+                .unwrap()
+                .read(0)
+                .unwrap(),
+            "東京都"
+        );
+    }
+
+    #[test]
+    fn opening_sources_rejects_a_sequence_count_that_overflows_the_table() {
+        let directory = TestDirectory::new();
+        let mut writer = SourceWriter::create(directory.path()).unwrap();
+        writer.push("東京都").unwrap();
+        writer.finish().unwrap();
+        writer.publish().unwrap();
+
+        let error = SourceReader::open(directory.path(), usize::MAX).unwrap_err();
+        assert!(error.to_string().contains("does not describe"));
+    }
+
+    #[test]
+    fn reading_rejects_offsets_outside_the_source_file() {
+        let directory = TestDirectory::new();
+        let mut writer = SourceWriter::create(directory.path()).unwrap();
+        writer.push("東京都").unwrap();
+        writer.finish().unwrap();
+        writer.publish().unwrap();
+        // Claim a line far longer than the stored source texts.
+        let mut offsets = 0_u64.to_le_bytes().to_vec();
+        offsets.extend_from_slice(&u64::MAX.to_le_bytes());
+        fs::write(directory.path().join("sources.idx"), offsets).unwrap();
+
+        let error = SourceReader::open(directory.path(), 1)
+            .unwrap()
+            .read(0)
+            .unwrap_err();
+        assert!(error.to_string().contains("invalid source offsets"));
+    }
+
+    #[test]
     fn opening_sources_rejects_a_mismatched_sequence_count() {
         let directory = TestDirectory::new();
         let mut writer = SourceWriter::create(directory.path()).unwrap();
         writer.push("東京都").unwrap();
         writer.finish().unwrap();
+        writer.publish().unwrap();
 
         let error = SourceReader::open(directory.path(), 2).unwrap_err();
         assert!(

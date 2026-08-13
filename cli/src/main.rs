@@ -79,7 +79,10 @@ struct SearchOptions {
     #[arg(long)]
     costs: Option<PathBuf>,
 
-    /// Check the integrity of the index before searching it.
+    /// Check the internal integrity of the search index before searching it.
+    ///
+    /// The stored source texts are not checked, so a match is reported as
+    /// stored even if they no longer agree with the search index.
     #[arg(long)]
     verify: bool,
 
@@ -182,8 +185,11 @@ where
     let engine = builder.build()?;
     timings.build = build_start.elapsed();
 
+    // Publish the new index only once every stage has succeeded, so a failed
+    // run leaves the index of a previous one usable.
     let save_start = Instant::now();
     engine.save_with(index::engine_path(directory), codec)?;
+    sources.publish()?;
     index::write_metadata(directory, options.tokenizer, sequence_count)?;
     timings.save = save_start.elapsed();
 
@@ -644,6 +650,28 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 2);
         assert_eq!(verified, second);
+    }
+
+    #[test]
+    fn a_failed_rebuild_leaves_the_previous_index_usable() {
+        let directory = TestDirectory::new();
+        let index = build_index(&directory, TokenizerKind::Character, &["東京都", "京都市"]);
+        // The corpus stops being valid UTF-8 after the first line.
+        let corpus = directory.path().join("broken.txt");
+        fs::write(&corpus, b"\xe6\x9d\xb1\n\xff\n").unwrap();
+
+        let error = run_index(&IndexOptions {
+            index: index.clone(),
+            corpus: Some(corpus),
+            tokenizer: TokenizerKind::Character,
+            timing: false,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("failed to build the index"));
+        let (matches, _) = find_matches(&search_options(index, "東京", Cost::ZERO)).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_text, "東京");
     }
 
     #[test]

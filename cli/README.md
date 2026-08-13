@@ -51,8 +51,10 @@ $ target/release/yurine --help
 - `--eta <NUMBER>` overrides an internal candidate-generation radius. Most
   users should leave it unset; it affects filtering performance, not the
   distance threshold used to verify results.
-- `--verify` checks the integrity of the index before searching it. Use it on
-  an index from an untrusted source; the check reads the whole index.
+- `--verify` checks the internal integrity of `engine.yurine` before searching
+  it, reading the whole file. It does not check the stored source texts, so a
+  reported match is quoted as stored even if `sources.txt` no longer agrees
+  with the search index.
 - `--timing` reports the elapsed time of each stage on standard error.
 
 There is no `--tokenizer` option on `search`. The query is tokenized with the
@@ -90,12 +92,17 @@ tokenizer of the index they are searched with.
 
 Results report byte offsets into the original text, which tokenization does not
 preserve, so the source texts are stored next to the index. The offset table
-lets a search read only the lines it matched, so search time does not grow with
-the size of the corpus.
+lets a search read only the lines it matched, so looking up matched text costs
+the same whatever the size of the corpus. The search itself still scales with
+the index.
 
 An index is an immutable snapshot. Adding or changing source texts requires
-building a new index. Rebuilding into an existing directory overwrites all four
-files.
+building a new index. Rebuilding into an existing directory replaces all four
+files: the new ones are written under temporary names, ending in `.tmp`, and
+are only put in place once every stage has succeeded, so a failed run leaves
+the previous index usable. Its `.tmp` files stay behind and are reused by the
+next run. Do not rebuild an index while it is being searched, because a search
+maps `engine.yurine` for as long as it runs.
 
 ## Output
 
