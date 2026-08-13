@@ -29,8 +29,8 @@ struct Candidate {
 /// A verified data segment satisfying the inclusive distance threshold.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
-    /// The encoded data string corresponding to the matched data sequence.
-    pub string_id: StringId,
+    /// The identifier returned when the matched data sequence was added.
+    pub sequence_id: StringId,
     /// The matched zero-based, end-exclusive token range.
     pub token_range: Range<Position>,
     /// The weighted edit distance from the query sequence to the data segment.

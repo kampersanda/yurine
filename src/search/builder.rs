@@ -141,12 +141,12 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    string_id: StringId::new(3),
+                    sequence_id: StringId::new(3),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
@@ -169,12 +169,12 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(1)..Position::new(3),
                     distance: Cost::ZERO,
                 },

@@ -161,11 +161,11 @@ struct LocatedMatch {
 fn locate_match(matched: Match, source_token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
     // Every source text is passed to `add_sequence` in order, so `StringId`
     // indexes `source_token_ranges`. Matches are always non-empty token ranges.
-    let ranges = &source_token_ranges[matched.string_id.as_usize()];
+    let ranges = &source_token_ranges[matched.sequence_id.as_usize()];
     let token_start = matched.token_range.start.as_usize();
     let token_end = matched.token_range.end.as_usize();
     LocatedMatch {
-        string_id: matched.string_id,
+        string_id: matched.sequence_id,
         byte_range: ranges[token_start].start..ranges[token_end - 1].end,
         distance: matched.distance,
     }

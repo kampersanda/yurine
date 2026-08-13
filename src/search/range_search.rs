@@ -308,12 +308,12 @@ mod tests {
     fn expected_matches(distance: Cost) -> Vec<Match> {
         vec![
             Match {
-                string_id: StringId::new(0),
+                sequence_id: StringId::new(0),
                 token_range: Position::new(0)..Position::new(1),
                 distance,
             },
             Match {
-                string_id: StringId::new(1),
+                sequence_id: StringId::new(1),
                 token_range: Position::new(0)..Position::new(1),
                 distance,
             },
@@ -434,7 +434,7 @@ mod tests {
 
         assert_eq!(filtered, exhaustive);
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].string_id, StringId::new(0));
+        assert_eq!(filtered[0].sequence_id, StringId::new(0));
         assert_eq!(filtered[0].token_range, Position::new(0)..Position::new(2));
     }
 }

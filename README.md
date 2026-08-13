@@ -18,7 +18,7 @@ fn main() -> Result<()> {
     let engine = builder.build()?;
     let matches = engine.range_search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))?;
 
-    assert_eq!(matches[0].string_id, tokyo);
+    assert_eq!(matches[0].sequence_id, tokyo);
     assert_eq!(matches[0].token_range.start.get(), 0);
     assert_eq!(matches[0].token_range.end.get(), 2);
     Ok(())

@@ -50,7 +50,7 @@ fn create_match(
     distance: Cost,
 ) -> Result<Match> {
     Ok(Match {
-        string_id,
+        sequence_id: string_id,
         token_range: Position::from_usize(symbol_start)?..Position::from_usize(symbol_end)?,
         distance,
     })
@@ -215,27 +215,27 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(1),
                     distance: Cost::ONE,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ONE,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(3),
                     distance: Cost::ONE,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(1)..Position::new(3),
                     distance: Cost::ONE,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(2)..Position::new(3),
                     distance: Cost::ONE,
                 },
@@ -268,12 +268,12 @@ mod tests {
             matches,
             [
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(0)..Position::new(1),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    string_id: StringId::new(0),
+                    sequence_id: StringId::new(0),
                     token_range: Position::new(1)..Position::new(2),
                     distance: Cost::ZERO,
                 },
