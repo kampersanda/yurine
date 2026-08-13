@@ -2,11 +2,31 @@
 
 Fast, exact search for sequence segments under weighted edit distance.
 
-Yurine indexes sequences of generic tokens and returns every non-empty segment
-within a chosen edit-distance threshold. Applications retain ownership of
-tokenization, source text, and conversion from token ranges to source ranges.
-Here, "exact search" means that qualifying approximate matches are not omitted;
-it does not mean exact string matching.
+## What Yurine does
+
+Yurine finds approximate query segments inside longer token sequences. In this
+example, the bold part of the indexed sequence is returned:
+
+Indexed sequence: `Jinbocho is a` **`book town known for curry`**
+
+| | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| Query | `book` | `district` | `known` | `for` | `curry` |
+| Matched segment | `book` | `town` | `known` | `for` | `curry` |
+| Cost | 0 | 0.25 | 0 | 0 | 0 |
+
+The match qualifies because replacing `district` with `town` costs `0.25`.
+
+Key characteristics:
+
+- **Segment search:** finds matching ranges within longer sequences.
+- **Weighted edits:** costs can vary by token, operation, and direction.
+- **Embedding costs:** cosine distance can make similar tokens such as
+  `bookshops` and `bookstores` inexpensive substitutions.
+- **Exact results:** returns every segment within the threshold; “exact” means
+  complete results, not exact string matching.
+- **Reusable indexes:** supports generic token types, multiple cost policies,
+  and memory-mapped persistence.
 
 ## Usage
 
