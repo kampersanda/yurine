@@ -1,3 +1,9 @@
+//! Building and querying reusable sequence indexes.
+//!
+//! Add data with [`SearchEngineBuilder`], build a [`SearchEngine`], then create
+//! a range searcher with [`SearchEngine::range_searcher`]. Search configuration
+//! and execution live in [`range_search`].
+
 mod builder;
 mod encoding;
 mod filtering;

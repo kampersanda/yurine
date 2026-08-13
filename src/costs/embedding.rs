@@ -21,6 +21,18 @@ mod persistence;
 /// Embeddings are stored consecutively in insertion order. They are validated
 /// and normalized when inserted. Call [`EmbeddingStoreBuilder::build`] to make
 /// the store immutable and ready for searching or persistence.
+///
+/// ```
+/// use std::num::NonZeroUsize;
+/// use yurine::costs::embedding::EmbeddingStoreBuilder;
+///
+/// let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+/// builder.insert("cat", [3.0, 4.0])?;
+/// let store = builder.build();
+///
+/// assert_eq!(store.get("cat"), Some([0.6, 0.8].as_slice()));
+/// # Ok::<(), yurine::errors::Error>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct EmbeddingStoreBuilder<T> {
     dimension: NonZeroUsize,
@@ -246,6 +258,22 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 /// with embeddings, the cost is `clamp(1 - cosine, 0, 1)`. If either embedding
 /// is absent, the configured missing-embedding cost is used instead. Deletion
 /// and insertion use configurable constant costs.
+///
+/// ```
+/// use std::num::NonZeroUsize;
+/// use yurine::costs::{Cost, EditCosts};
+/// use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+///
+/// let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+/// builder.insert("literature", [1.0, 0.0])?;
+/// builder.insert("books", [0.8, 0.6])?;
+/// let costs = CosineEmbeddingCosts::new(builder.build());
+///
+/// let distance = costs.substitution(&"literature", &"books").get();
+/// assert!((distance - 0.2).abs() < 1e-6);
+/// assert_eq!(costs.substitution(&"literature", &"unknown"), Cost::ONE);
+/// # Ok::<(), yurine::errors::Error>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct CosineEmbeddingCosts<T> {
     embeddings: EmbeddingStore<T>,
