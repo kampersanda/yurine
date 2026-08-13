@@ -24,6 +24,7 @@ use crate::vocabulary::Vocabulary;
 use filtering::SubstitutionNeighborhood;
 
 pub use builder::SearchEngineBuilder;
+pub use range_search::{RangeSearchMetrics, RangeSearchParams, RangeSearcher};
 
 /// A candidate match of a query string in a data string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

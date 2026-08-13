@@ -43,8 +43,8 @@ tokens rather than to road-network trajectories.
 ## Usage
 
 ```rust
-use yurine::costs::{Cost, custom::CustomCosts};
-use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+use yurine::costs::CustomCosts;
+use yurine::{Cost, RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
@@ -80,8 +80,8 @@ similar tokens can match without an explicit rule:
 
 ```rust
 use std::num::NonZeroUsize;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
+use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+use yurine::{RangeSearchParams, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
@@ -117,7 +117,7 @@ engines, embedding stores, and edit-cost policies:
 ```rust
 use tempfile::tempdir;
 use yurine::persistence::StringCodec;
-use yurine::search::{SearchEngine, SearchEngineBuilder};
+use yurine::{SearchEngine, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
     let directory = tempdir().expect("create temporary directory");

@@ -1,7 +1,7 @@
 //! Weighted edit-operation costs used during search.
 //!
-//! Start with [`levenshtein::LevenshteinCosts`] for ordinary edit distance.
-//! Use [`custom::CustomCosts`] for token-specific rules, or implement
+//! Start with [`LevenshteinCosts`] for ordinary edit distance.
+//! Use [`CustomCosts`] for token-specific rules, or implement
 //! [`EditCosts`] when costs must be computed dynamically.
 
 pub mod custom;
@@ -9,6 +9,10 @@ pub mod embedding;
 pub mod levenshtein;
 #[cfg(feature = "persist")]
 pub(crate) mod persistence;
+
+pub use custom::CustomCosts;
+pub use embedding::{CosineEmbeddingCosts, EmbeddingStore, EmbeddingStoreBuilder};
+pub use levenshtein::LevenshteinCosts;
 
 use std::cmp::Ordering;
 use std::fmt;
