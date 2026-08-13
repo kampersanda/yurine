@@ -86,30 +86,29 @@ The `persist` feature adds immutable, memory-mapped snapshots for search
 engines, embedding stores, and edit-cost policies:
 
 ```rust
+use tempfile::tempdir;
 use yurine::persistence::StringCodec;
 use yurine::search::{SearchEngine, SearchEngineBuilder};
 
 fn main() -> yurine::errors::Result<()> {
-    let path = std::env::temp_dir().join(format!(
-        "yurine-example-{}.index",
-        std::process::id(),
-    ));
+    let directory = tempdir().expect("create temporary directory");
+    let path = directory.path().join("index.yurine");
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(["Jinbocho", "book", "town"].map(str::to_owned))?;
     builder.build()?.save_with(&path, &StringCodec)?;
 
     let engine = SearchEngine::open_with(&path, &StringCodec)?;
     engine.verify()?;
-    drop(engine);
-    std::fs::remove_file(path).expect("remove temporary index");
     Ok(())
 }
 ```
 
 Build with `--features persist`. Opened indexes keep their large corpus and
 posting arrays memory-mapped. The snapshot must not be modified or truncated
-while it is mapped. The tested example and codec requirements are documented
-under “Saving and loading an index” in the crate-level Rust Doc.
+while it is mapped. `tempdir` removes this example's index even when an
+operation returns early with `?`; applications should instead choose a durable
+path. The tested example and codec requirements are documented under “Saving
+and loading an index” in the crate-level Rust Doc.
 
 ## Documentation
 
