@@ -1,7 +1,7 @@
 pub mod costs;
 pub mod errors;
-pub mod postings;
+mod postings;
 pub mod search;
-pub mod store;
+mod store;
 pub mod types;
-pub mod vocabulary;
+mod vocabulary;

@@ -14,7 +14,7 @@ use crate::store::CorpusStore;
 use crate::types::{Position, SequenceId};
 use crate::vocabulary::Vocabulary;
 
-use filtering::neighborhood::SubstitutionNeighborhood;
+use filtering::SubstitutionNeighborhood;
 
 pub use builder::SearchEngineBuilder;
 
@@ -62,7 +62,7 @@ where
     ) -> Result<Self> {
         for symbol in store.alphabet() {
             if vocabulary.token(*symbol).is_none() {
-                return Err(Error::UnknownStringSymbol(*symbol));
+                return Err(Error::UnknownStringSymbol(symbol.get()));
             }
         }
         let neighborhood = SubstitutionNeighborhood::new(store.alphabet().iter().copied())?;
@@ -102,7 +102,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(Error::UnknownStringSymbol(symbol)) if symbol == unknown_symbol
+            Err(Error::UnknownStringSymbol(symbol)) if symbol == unknown_symbol.get()
         ));
     }
 }

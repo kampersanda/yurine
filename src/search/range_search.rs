@@ -6,8 +6,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
 use crate::search::encoding::EncodedQuery;
-use crate::search::filtering::candidate::MinCandidateSelector;
-use crate::search::filtering::generate_candidates;
+use crate::search::filtering::{MinCandidateSelector, generate_candidates};
 use crate::search::verification::Verifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
@@ -80,7 +79,7 @@ impl RangeSearchParams {
 /// this returns zero rather than dividing by zero; searching an empty query
 /// sequence retains its existing error behavior. [`Cost::MAX`] is rejected
 /// because it cannot be converted to a finite strict search bound.
-pub fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost> {
+pub(crate) fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost> {
     // strict_threshold(threshold)?;
     if query_sequence_len == 0 {
         Ok(Cost::ZERO)

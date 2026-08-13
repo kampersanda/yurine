@@ -1,11 +1,13 @@
-pub mod candidate;
-pub mod neighborhood;
+mod candidate;
+mod neighborhood;
+
+pub(in crate::search) use candidate::MinCandidateSelector;
+pub(in crate::search) use neighborhood::SubstitutionNeighborhood;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::search::Candidate;
-use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::{Position, Symbol};
 
 /// Generates candidate anchors.
