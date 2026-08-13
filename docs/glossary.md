@@ -1,15 +1,15 @@
 # Glossary
 
-| 用語                      | 定義                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------- |
-| **token**                 | sequence を構成する値。Yurine における比較・索引化の最小単位。                           |
-| **sequence**              | token の有限列。                                                                         |
-| **segment**               | 1つの sequence 内の連続した非空の token range。                                          |
-| **vocabulary**            | corpus へ追加された sequence に現れる distinct token value と vocabulary symbol の対応表 |
-| **symbol**                | token を表す Yurine 内部の整数 ID                                                        |
-| **string**                | symbol の有限列。sequence を symbol へ符号化した Yurine 内部の表現                       |
-| **substring**             | 1つの string 内の連続した非空の symbol range                                             |
-| **alphabet**              | vocabulary に含まれる symbol の集合                                                      |
-| **data sequence/string**  | 索引に登録される sequence/string                                                         |
-| **query sequence/string** | 検索時に呼び出し側から渡される sequence/string                                           |
-| **corpus**                | data string の順序付き collection                                                        |
+| Term                      | Definition                                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Token**                 | A value that constitutes a sequence. The smallest unit of comparison and indexing in Yurine.                     |
+| **Sequence**              | A finite sequence of tokens.                                                                                     |
+| **Segment**               | A contiguous, non-empty range of tokens within a single sequence.                                                |
+| **Vocabulary**            | A mapping between vocabulary symbols and the distinct token values that appear in sequences added to the corpus. |
+| **Symbol**                | An integer ID used internally by Yurine to represent a token.                                                    |
+| **String**                | A finite sequence of symbols. Yurine's internal representation of a sequence encoded as symbols.                 |
+| **Substring**             | A contiguous, non-empty range of symbols within a single string.                                                 |
+| **Alphabet**              | The set of symbols contained in a vocabulary.                                                                    |
+| **Data sequence/string**  | A sequence/string registered in the index.                                                                       |
+| **Query sequence/string** | A sequence/string supplied by the caller at search time.                                                         |
+| **Corpus**                | An ordered collection of data strings.                                                                           |
