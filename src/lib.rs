@@ -7,9 +7,6 @@
 //! Here, "exact search" means that qualifying approximate matches are not
 //! omitted; it does not mean exact string matching.
 //!
-//! The search algorithm follows the filtering–verification framework of Koide
-//! et al. \[1]; see [References](#references).
-//!
 //! # Quick start
 //!
 //! ```
@@ -135,12 +132,8 @@
 //!
 //! # References
 //!
-//! Yurine implements the weighted edit distance search algorithm proposed for
-//! subtrajectory search in road networks: a query subsequence minimizing the
-//! number of candidates is selected by a two-approximation algorithm,
-//! candidate anchors are collected from an inverted index, and each candidate
-//! is verified with a bidirectional trie. Yurine indexes sequences of
-//! arbitrary tokens rather than road-network trajectories.
+//! Yurine implements the search algorithm proposed for subtrajectory search in
+//! road networks, applied here to sequences of arbitrary tokens.
 //!
 //! 1. Satoshi Koide, Chuan Xiao, and Yoshiharu Ishikawa. Fast Subtrajectory
 //!    Similarity Search in Road Networks under Weighted Edit Distance
