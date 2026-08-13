@@ -135,10 +135,10 @@
 //! Yurine implements the search algorithm proposed for subtrajectory search in
 //! road networks, applied here to sequences of arbitrary tokens.
 //!
-//! Satoshi Koide, Chuan Xiao, and Yoshiharu Ishikawa. Fast Subtrajectory
-//! Similarity Search in Road Networks under Weighted Edit Distance
-//! Constraints. *PVLDB*, 13(11): 2188–2201, 2020.
-//! <https://doi.org/10.14778/3407790.3407818>
+//! > Satoshi Koide, Chuan Xiao, and Yoshiharu Ishikawa. Fast Subtrajectory
+//! > Similarity Search in Road Networks under Weighted Edit Distance
+//! > Constraints. *PVLDB*, 13(11): 2188–2201, 2020.
+//! > <https://doi.org/10.14778/3407790.3407818>
 #![warn(missing_docs)]
 
 pub mod costs;
