@@ -2,9 +2,6 @@
 
 Fast and exact search for sequence segments under weighted edit distance
 
-The reproducible performance baseline and compatibility workload for the
-persistent-index work are documented in [`benchmarks/`](benchmarks/README.md).
-
 ```rust
 use yurine::costs::Cost;
 use yurine::costs::levenshtein::LevenshteinCosts;
@@ -31,8 +28,6 @@ fn main() -> Result<()> {
 Yurine accepts token sequences and encodes them as internal symbol strings.
 Callers own source text, tokenization, and conversion from returned token ranges
 to source-text byte ranges. Token types remain generic for in-memory search.
-See the [glossary](docs/glossary.md) for the distinction between public token
-sequences and their internal symbol-string representations.
 
 ## Command-line search
 
