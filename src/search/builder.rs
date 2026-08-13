@@ -35,7 +35,7 @@ where
     /// # Errors
     ///
     /// Returns [`crate::errors::Error::StringIdOverflow`] if the corpus has
-    /// too many corpus strings or [`crate::errors::Error::PositionOverflow`]
+    /// too many data strings or [`crate::errors::Error::PositionOverflow`]
     /// if the sequence is too long.
     pub fn add_sequence<I>(&mut self, sequence: I) -> Result<StringId>
     where

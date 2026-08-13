@@ -16,7 +16,7 @@ use crate::types::{StringId, Symbol};
 /// implementation therefore uses `O(n^2 m)` time and `O(m)` DP working space,
 /// as described in `docs/development/smith-waterman-verification.md`. It
 /// additionally uses `O(u)` space to deduplicate the `u` candidate-referenced
-/// corpus strings.
+/// data strings.
 ///
 /// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,

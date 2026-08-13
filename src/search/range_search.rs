@@ -106,7 +106,7 @@ where
     ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query-sequence length
     /// `m` and
-    /// corpus string lengths `n_i`, and can return `O(sum(n_i^2))` data
+    /// data string lengths `n_i`, and can return `O(sum(n_i^2))` data
     /// segments.
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
