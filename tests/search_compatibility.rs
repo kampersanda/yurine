@@ -2,7 +2,7 @@ use yurine::costs::{Cost, EditCosts};
 use yurine::errors::Error;
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
-use yurine::types::{Position, StringId};
+use yurine::types::{Position, SequenceId};
 
 struct CompatibilityCosts;
 
@@ -45,27 +45,27 @@ fn range_search_result_contract_is_stable() {
         matches,
         [
             yurine::search::Match {
-                sequence_id: StringId::new(0),
+                sequence_id: SequenceId::new(0),
                 token_range: Position::new(1)..Position::new(3),
                 distance: Cost::ZERO,
             },
             yurine::search::Match {
-                sequence_id: StringId::new(1),
+                sequence_id: SequenceId::new(1),
                 token_range: Position::new(0)..Position::new(2),
                 distance: Cost::ZERO,
             },
             yurine::search::Match {
-                sequence_id: StringId::new(2),
+                sequence_id: SequenceId::new(2),
                 token_range: Position::new(0)..Position::new(2),
                 distance: Cost::new_const(0.25),
             },
             yurine::search::Match {
-                sequence_id: StringId::new(3),
+                sequence_id: SequenceId::new(3),
                 token_range: Position::new(0)..Position::new(2),
                 distance: Cost::ZERO,
             },
             yurine::search::Match {
-                sequence_id: StringId::new(3),
+                sequence_id: SequenceId::new(3),
                 token_range: Position::new(2)..Position::new(4),
                 distance: Cost::ZERO,
             },
@@ -104,7 +104,7 @@ fn exhaustive_fallback_result_contract_is_stable() {
     assert_eq!(
         matches,
         [yurine::search::Match {
-            sequence_id: StringId::new(0),
+            sequence_id: SequenceId::new(0),
             token_range: Position::new(0)..Position::new(1),
             distance: Cost::ZERO,
         }]

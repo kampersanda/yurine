@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::errors::Result;
-use crate::types::{StringId, Symbol};
+use crate::types::{SequenceId, Symbol};
 
 /// A builder for a [`CorpusStore`].
 #[derive(Debug)]
@@ -60,7 +60,7 @@ pub struct CorpusStore {
 /// Read access to indexed strings.
 impl CorpusStore {
     /// Returns the string identified by `id`, or `None` when it is unknown.
-    pub fn string(&self, id: StringId) -> Result<Option<&[Symbol]>> {
+    pub fn string(&self, id: SequenceId) -> Result<Option<&[Symbol]>> {
         let Some((start, end)) = self.string_bounds(id)? else {
             return Ok(None);
         };
@@ -82,7 +82,7 @@ impl CorpusStore {
         &self.alphabet
     }
 
-    fn string_bounds(&self, id: StringId) -> Result<Option<(usize, usize)>> {
+    fn string_bounds(&self, id: SequenceId) -> Result<Option<(usize, usize)>> {
         let index = id.as_usize();
         let Some(end_index) = index.checked_add(1) else {
             return Ok(None);
@@ -100,7 +100,7 @@ impl CorpusStore {
 #[cfg(test)]
 mod tests {
     use super::CorpusStoreBuilder;
-    use crate::types::{StringId, Symbol};
+    use crate::types::{SequenceId, Symbol};
 
     #[test]
     fn alphabet_is_unique_across_strings() {
@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(!store.is_empty());
         assert_eq!(
-            store.string(StringId::new(0)).unwrap(),
+            store.string(SequenceId::new(0)).unwrap(),
             Some(&[first, second][..])
         );
     }
@@ -145,7 +145,7 @@ mod tests {
 
         assert_eq!(store.symbols, [first, second, second]);
         assert_eq!(store.string_offsets, [0, 2, 2, 3]);
-        assert_eq!(store.string(StringId::new(1)).unwrap(), Some(&[][..]));
+        assert_eq!(store.string(SequenceId::new(1)).unwrap(), Some(&[][..]));
     }
 
     #[test]
@@ -153,6 +153,6 @@ mod tests {
         let store = CorpusStoreBuilder::new().build();
 
         assert!(store.is_empty());
-        assert_eq!(store.string(StringId::new(0)).unwrap(), None);
+        assert_eq!(store.string(SequenceId::new(0)).unwrap(), None);
     }
 }

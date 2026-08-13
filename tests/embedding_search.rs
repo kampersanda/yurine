@@ -5,7 +5,7 @@ use yurine::costs::Cost;
 use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
-use yurine::types::{Position, StringId};
+use yurine::types::{Position, SequenceId};
 
 #[test]
 fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
@@ -26,7 +26,7 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
         .unwrap();
 
     assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].sequence_id, StringId::new(0));
+    assert_eq!(matches[0].sequence_id, SequenceId::new(0));
     assert_eq!(matches[0].token_range, Position::new(0)..Position::new(1));
     assert_abs_diff_eq!(matches[0].distance.get(), 0.2, epsilon = 1e-6);
 }

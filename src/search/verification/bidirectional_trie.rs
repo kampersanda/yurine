@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{StringId, Symbol};
+use crate::types::{SequenceId, Symbol};
 
 struct TrieNode {
     // `column` is the WED state after consuming the edge labels from the root
@@ -134,7 +134,7 @@ where
     let mut forest = TrieForest::default();
     let mut directional_query_strings_by_position =
         BTreeMap::<usize, DirectionalQueryStrings>::new();
-    let mut substrings = BTreeMap::<(StringId, usize, usize), f32>::new();
+    let mut substrings = BTreeMap::<(SequenceId, usize, usize), f32>::new();
 
     for candidate in candidates {
         // Candidates were validated before cache construction, so an

@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, StringId, Symbol};
+use crate::types::{Position, SequenceId, Symbol};
 
 /// Verification algorithm used to check filtering candidates.
 pub(in crate::search) enum Verifier {
@@ -44,7 +44,7 @@ impl Verifier {
 }
 
 fn create_match(
-    string_id: StringId,
+    string_id: SequenceId,
     symbol_start: usize,
     symbol_end: usize,
     distance: Cost,
@@ -167,7 +167,7 @@ mod tests {
     use crate::costs::{Cost, EditCosts};
     use crate::search::{Candidate, Match};
     use crate::store::{CorpusStore, CorpusStoreBuilder};
-    use crate::types::{Position, StringId, Symbol};
+    use crate::types::{Position, SequenceId, Symbol};
 
     struct UnitCosts;
 
@@ -200,7 +200,7 @@ mod tests {
         let candidates: Vec<_> = (0..3)
             .flat_map(|string_position| {
                 (0..2).map(move |query_position| Candidate {
-                    string_id: StringId::new(0),
+                    string_id: SequenceId::new(0),
                     string_position: Position::new(string_position),
                     query_position: Position::new(query_position),
                 })
@@ -215,27 +215,27 @@ mod tests {
             matches,
             [
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(1),
                     distance: Cost::ONE,
                 },
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(2),
                     distance: Cost::ONE,
                 },
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(3),
                     distance: Cost::ONE,
                 },
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(1)..Position::new(3),
                     distance: Cost::ONE,
                 },
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(2)..Position::new(3),
                     distance: Cost::ONE,
                 },
@@ -249,12 +249,12 @@ mod tests {
         let corpus = corpus(vec![a, a]);
         let duplicate_candidates = [
             Candidate {
-                string_id: StringId::new(0),
+                string_id: SequenceId::new(0),
                 string_position: Position::new(0),
                 query_position: Position::new(0),
             },
             Candidate {
-                string_id: StringId::new(0),
+                string_id: SequenceId::new(0),
                 string_position: Position::new(1),
                 query_position: Position::new(0),
             },
@@ -268,12 +268,12 @@ mod tests {
             matches,
             [
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(0)..Position::new(1),
                     distance: Cost::ZERO,
                 },
                 Match {
-                    sequence_id: StringId::new(0),
+                    sequence_id: SequenceId::new(0),
                     token_range: Position::new(1)..Position::new(2),
                     distance: Cost::ZERO,
                 },
@@ -286,7 +286,7 @@ mod tests {
         let symbol = Symbol::new(0);
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
-            string_id: StringId::new(1),
+            string_id: SequenceId::new(1),
             string_position: Position::new(0),
             query_position: Position::new(0),
         };
@@ -301,7 +301,7 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(crate::errors::Error::UnknownString(StringId::new(1)))
+            Err(crate::errors::Error::UnknownString(SequenceId::new(1)))
         );
     }
 
@@ -310,7 +310,7 @@ mod tests {
         let symbol = Symbol::new(0);
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             string_position: Position::new(1),
             query_position: Position::new(0),
         };
@@ -337,7 +337,7 @@ mod tests {
         let symbol = Symbol::new(0);
         let corpus = corpus(vec![symbol]);
         let candidate = Candidate {
-            string_id: StringId::new(0),
+            string_id: SequenceId::new(0),
             string_position: Position::new(0),
             query_position: Position::new(1),
         };

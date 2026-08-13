@@ -63,7 +63,7 @@ mod tests {
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
     use crate::search::Candidate;
-    use crate::types::{Position, Posting, StringId, Symbol};
+    use crate::types::{Position, Posting, SequenceId, Symbol};
 
     #[test]
     fn generates_candidates_in_selected_position_and_posting_order() {
@@ -74,7 +74,7 @@ mod tests {
             .add_posting(
                 first,
                 Posting {
-                    string_id: StringId::new(1),
+                    string_id: SequenceId::new(1),
                     position: Position::new(2),
                 },
             )
@@ -83,7 +83,7 @@ mod tests {
             .add_posting(
                 second,
                 Posting {
-                    string_id: StringId::new(0),
+                    string_id: SequenceId::new(0),
                     position: Position::new(3),
                 },
             )
@@ -104,12 +104,12 @@ mod tests {
             candidates,
             [
                 Candidate {
-                    string_id: StringId::new(0),
+                    string_id: SequenceId::new(0),
                     string_position: Position::new(3),
                     query_position: Position::new(1),
                 },
                 Candidate {
-                    string_id: StringId::new(1),
+                    string_id: SequenceId::new(1),
                     string_position: Position::new(2),
                     query_position: Position::new(0),
                 },

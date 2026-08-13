@@ -37,7 +37,7 @@ costs, character tokenization, and a default threshold of zero. The CLI owns
 the source text and token byte ranges so it can continue to print matched text;
 these are not stored by the Yurine library.
 
-Results are headerless, tab-delimited CSV records containing the string ID,
+Results are headerless, tab-delimited CSV records containing the sequence ID,
 distance, byte start, byte end, and matched text. CSV quoting applies when
 needed.
 
