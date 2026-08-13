@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use memmap2::Mmap;
-use zerocopy::{FromBytes, Immutable, KnownLayout};
+use zerocopy::byteorder::little_endian::{U32, U64};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use super::TokenCodec;
 use super::storage::{MappedSlice, map_file};
@@ -12,9 +13,36 @@ use crate::errors::{Error, Result};
 
 pub(crate) const MAGIC: [u8; 8] = *b"YURINE\0\0";
 pub(crate) const FORMAT_VERSION: u32 = 1;
-pub(crate) const HEADER_LEN: usize = 64;
-pub(crate) const SECTION_ENTRY_LEN: usize = 32;
 const ENDIAN_MARKER: u32 = 0x0102_0304;
+
+#[repr(C)]
+#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
+struct DiskHeader {
+    magic: [u8; 8],
+    format_version: U32,
+    endian_marker: U32,
+    file_kind: U32,
+    header_len: U32,
+    codec_version: U32,
+    section_count: U32,
+    codec_offset: U64,
+    codec_len: U64,
+    section_table_offset: U64,
+    file_len: U64,
+}
+
+#[repr(C)]
+#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
+struct DiskSectionEntry {
+    kind: U32,
+    flags: U32,
+    offset: U64,
+    byte_len: U64,
+    element_count: U64,
+}
+
+pub(crate) const HEADER_LEN: usize = size_of::<DiskHeader>();
+pub(crate) const SECTION_ENTRY_LEN: usize = size_of::<DiskSectionEntry>();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -155,36 +183,36 @@ impl PersistedFile {
         expected_codec_version: u32,
     ) -> Result<Self> {
         let bytes: &[u8] = &mmap;
-        if bytes.len() < HEADER_LEN {
-            return Err(Error::InvalidFile("header is truncated"));
-        }
-        if bytes[..8] != MAGIC {
+        let header = DiskHeader::ref_from_prefix(bytes)
+            .map_err(|_| Error::InvalidFile("header is truncated"))?
+            .0;
+        if header.magic != MAGIC {
             return Err(Error::InvalidFile("magic does not match"));
         }
-        if read_u32(bytes, 8)? != FORMAT_VERSION {
-            return Err(Error::UnsupportedFormatVersion(read_u32(bytes, 8)?));
+        if header.format_version.get() != FORMAT_VERSION {
+            return Err(Error::UnsupportedFormatVersion(header.format_version.get()));
         }
-        if read_u32(bytes, 12)? != ENDIAN_MARKER {
+        if header.endian_marker.get() != ENDIAN_MARKER {
             return Err(Error::EndiannessMismatch);
         }
         if cfg!(target_endian = "big") {
             return Err(Error::UnsupportedHostEndianness);
         }
 
-        let kind = FileKind::from_raw(read_u32(bytes, 16)?)?;
+        let kind = FileKind::from_raw(header.file_kind.get())?;
         if kind != expected_kind {
             return Err(Error::InvalidFile("file kind does not match"));
         }
-        if read_u32(bytes, 20)? as usize != HEADER_LEN {
+        if header.header_len.get() as usize != HEADER_LEN {
             return Err(Error::InvalidFile("header size does not match"));
         }
 
-        let codec_version = read_u32(bytes, 24)?;
-        let section_count = u64::from(read_u32(bytes, 28)?);
-        let codec_offset = read_u64(bytes, 32)?;
-        let codec_len = read_u64(bytes, 40)?;
-        let section_table_offset = read_u64(bytes, 48)?;
-        let recorded_file_len = read_u64(bytes, 56)?;
+        let codec_version = header.codec_version.get();
+        let section_count = u64::from(header.section_count.get());
+        let codec_offset = header.codec_offset.get();
+        let codec_len = header.codec_len.get();
+        let section_table_offset = header.section_table_offset.get();
+        let recorded_file_len = header.file_len.get();
         if recorded_file_len != u64::try_from(bytes.len()).unwrap() {
             return Err(Error::InvalidFile("recorded file length does not match"));
         }
@@ -210,16 +238,18 @@ impl PersistedFile {
             .ok_or(Error::InvalidFile("section table length overflows"))?;
         let table = checked_range(bytes, section_table_offset, table_len)?;
         let mut sections = BTreeMap::new();
-        for entry in table.chunks_exact(SECTION_ENTRY_LEN) {
-            let kind = SectionKind::from_raw(read_u32(entry, 0)?)?;
-            if read_u32(entry, 4)? != 0 {
+        let entries = <[DiskSectionEntry]>::ref_from_bytes(table)
+            .map_err(|_| Error::InvalidFile("section table has an invalid length"))?;
+        for entry in entries {
+            let kind = SectionKind::from_raw(entry.kind.get())?;
+            if entry.flags.get() != 0 {
                 return Err(Error::InvalidFile("section flags are not zero"));
             }
             let descriptor = SectionDescriptor {
                 kind,
-                offset: read_u64(entry, 8)?,
-                byte_len: read_u64(entry, 16)?,
-                element_count: read_u64(entry, 24)?,
+                offset: entry.offset.get(),
+                byte_len: entry.byte_len.get(),
+                element_count: entry.element_count.get(),
             };
             validate_section(bytes, descriptor)?;
             if sections.insert(kind, descriptor).is_some() {
@@ -461,34 +491,18 @@ fn checked_range(bytes: &[u8], offset: u64, len: u64) -> Result<&[u8]> {
         .ok_or(Error::InvalidFile("file range is truncated"))
 }
 
-fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
-    let raw = bytes
-        .get(offset..offset + 4)
-        .ok_or(Error::InvalidFile("fixed-width value is truncated"))?
-        .try_into()
-        .unwrap();
-    Ok(u32::from_le_bytes(raw))
-}
-
-fn read_u64(bytes: &[u8], offset: usize) -> Result<u64> {
-    let raw = bytes
-        .get(offset..offset + 8)
-        .ok_or(Error::InvalidFile("fixed-width value is truncated"))?
-        .try_into()
-        .unwrap();
-    Ok(u64::from_le_bytes(raw))
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::sync::Arc;
 
     use memmap2::MmapOptions;
+    use zerocopy::IntoBytes;
 
     use super::{
-        DiskPosting, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION, FileKind, HEADER_LEN, MAGIC,
-        PersistedFile, SECTION_ENTRY_LEN, SectionKind, adjacent,
+        DiskHeader, DiskPosting, DiskSectionEntry, DiskSymbol, ENDIAN_MARKER, FORMAT_VERSION,
+        FileKind, HEADER_LEN, MAGIC, PersistedFile, SECTION_ENTRY_LEN, SectionKind, U32, U64,
+        adjacent,
     };
     use crate::errors::Error;
     use crate::persistence::CharCodec;
@@ -568,27 +582,34 @@ mod tests {
                 },
             );
 
-            bytes[..8].copy_from_slice(&MAGIC);
-            write_u32(&mut bytes, 8, FORMAT_VERSION);
-            write_u32(&mut bytes, 12, ENDIAN_MARKER);
-            write_u32(&mut bytes, 16, FileKind::SearchEngine as u32);
-            write_u32(&mut bytes, 20, HEADER_LEN as u32);
-            write_u32(&mut bytes, 24, 1);
-            write_u32(&mut bytes, 28, section_kinds.len() as u32);
-            write_u64(&mut bytes, 32, codec_offset as u64);
-            write_u64(&mut bytes, 40, codec.len() as u64);
-            write_u64(&mut bytes, 48, table_offset as u64);
-            let file_len = bytes.len() as u64;
-            write_u64(&mut bytes, 56, file_len);
+            let header = DiskHeader {
+                magic: MAGIC,
+                format_version: U32::new(FORMAT_VERSION),
+                endian_marker: U32::new(ENDIAN_MARKER),
+                file_kind: U32::new(FileKind::SearchEngine as u32),
+                header_len: U32::new(HEADER_LEN as u32),
+                codec_version: U32::new(1),
+                section_count: U32::new(section_kinds.len() as u32),
+                codec_offset: U64::new(codec_offset as u64),
+                codec_len: U64::new(codec.len() as u64),
+                section_table_offset: U64::new(table_offset as u64),
+                file_len: U64::new(bytes.len() as u64),
+            };
+            bytes[..HEADER_LEN].copy_from_slice(header.as_bytes());
 
             let mut entries = Vec::new();
             for (index, (kind, offset, byte_len, count)) in sections.into_iter().enumerate() {
-                let entry = table_offset + index * SECTION_ENTRY_LEN;
-                write_u32(&mut bytes, entry, kind as u32);
-                write_u64(&mut bytes, entry + 8, offset as u64);
-                write_u64(&mut bytes, entry + 16, byte_len as u64);
-                write_u64(&mut bytes, entry + 24, count);
-                entries.push((kind, entry));
+                let entry_offset = table_offset + index * SECTION_ENTRY_LEN;
+                let entry = DiskSectionEntry {
+                    kind: U32::new(kind as u32),
+                    flags: U32::ZERO,
+                    offset: U64::new(offset as u64),
+                    byte_len: U64::new(byte_len as u64),
+                    element_count: U64::new(count),
+                };
+                bytes[entry_offset..entry_offset + SECTION_ENTRY_LEN]
+                    .copy_from_slice(entry.as_bytes());
+                entries.push((kind, entry_offset));
             }
 
             Self { bytes, entries }
@@ -636,15 +657,11 @@ mod tests {
     }
 
     fn append_u32s<const N: usize>(bytes: &mut Vec<u8>, values: [u32; N]) {
-        for value in values {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
+        bytes.extend_from_slice(values.map(U32::new).as_bytes());
     }
 
     fn append_u64s<const N: usize>(bytes: &mut Vec<u8>, values: [u64; N]) {
-        for value in values {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
+        bytes.extend_from_slice(values.map(U64::new).as_bytes());
     }
 
     fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -799,6 +816,10 @@ mod tests {
 
     #[test]
     fn disk_types_have_fixed_width_layouts() {
+        assert_eq!(size_of::<DiskHeader>(), 64);
+        assert_eq!(align_of::<DiskHeader>(), 1);
+        assert_eq!(size_of::<DiskSectionEntry>(), 32);
+        assert_eq!(align_of::<DiskSectionEntry>(), 1);
         assert_eq!(size_of::<DiskSymbol>(), 4);
         assert_eq!(align_of::<DiskSymbol>(), 4);
         assert_eq!(DiskSymbol::new(7).get(), 7);
