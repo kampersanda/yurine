@@ -19,7 +19,7 @@ mod persistence;
 /// the cost from `'A'` to `'a'`.
 ///
 /// ```
-/// use yurine::costs::{Cost, EditCosts, custom::CustomCosts};
+/// use yurine::costs::{Cost, CustomCosts, EditCosts};
 ///
 /// let mut costs = CustomCosts::default();
 /// costs.set_substitution('a', 'A', Cost::new_const(0.25));

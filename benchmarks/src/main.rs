@@ -8,11 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
-use yurine::costs::Cost;
-use yurine::costs::levenshtein::LevenshteinCosts;
+use yurine::costs::LevenshteinCosts;
 use yurine::persistence::StringCodec;
-use yurine::search::range_search::RangeSearchParams;
-use yurine::search::{SearchEngine, SearchEngineBuilder};
+use yurine::{Cost, RangeSearchParams, SearchEngine, SearchEngineBuilder};
 use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY_SOURCE_TEXT, write_data_sequences};
 
 struct TrackingAllocator;

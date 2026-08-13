@@ -1,9 +1,8 @@
 use std::num::NonZeroUsize;
 
 use approx::assert_abs_diff_eq;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
-use yurine::search::SearchEngineBuilder;
-use yurine::search::range_search::RangeSearchParams;
+use yurine::costs::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
+use yurine::{RangeSearchParams, SearchEngineBuilder};
 
 #[test]
 fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
@@ -32,7 +31,7 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
 #[test]
 fn mapped_embeddings_and_costs_preserve_search_results() {
     use tempfile::tempdir;
-    use yurine::costs::embedding::EmbeddingStore;
+    use yurine::costs::EmbeddingStore;
     use yurine::persistence::CharCodec;
 
     let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
