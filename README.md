@@ -105,10 +105,7 @@ fn main() -> yurine::errors::Result<()> {
 
 Build with `--features persist`. Opened indexes keep their large corpus and
 posting arrays memory-mapped. The snapshot must not be modified or truncated
-while it is mapped. `tempdir` removes this example's index even when an
-operation returns early with `?`; applications should instead choose a durable
-path. The tested example and codec requirements are documented under “Saving
-and loading an index” in the crate-level Rust Doc.
+while it is mapped.
 
 ## Documentation
 
