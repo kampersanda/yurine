@@ -1,18 +1,17 @@
 # Yurine CLI
 
 The `yurine` command searches newline-delimited text for matching segments under
-weighted edit distance. It builds an in-memory index for each invocation.
+weighted edit distance. Indexing and searching are separate commands, so a
+corpus is indexed once and searched any number of times without rebuilding.
 
 ## Quick start
 
 Run the CLI from the repository with Cargo:
 
 ```console
-$ printf 'Jinbocho is a book town known for curry\n' | \
-    cargo run -p yurine-cli -- \
-    --tokenizer whitespace \
-    --threshold 1 \
-    'book district known for curry'
+$ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
+$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run -p yurine-cli -- search --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 
@@ -23,12 +22,13 @@ have unit cost.
 ## Command syntax
 
 ```console
-yurine [OPTIONS] <QUERY> [CORPUS]
+yurine index [OPTIONS] <INDEX> [CORPUS]
+yurine search [OPTIONS] <INDEX> <QUERY>
 ```
 
-`QUERY` is the text to search for. `CORPUS` is a file containing one source
-text per line. When `CORPUS` is omitted or is `-`, the command reads standard
-input.
+`INDEX` is the index directory: `index` creates it, and `search` reads it.
+`CORPUS` is a file containing one source text per line; when it is omitted or
+is `-`, `index` reads standard input. `QUERY` is the text to search for.
 
 To build a standalone binary:
 
@@ -37,17 +37,28 @@ $ cargo build --release -p yurine-cli
 $ target/release/yurine --help
 ```
 
-### Options
+### `index` options
+
+- `--tokenizer character|whitespace` selects tokenization. It defaults to
+  `character`.
+- `--timing` reports the elapsed time of each stage on standard error.
+
+### `search` options
 
 - `-t, --threshold <NUMBER>` sets the inclusive maximum edit distance. It
   defaults to `0`.
-- `--tokenizer character|whitespace` selects tokenization. It defaults to
-  `character`.
 - `--costs <FILE>` loads a custom or embedding-based cost policy.
 - `--eta <NUMBER>` overrides an internal candidate-generation radius. Most
   users should leave it unset; it affects filtering performance, not the
   distance threshold used to verify results.
+- `--verify` checks the internal integrity of `engine.yurine` before searching
+  it, reading the whole file. It does not check the stored source texts, so a
+  reported match is quoted as stored even if `sources.txt` no longer agrees
+  with the search index.
 - `--timing` reports the elapsed time of each stage on standard error.
+
+There is no `--tokenizer` option on `search`. The query is tokenized with the
+strategy recorded in the index, so it always matches the corpus.
 
 Use `--help` for the generated command reference.
 
@@ -62,15 +73,36 @@ one token. Tokenization does not normalize or lowercase text.
 Use `whitespace` for pre-tokenized text or word-level cost policies:
 
 ```console
-$ cargo run -p yurine-cli -- \
-    --tokenizer whitespace \
-    --threshold 1 \
-    'book district known for curry' \
-    corpus.txt
+$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
 ```
 
 Cost rules and embeddings must use exactly one complete token under the
-selected tokenizer.
+tokenizer of the index they are searched with.
+
+## Index directory
+
+`yurine index` writes four files, and `yurine search` needs all of them:
+
+| File | Contents |
+| --- | --- |
+| `metadata.json` | Format version, tokenizer, and number of source texts |
+| `engine.yurine` | The search index, memory-mapped when searching |
+| `sources.txt` | A copy of the corpus lines |
+| `sources.idx` | Byte offset of each line in `sources.txt` |
+
+Results report byte offsets into the original text, which tokenization does not
+preserve, so the source texts are stored next to the index. The offset table
+lets a search read only the lines it matched, so looking up matched text costs
+the same whatever the size of the corpus. The search itself still scales with
+the index.
+
+An index is an immutable snapshot. Adding or changing source texts requires
+building a new index. Rebuilding into an existing directory replaces all four
+files: the new ones are written under temporary names, ending in `.tmp`, and
+are only put in place once every stage has succeeded, so a failed run leaves
+the previous index usable. Its `.tmp` files stay behind and are reused by the
+next run. Do not rebuild an index while it is being searched, because a search
+maps `engine.yurine` for as long as it runs.
 
 ## Output
 
@@ -93,29 +125,32 @@ are ordered by sequence ID, start offset, then end offset.
 so it never mixes with the results on standard output:
 
 ```console
-$ cargo run -p yurine-cli --release -- \
-    --timing \
-    --tokenizer whitespace \
-    --threshold 1 \
-    'book district known for curry' \
-    corpus.txt
+$ cargo run -p yurine-cli --release -- index --timing \
+    --tokenizer whitespace corpus.index corpus.txt
+timing: read=0.403ms build=0.103ms save=8.422ms total=9.072ms
+
+$ cargo run -p yurine-cli --release -- search --timing \
+    --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
-timing: read=0.097ms costs=0.000ms build=0.064ms search=0.061ms total=0.317ms
+timing: open=0.162ms costs=0.000ms search=0.050ms total=0.254ms
 ```
 
-| Stage | Covers |
-| --- | --- |
-| `read` | Reading the corpus |
-| `costs` | Loading the `--costs` configuration and its data files |
-| `build` | Tokenizing the corpus and building the index |
-| `search` | Tokenizing the query and searching |
-| `total` | The whole run, including writing the results |
+| Command | Stage | Covers |
+| --- | --- | --- |
+| `index` | `read` | Reading the corpus, tokenizing it, and storing the source texts |
+| `index` | `build` | Building the index |
+| `index` | `save` | Writing the index and its metadata |
+| `index` | `total` | The whole run |
+| `search` | `open` | Reading the metadata and opening the index, including `--verify` |
+| `search` | `costs` | Loading the `--costs` configuration and its data files |
+| `search` | `search` | Tokenizing the query and searching |
+| `search` | `total` | The whole run, including writing the results |
 
 Every stage is always reported, so the fields are the same with and without
 `--costs`. When `--costs` is omitted, the `costs` stage only builds the unit-cost
 policy, which rounds to `0.000ms`. Values are always in milliseconds with three
 decimal places, and the difference between `total` and the sum of the stages is
-output and start-up overhead.
+output, start-up, and result-reading overhead.
 
 Each stage is measured once, without warm-up or repetition, so the numbers vary
 between runs. Build a release binary before comparing them, and use the
@@ -157,12 +192,12 @@ Jinbocho is a book town known for curry
 Then run:
 
 ```console
-$ cargo run -p yurine-cli -- \
-    --tokenizer whitespace \
+$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run -p yurine-cli -- search \
     --costs costs.json \
     --threshold 0.25 \
-    'book district known for curry' \
-    corpus.txt
+    corpus.index \
+    'book district known for curry'
 0	0.25	14	39	book town known for curry
 ```
 
@@ -208,24 +243,27 @@ Visitors enjoy books and curry in Jinbocho
 Then run:
 
 ```console
-$ cargo run -p yurine-cli -- \
-    --tokenizer whitespace \
+$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run -p yurine-cli -- search \
     --costs costs.json \
     --threshold 0.2 \
-    'literature and curry' \
-    corpus.txt
+    corpus.index \
+    'literature and curry'
 0	0.19999999	15	30	books and curry
 ```
 
 All vectors must have the same non-zero dimension and contain finite values.
 Vectors are normalized when loaded. Duplicate tokens, zero vectors, and tokens
-that do not match the selected tokenizer are rejected.
+that do not match the tokenizer of the index are rejected.
 
 The optional `missing_substitution_cost`, `deletion_cost`, and `insertion_cost`
 fields default to `1.0`.
 
 Paths in a cost configuration are resolved relative to that configuration
 file, not the current working directory.
+
+Cost policies are loaded on every search. Only the index is prebuilt, so a
+large embedding file is read again for each query.
 
 ## Preparing corpora and embeddings
 

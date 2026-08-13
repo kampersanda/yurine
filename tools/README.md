@@ -86,12 +86,15 @@ $ uv run yurine-preprocess-corpus --workers 0 corpus.txt output/corpus.txt
 ## Search with Yurine
 
 ```console
-$ cargo run -p yurine-cli -- \
+$ cargo run -p yurine-cli -- index \
     --tokenizer whitespace \
+    tools/output/corpus.index \
+    tools/output/corpus.txt
+$ cargo run -p yurine-cli -- search \
     --costs tools/output/costs.json \
     --threshold 0.3 \
-    '東京 都' \
-    tools/output/corpus.txt
+    tools/output/corpus.index \
+    '東京 都'
 ```
 
 Run each feature command with `--help` for all options.

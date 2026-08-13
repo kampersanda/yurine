@@ -148,12 +148,14 @@ to the code and can be tested.
 ## Command-line search
 
 The workspace includes the `yurine` command for searching newline-delimited
-text. Run it from the repository with:
+text. It indexes a corpus once and searches the saved index any number of
+times. Run it from the repository with:
 
 ```console
-$ printf 'Jinbocho is a book town known for curry\n' | \
-    cargo run -p yurine-cli -- --tokenizer whitespace --threshold 1 \
-    'book district known for curry' -
+$ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
+$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run -p yurine-cli -- search --threshold 1 corpus.index \
+    'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 

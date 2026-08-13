@@ -1,5 +1,17 @@
 use std::ops::Range;
 
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
+
+/// Tokenization strategy of a corpus and of the queries searching it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TokenizerKind {
+    #[default]
+    Character,
+    Whitespace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Tokenized<T> {
     pub(crate) value: T,
