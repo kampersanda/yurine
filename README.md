@@ -18,8 +18,9 @@ Edit:                        district -> town (cost 0.25)
 
 - **Segment search:** finds matching ranges within longer sequences.
 - **Weighted edits:** costs can vary by token, operation, and direction.
-- **Embedding costs:** cosine distance can make similar tokens such as
-  `bookshops` and `bookstores` inexpensive substitutions.
+- **Embedding costs:** cosine distance can make semantically related tokens
+  with different spellings, such as `literature` and `books`, inexpensive
+  substitutions.
 - **Exact results:** returns every segment within the threshold; “exact” means
   complete results, not exact string matching.
 - **Reusable indexes:** supports generic token types, multiple cost policies,
@@ -73,17 +74,17 @@ use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 fn main() -> yurine::errors::Result<()> {
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence([
-        "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
+        "Visitors", "enjoy", "books", "and", "curry", "in", "Jinbocho",
     ])?;
     let engine = builder.build()?;
 
     let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
-    embeddings.insert("bookshops", [1.0, 0.0])?;
-    embeddings.insert("bookstores", [0.8, 0.6])?;
+    embeddings.insert("literature", [1.0, 0.0])?;
+    embeddings.insert("books", [0.8, 0.6])?;
     let costs = CosineEmbeddingCosts::new(embeddings.build());
 
     let matches = engine.range_searcher(costs).search(
-        &["bookshops", "and", "curry"],
+        &["literature", "and", "curry"],
         &RangeSearchParams::new(Cost::new_const(0.2)),
     )?;
 
@@ -93,8 +94,8 @@ fn main() -> yurine::errors::Result<()> {
 }
 ```
 
-Here, `bookshops` matches `bookstores` by cosine distance, returning the
-`bookstores and curry` segment. The crate-level Rust Doc contains the tested
+Here, `literature` matches `books` by cosine distance, returning the
+`books and curry` segment. The crate-level Rust Doc contains the tested
 version of this example.
 
 ## Optional persistence

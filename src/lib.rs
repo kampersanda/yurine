@@ -56,17 +56,17 @@
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
 //! let jinbocho = builder.add_sequence([
-//!     "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
+//!     "Visitors", "enjoy", "books", "and", "curry", "in", "Jinbocho",
 //! ])?;
 //! let engine = builder.build()?;
 //!
 //! let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
-//! embeddings.insert("bookshops", [1.0, 0.0])?;
-//! embeddings.insert("bookstores", [0.8, 0.6])?;
+//! embeddings.insert("literature", [1.0, 0.0])?;
+//! embeddings.insert("books", [0.8, 0.6])?;
 //! let costs = CosineEmbeddingCosts::new(embeddings.build());
 //!
 //! let matches = engine.range_searcher(costs).search(
-//!     &["bookshops", "and", "curry"],
+//!     &["literature", "and", "curry"],
 //!     &RangeSearchParams::new(Cost::new_const(0.2)),
 //! )?;
 //!
@@ -79,8 +79,8 @@
 //! # }
 //! ```
 //!
-//! Here, `bookshops` matches `bookstores` with cosine distance `0.2`, returning
-//! the `bookstores and curry` segment from the longer sequence.
+//! Here, `literature` matches `books` with cosine distance `0.2`, returning the
+//! `books and curry` segment from the longer sequence.
 //!
 //! # Saving and loading an index
 //!

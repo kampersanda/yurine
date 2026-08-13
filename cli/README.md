@@ -158,14 +158,14 @@ Embedding-based costs use cosine distance for substitutions. Create
 Create `embeddings.jsonl` with one token and vector per line:
 
 ```json
-{"token":"bookshops","embedding":[1.0,0.0]}
-{"token":"bookstores","embedding":[0.8,0.6]}
+{"token":"literature","embedding":[1.0,0.0]}
+{"token":"books","embedding":[0.8,0.6]}
 ```
 
 Create `corpus.txt`:
 
 ```text
-Visitors enjoy bookstores and curry in Jinbocho
+Visitors enjoy books and curry in Jinbocho
 ```
 
 Then run:
@@ -175,9 +175,9 @@ $ cargo run -p yurine-cli -- \
     --tokenizer whitespace \
     --costs costs.json \
     --threshold 0.2 \
-    'bookshops and curry' \
+    'literature and curry' \
     corpus.txt
-0	0.19999999	15	35	bookstores and curry
+0	0.19999999	15	30	books and curry
 ```
 
 All vectors must have the same non-zero dimension and contain finite values.
