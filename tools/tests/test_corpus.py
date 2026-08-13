@@ -1,7 +1,10 @@
 from yurine_tools.corpus import (
+    CHUNK_SIZE,
     SudachiTokenizer,
+    TokenizerConfig,
     WhitespaceTokenizer,
     normalize_text,
+    preprocess_blocks,
     preprocess_lines,
 )
 
@@ -17,6 +20,24 @@ def test_preserves_line_structure_and_normalizes_whitespace() -> None:
 def test_supports_unicode_normalization() -> None:
     assert normalize_text("ＡＢＣ", "nfkc-casefold") == "abc"
     assert normalize_text("𝐀", "nfkc-casefold") == "a"
+
+
+def test_worker_processes_reproduce_the_sequential_output() -> None:
+    # Spanning several chunks exercises the batching that feeds the workers.
+    lines = [f"line   {index} ＡＢ\n" for index in range(2 * CHUNK_SIZE + 1)]
+    config = TokenizerConfig(kind="whitespace")
+
+    sequential = "".join(preprocess_blocks(lines, config, normalization="nfkc-casefold"))
+    parallel = "".join(preprocess_blocks(lines, config, normalization="nfkc-casefold", workers=2))
+
+    assert parallel == sequential
+    assert sequential.splitlines() == [f"line {index} ab" for index in range(2 * CHUNK_SIZE + 1)]
+
+
+def test_blocks_terminate_every_line_including_the_last() -> None:
+    blocks = list(preprocess_blocks(["a b", ""], TokenizerConfig(kind="whitespace")))
+
+    assert blocks == ["a b\n\n"]
 
 
 def test_sudachi_normalized_form_matches_chive_preprocessing() -> None:

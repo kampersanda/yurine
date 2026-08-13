@@ -75,6 +75,14 @@ Use the same preprocessing options for the corpus and query. Different
 Sudachi modes or output forms produce different tokens even when the source
 text is identical.
 
+Tokenization runs in a single process by default. For a large corpus,
+`--workers` spreads it over several processes, with `0` requesting one per CPU.
+The input is streamed either way, and the output is byte-for-byte the same:
+
+```console
+$ uv run yurine-preprocess-corpus --workers 0 corpus.txt output/corpus.txt
+```
+
 ## Search with Yurine
 
 ```console
