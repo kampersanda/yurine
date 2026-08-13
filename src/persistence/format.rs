@@ -16,6 +16,8 @@ use crate::errors::{Error, Result};
 pub(crate) const MAGIC: [u8; 8] = *b"YURINE\0\0";
 pub(crate) const FORMAT_VERSION: u32 = 1;
 pub(crate) const MAX_CODEC_ID_LEN: usize = 255;
+// Detects a damaged or incorrectly encoded header. The v1 payload slices are
+// native integer views, so big-endian hosts are rejected separately below.
 const ENDIAN_MARKER: u32 = 0x0102_0304;
 
 #[repr(C)]
@@ -42,6 +44,31 @@ struct DiskSectionEntry {
     offset: U64,
     byte_len: U64,
     element_count: U64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValidatedHeader {
+    kind: FileKind,
+    codec_version: u32,
+    section_count: u32,
+    codec_offset: u64,
+    codec_len: u64,
+    section_table_offset: u64,
+    file_len: u64,
+}
+
+impl ValidatedHeader {
+    fn from_disk(header: &DiskHeader, kind: FileKind) -> Self {
+        Self {
+            kind,
+            codec_version: header.codec_version.get(),
+            section_count: header.section_count.get(),
+            codec_offset: header.codec_offset.get(),
+            codec_len: header.codec_len.get(),
+            section_table_offset: header.section_table_offset.get(),
+            file_len: header.file_len.get(),
+        }
+    }
 }
 
 pub(crate) const HEADER_LEN: usize = size_of::<DiskHeader>();
@@ -149,24 +176,29 @@ impl PersistedFile {
     ) -> Result<Self> {
         validate_codec_id_len(codec.id())?;
 
-        let mut file = File::open(path)?;
+        let mut file = File::open(path).map_err(|error| Error::io(path, error))?;
         let mut header_bytes = [0; HEADER_LEN];
         if let Err(error) = file.read_exact(&mut header_bytes) {
             return if error.kind() == std::io::ErrorKind::UnexpectedEof {
                 Err(Error::InvalidFile("header is truncated"))
             } else {
-                Err(error.into())
+                Err(Error::io(path, error))
             };
         }
         let header = DiskHeader::ref_from_bytes(&header_bytes)
             .map_err(|_| Error::InvalidFile("header has an invalid layout"))?;
-        validate_header(header, expected_kind)?;
-        if header.file_len.get() != file.metadata()?.len() {
+        let kind = validate_header(header, expected_kind)?;
+        let header = ValidatedHeader::from_disk(header, kind);
+        let file_len = file
+            .metadata()
+            .map_err(|error| Error::io(path, error))?
+            .len();
+        if header.file_len != file_len {
             return Err(Error::InvalidFile("recorded file length does not match"));
         }
 
-        let mmap = map_file(&file)?;
-        Self::parse(mmap, expected_kind, codec.id(), codec.version())
+        let mmap = map_file(&file, path)?;
+        Self::parse_contents(mmap, header, codec.id(), codec.version())
     }
 
     fn parse(
@@ -185,11 +217,22 @@ impl PersistedFile {
             return Err(Error::InvalidFile("recorded file length does not match"));
         }
 
-        let codec_len = header.codec_len.get();
+        let header = ValidatedHeader::from_disk(header, kind);
+        Self::parse_contents(mmap, header, expected_codec, expected_codec_version)
+    }
+
+    fn parse_contents(
+        mmap: Arc<Mmap>,
+        header: ValidatedHeader,
+        expected_codec: &str,
+        expected_codec_version: u32,
+    ) -> Result<Self> {
+        let bytes: &[u8] = &mmap;
+        let codec_len = header.codec_len;
         if codec_len > MAX_CODEC_ID_LEN as u64 {
             return Err(Error::InvalidFile("codec identifier is too long"));
         }
-        let codec_offset = header.codec_offset.get();
+        let codec_offset = header.codec_offset;
         let codec_bytes = checked_range(bytes, codec_offset, codec_len)?;
         let actual_codec = std::str::from_utf8(codec_bytes)
             .map_err(|_| Error::InvalidFile("codec identifier is not UTF-8"))?;
@@ -199,7 +242,7 @@ impl PersistedFile {
                 actual: actual_codec.to_owned(),
             });
         }
-        let codec_version = header.codec_version.get();
+        let codec_version = header.codec_version;
         if codec_version != expected_codec_version {
             return Err(Error::CodecVersionMismatch {
                 expected: expected_codec_version,
@@ -207,11 +250,11 @@ impl PersistedFile {
             });
         }
 
-        let section_count = u64::from(header.section_count.get());
+        let section_count = u64::from(header.section_count);
         let table_len = section_count
             .checked_mul(SECTION_ENTRY_LEN as u64)
             .ok_or(Error::InvalidFile("section table length overflows"))?;
-        let section_table_offset = header.section_table_offset.get();
+        let section_table_offset = header.section_table_offset;
         let table = checked_range(bytes, section_table_offset, table_len)?;
         let entries = <[DiskSectionEntry]>::ref_from_bytes(table)
             .map_err(|_| Error::InvalidFile("section table has an invalid length"))?;
@@ -244,7 +287,7 @@ impl PersistedFile {
 
         let file = Self {
             mmap,
-            kind,
+            kind: header.kind,
             sections,
         };
         file.validate_structure()?;
@@ -315,6 +358,8 @@ fn validate_header(header: &DiskHeader, expected_kind: FileKind) -> Result<FileK
     if header.endian_marker.get() != ENDIAN_MARKER {
         return Err(Error::EndiannessMismatch);
     }
+    // Header fields use zerocopy's explicit LE wrappers, while large payload
+    // arrays intentionally use native types for direct slice access in v1.
     if cfg!(target_endian = "big") {
         return Err(Error::UnsupportedHostEndianness);
     }
@@ -614,6 +659,24 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::InvalidFile("recorded file length does not match"))
+        ));
+    }
+
+    #[test]
+    fn open_io_error_identifies_the_file() {
+        let path = std::env::temp_dir().join(format!(
+            "yurine-missing-format-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+
+        assert!(matches!(
+            PersistedFile::open(&path, FileKind::SearchEngine, &CharCodec),
+            Err(Error::Io {
+                path: actual,
+                kind: std::io::ErrorKind::NotFound,
+                ..
+            }) if actual == path
         ));
     }
 

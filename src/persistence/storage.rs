@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -10,6 +11,7 @@ use zerocopy::{FromBytes, Immutable, KnownLayout};
 use crate::errors::{Error, Result};
 
 /// A typed slice backed by one immutable, read-only file mapping.
+#[derive(Debug)]
 pub(crate) struct MappedSlice<T> {
     mmap: Arc<Mmap>,
     pointer: NonNull<T>,
@@ -72,7 +74,9 @@ where
             marker: PhantomData,
         })
     }
+}
 
+impl<T> MappedSlice<T> {
     pub(crate) fn as_slice(&self) -> &[T] {
         // SAFETY: `new` validated the typed slice and stored its pointer and
         // length. The mapping is immutable, has a stable address, and is kept
@@ -81,10 +85,7 @@ where
     }
 }
 
-impl<T> Deref for MappedSlice<T>
-where
-    T: FromBytes + Immutable + KnownLayout,
-{
+impl<T> Deref for MappedSlice<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -93,6 +94,7 @@ where
 }
 
 /// Either an in-memory array or a typed view into an immutable mapping.
+#[derive(Debug)]
 pub(crate) enum Storage<T> {
     Owned(Box<[T]>),
     Mapped(MappedSlice<T>),
@@ -104,10 +106,7 @@ impl<T> From<MappedSlice<T>> for Storage<T> {
     }
 }
 
-impl<T> Storage<T>
-where
-    T: FromBytes + Immutable + KnownLayout,
-{
+impl<T> Storage<T> {
     pub(crate) fn as_slice(&self) -> &[T] {
         match self {
             Self::Owned(values) => values,
@@ -116,10 +115,7 @@ where
     }
 }
 
-impl<T> Deref for Storage<T>
-where
-    T: FromBytes + Immutable + KnownLayout,
-{
+impl<T> Deref for Storage<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -128,8 +124,12 @@ where
 }
 
 /// Maps an immutable snapshot file once for all of its section views.
-pub(crate) fn map_file(file: &File) -> Result<Arc<Mmap>> {
-    if file.metadata()?.len() == 0 {
+pub(crate) fn map_file(file: &File, path: &Path) -> Result<Arc<Mmap>> {
+    let file_len = file
+        .metadata()
+        .map_err(|error| Error::io(path, error))?
+        .len();
+    if file_len == 0 {
         return Err(Error::InvalidFile("file is empty"));
     }
 
@@ -137,7 +137,7 @@ pub(crate) fn map_file(file: &File) -> Result<Arc<Mmap>> {
     // or truncates a published file in place; replacements are published by
     // atomic rename. Callers must uphold the same rule, documented on the
     // persistence module and future open APIs.
-    let mmap = unsafe { MmapOptions::new().map(file)? };
+    let mmap = unsafe { MmapOptions::new().map(file) }.map_err(|error| Error::io(path, error))?;
     Ok(Arc::new(mmap))
 }
 
@@ -150,6 +150,7 @@ mod tests {
 
     use super::{MappedSlice, Storage};
     use crate::errors::Error;
+    use crate::types::Symbol;
 
     fn test_map(bytes: &[u8]) -> Arc<memmap2::Mmap> {
         let mut mmap = MmapOptions::new().len(bytes.len()).map_anon().unwrap();
@@ -169,6 +170,14 @@ mod tests {
         let mapped = Storage::Mapped(mapped);
 
         assert_eq!(owned.as_slice(), mapped.as_slice());
+    }
+
+    #[test]
+    fn owned_storage_does_not_require_zerocopy_traits() {
+        let values = Storage::Owned(vec![Symbol::new(7)].into_boxed_slice());
+
+        assert_eq!(values[0].get(), 7);
+        assert!(format!("{values:?}").contains("Symbol"));
     }
 
     #[test]
@@ -193,7 +202,7 @@ mod tests {
         ));
         fs::write(&path, []).unwrap();
         let file = File::open(&path).unwrap();
-        let result = super::map_file(&file);
+        let result = super::map_file(&file, &path);
         fs::remove_file(path).unwrap();
 
         assert!(matches!(result, Err(Error::InvalidFile("file is empty"))));

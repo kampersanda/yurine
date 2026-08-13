@@ -1,5 +1,9 @@
 //! Error types.
 
+#[cfg(feature = "persist")]
+use std::path::Path;
+use std::path::PathBuf;
+
 use crate::types::{Position, SequenceId};
 
 /// An error type for the library.
@@ -7,8 +11,10 @@ use crate::types::{Position, SequenceId};
 #[non_exhaustive]
 pub enum Error {
     /// An operating-system I/O operation failed.
-    #[error("I/O error ({kind:?}): {message}")]
+    #[error("I/O error for {path:?} ({kind:?}): {message}")]
     Io {
+        /// The file or directory involved in the failed operation.
+        path: PathBuf,
         /// The portable category of the I/O failure.
         kind: std::io::ErrorKind,
         /// The operating-system error message.
@@ -150,9 +156,11 @@ pub enum Error {
     ThresholdSubsequenceUnavailable,
 }
 
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
+impl Error {
+    #[cfg(feature = "persist")]
+    pub(crate) fn io(path: &Path, error: std::io::Error) -> Self {
         Self::Io {
+            path: path.to_owned(),
             kind: error.kind(),
             message: error.to_string(),
         }
@@ -164,15 +172,18 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "persist")]
     use super::Error;
 
     #[test]
-    fn io_conversion_preserves_kind_and_message() {
+    #[cfg(feature = "persist")]
+    fn io_error_preserves_path_kind_and_message() {
         let source = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not allowed");
 
         assert_eq!(
-            Error::from(source),
+            Error::io(std::path::Path::new("index.yurine"), source),
             Error::Io {
+                path: "index.yurine".into(),
                 kind: std::io::ErrorKind::PermissionDenied,
                 message: "not allowed".to_owned(),
             }
