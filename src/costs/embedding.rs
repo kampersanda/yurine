@@ -2,6 +2,7 @@
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 
@@ -10,13 +11,15 @@ use crate::errors::{Error, Result};
 
 /// Stores fixed-dimensional, L2-normalized embeddings by token.
 ///
-/// Embeddings are validated and normalized when inserted, so values returned
-/// by [`EmbeddingStore::get`] are always finite, non-zero unit vectors with the
-/// store's configured dimension.
+/// Embeddings are stored consecutively in insertion order. They are validated
+/// and normalized when inserted, so values returned by [`EmbeddingStore::get`]
+/// are always finite, non-zero unit vectors with the store's configured
+/// dimension.
 #[derive(Debug, Clone)]
 pub struct EmbeddingStore<T> {
     dimension: NonZeroUsize,
-    embeddings: HashMap<T, Box<[f32]>>,
+    embedding_indices: HashMap<T, u32>,
+    embeddings: Vec<f32>,
 }
 
 impl<T> EmbeddingStore<T>
@@ -27,7 +30,8 @@ where
     pub fn new(dimension: NonZeroUsize) -> Self {
         Self {
             dimension,
-            embeddings: HashMap::new(),
+            embedding_indices: HashMap::new(),
+            embeddings: Vec::new(),
         }
     }
 
@@ -72,7 +76,23 @@ where
             *value = (f64::from(*value) / norm) as f32;
         }
 
-        Ok(self.embeddings.insert(token, embedding.into_boxed_slice()))
+        let dimension = self.dimension.get();
+        match self.embedding_indices.entry(token) {
+            Entry::Occupied(entry) => {
+                let start = *entry.get() as usize * dimension;
+                let stored = &mut self.embeddings[start..start + dimension];
+                let previous = stored.to_vec().into_boxed_slice();
+                stored.copy_from_slice(&embedding);
+                Ok(Some(previous))
+            }
+            Entry::Vacant(entry) => {
+                let index = u32::try_from(self.embeddings.len() / dimension)
+                    .expect("number of embeddings exceeds u32::MAX");
+                entry.insert(index);
+                self.embeddings.extend(embedding);
+                Ok(None)
+            }
+        }
     }
 
     /// Returns the normalized embedding registered for `token`.
@@ -81,7 +101,9 @@ where
         T: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.embeddings.get(token).map(Box::as_ref)
+        let index = *self.embedding_indices.get(token)? as usize;
+        let start = index * self.dimension.get();
+        Some(&self.embeddings[start..start + self.dimension.get()])
     }
 
     /// Returns the required number of elements in every embedding.
@@ -91,12 +113,12 @@ where
 
     /// Returns the number of registered tokens.
     pub fn len(&self) -> usize {
-        self.embeddings.len()
+        self.embedding_indices.len()
     }
 
     /// Returns whether the store contains no embeddings.
     pub fn is_empty(&self) -> bool {
-        self.embeddings.is_empty()
+        self.embedding_indices.is_empty()
     }
 }
 
@@ -206,6 +228,22 @@ mod tests {
         assert_eq!(store.get(&'b'), None);
         assert_eq!(store.len(), 1);
         assert!(!store.is_empty());
+    }
+
+    #[test]
+    fn stores_embeddings_in_a_flat_array() {
+        let mut store = EmbeddingStore::new(nonzero(2));
+        store.insert('a', vec![1.0, 0.0]).unwrap();
+        store.insert('b', vec![0.0, 1.0]).unwrap();
+
+        assert_eq!(store.embeddings, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(store.embedding_indices[&'a'], 0);
+        assert_eq!(store.embedding_indices[&'b'], 1);
+
+        store.insert('a', vec![0.0, 1.0]).unwrap();
+
+        assert_eq!(store.embeddings, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(store.embedding_indices[&'a'], 0);
     }
 
     #[test]
