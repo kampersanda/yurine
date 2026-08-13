@@ -2,10 +2,13 @@
 
 use crate::errors::{Error, Result};
 use std::fmt::Display;
+use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// Identifies a data sequence by its insertion order.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromBytes, Immutable, KnownLayout,
+)]
 pub struct SequenceId(u32);
 
 impl SequenceId {
@@ -44,7 +47,9 @@ impl Display for SequenceId {
 /// in a sequence and the corresponding symbol position in its string have the
 /// same numeric value.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromBytes, Immutable, KnownLayout,
+)]
 pub struct Position(u32);
 
 impl Position {
@@ -79,7 +84,7 @@ impl Display for Position {
 
 /// A posting in the corpus, consisting of a string identifier and a symbol position.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, FromBytes, Immutable, KnownLayout)]
 pub(crate) struct Posting {
     pub(crate) string_id: SequenceId,
     pub(crate) position: Position,
@@ -89,7 +94,9 @@ pub(crate) struct Posting {
 ///
 /// A symbol is meaningful only together with the vocabulary that assigned it.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromBytes, Immutable, KnownLayout,
+)]
 pub(crate) struct Symbol(u32);
 
 impl Symbol {

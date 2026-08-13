@@ -6,6 +6,48 @@ use crate::types::{Position, SequenceId};
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// An operating-system I/O operation failed.
+    #[error("I/O error: {0}")]
+    Io(String),
+
+    /// A persisted file is malformed or internally inconsistent.
+    #[error("invalid persisted file: {0}")]
+    InvalidFile(&'static str),
+
+    /// A persisted file uses an unsupported format version.
+    #[error("unsupported format version: {0}")]
+    UnsupportedFormatVersion(u32),
+
+    /// A persisted file was written with a different byte order.
+    #[error("persisted file is not little-endian")]
+    EndiannessMismatch,
+
+    /// This target cannot zero-copy little-endian persisted values.
+    #[error("memory-mapped persistence requires a little-endian target")]
+    UnsupportedHostEndianness,
+
+    /// The supplied token codec does not match the persisted codec.
+    #[error("token codec mismatch: expected {expected}, found {actual}")]
+    CodecMismatch {
+        /// The codec requested by the caller.
+        expected: String,
+        /// The codec recorded in the file.
+        actual: String,
+    },
+
+    /// The supplied token codec version does not match the persisted version.
+    #[error("token codec version mismatch: expected {expected}, found {actual}")]
+    CodecVersionMismatch {
+        /// The version requested by the caller.
+        expected: u32,
+        /// The version recorded in the file.
+        actual: u32,
+    },
+
+    /// A token's persisted bytes are invalid for the selected codec.
+    #[error("invalid token encoding: {0}")]
+    InvalidTokenEncoding(String),
+
     /// The corpus contains too many sequences for a `u32` sequence identifier.
     #[error("sequence identifier exceeds u32")]
     SequenceIdOverflow,
@@ -92,6 +134,12 @@ pub enum Error {
         "a threshold subsequence cannot be constructed; deletion costs may be too small for the threshold"
     )]
     ThresholdSubsequenceUnavailable,
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error.to_string())
+    }
 }
 
 /// A specialized `Result` type for errors.
