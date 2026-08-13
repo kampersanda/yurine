@@ -68,8 +68,8 @@ where
         let mut store_builder = CorpusStoreBuilder::new();
         for (raw_string_id, sequence) in sequences.into_iter().enumerate() {
             let string_id = StringId::from_usize(raw_string_id)?;
-            let symbols = vocabulary.encode(sequence);
-            for (raw_position, symbol) in symbols.iter().copied().enumerate() {
+            let string = vocabulary.encode(sequence);
+            for (raw_position, symbol) in string.iter().copied().enumerate() {
                 index_builder.add_posting(
                     symbol,
                     Posting {
@@ -78,7 +78,7 @@ where
                     },
                 )?;
             }
-            store_builder.add_string(symbols);
+            store_builder.add_string(string);
         }
 
         SearchEngine::from_parts(

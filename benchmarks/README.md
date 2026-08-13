@@ -12,10 +12,11 @@ Generate the default whitespace-tokenized corpus:
 cargo run --release -p yurine-benchmarks -- generate /tmp/yurine-baseline.txt
 ```
 
-The generator uses a fixed seed, 20,000 strings, 32 tokens per string, a
-256-token vocabulary, and an eight-token hot set. Every 128th string starts with
-the default query, so the workload always has known exact matches. Every setting
-can be overridden; rerunning the same command produces identical bytes.
+The generator uses a fixed seed, 20,000 data sequences, 32 tokens per sequence,
+a 256-token vocabulary, and an eight-token hot set. Every 128th sequence starts
+with the default query sequence, so the workload always has known exact matches.
+Every setting can be overridden; rerunning the same command produces identical
+bytes.
 
 Measure construction and one cold plus five warm searches:
 
@@ -50,7 +51,7 @@ threshold one:
 
 ```console
 cargo run --release -p yurine-benchmarks -- generate /tmp/yurine-overlap.txt \
-  --strings 2000 --tokens 32 --vocabulary 32 --hot-vocabulary 4 --seed 1
+  --sequences 2000 --tokens 32 --vocabulary 32 --hot-vocabulary 4 --seed 1
 cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-overlap.txt \
   --threshold 1
 ```

@@ -112,7 +112,7 @@ fn exhaustive_fallback_result_contract_is_stable() {
 }
 
 #[test]
-fn empty_query_error_contract_is_stable() {
+fn empty_query_sequence_error_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new(CompatibilityCosts);
     builder.add_sequence(['a']).unwrap();
     let engine = builder.build().unwrap();

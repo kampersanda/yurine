@@ -31,10 +31,10 @@ impl CorpusStoreBuilder {
 
     /// Adds a data string.
     pub fn add_string(&mut self, string: Vec<Symbol>) {
-        let end = self.symbols.len() as u64 + string.len() as u64;
+        let string_end = self.symbols.len() as u64 + string.len() as u64;
         self.alphabet.extend(string.iter().copied());
         self.symbols.extend(string);
-        self.string_offsets.push(end);
+        self.string_offsets.push(string_end);
     }
 
     /// Finalizes the builder and returns a [`CorpusStore`].

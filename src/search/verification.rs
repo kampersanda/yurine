@@ -23,7 +23,7 @@ impl Verifier {
     /// string ID, then symbol-range start, then symbol-range end.
     pub(in crate::search) fn verify<C>(
         &self,
-        query: &[Symbol],
+        query_string: &[Symbol],
         candidates: &[Candidate],
         corpus: &CorpusStore,
         threshold: Cost,
@@ -34,26 +34,31 @@ impl Verifier {
     {
         match self {
             Self::BidirectionalTrie => {
-                bidirectional_trie::verify(query, candidates, corpus, threshold, costs)
+                bidirectional_trie::verify(query_string, candidates, corpus, threshold, costs)
             }
             Self::SmithWaterman => {
-                smith_waterman::verify(query, candidates, corpus, threshold, costs)
+                smith_waterman::verify(query_string, candidates, corpus, threshold, costs)
             }
         }
     }
 }
 
-fn create_match(string_id: StringId, start: usize, end: usize, distance: Cost) -> Result<Match> {
+fn create_match(
+    string_id: StringId,
+    symbol_start: usize,
+    symbol_end: usize,
+    distance: Cost,
+) -> Result<Match> {
     Ok(Match {
         string_id,
-        token_range: Position::from_usize(start)?..Position::from_usize(end)?,
+        token_range: Position::from_usize(symbol_start)?..Position::from_usize(symbol_end)?,
         distance,
     })
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.
 fn validated_candidate_string<'a>(
-    query: &[Symbol],
+    query_string: &[Symbol],
     candidate: &Candidate,
     corpus: &'a CorpusStore,
 ) -> Result<&'a [Symbol]> {
@@ -68,10 +73,10 @@ fn validated_candidate_string<'a>(
         });
     }
     let query_position = candidate.query_position.as_usize();
-    if query_position >= query.len() {
+    if query_position >= query_string.len() {
         return Err(Error::InvalidQueryPosition {
             position: candidate.query_position,
-            query_len: query.len(),
+            query_len: query_string.len(),
         });
     }
     Ok(string)
@@ -101,15 +106,15 @@ fn add_distance(left: f32, right: f32) -> f32 {
 ///
 /// Internal DP cells use `f32` so accumulation above [`Cost::MAX`] becomes
 /// infinity instead of being confused with an exact, representable maximum.
-fn root_column<C>(query: &[Symbol], costs: &C) -> Vec<f32>
+fn root_column<C>(query_string: &[Symbol], costs: &C) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
-    // `column[r]` is wed(query[..r], empty). Reaching the empty data prefix
-    // requires deleting every symbol in the query prefix.
-    let mut column = Vec::with_capacity(query.len() + 1);
+    // `column[r]` is wed(query_string[..r], empty). Reaching the empty data
+    // prefix requires deleting every symbol in the query-string prefix.
+    let mut column = Vec::with_capacity(query_string.len() + 1);
     column.push(0.0);
-    for query_symbol in query {
+    for query_symbol in query_string {
         column.push(add_distance(
             column.last().copied().unwrap_or(0.0),
             costs.deletion(query_symbol).get(),
@@ -119,24 +124,29 @@ where
 }
 
 /// Advances a weighted-edit-distance column by one data symbol.
-fn step_dp<C>(query: &[Symbol], string_symbol: Symbol, previous: &[f32], costs: &C) -> Vec<f32>
+fn step_dp<C>(
+    query_string: &[Symbol],
+    string_symbol: Symbol,
+    previous: &[f32],
+    costs: &C,
+) -> Vec<f32>
 where
     C: EditCosts<Symbol>,
 {
-    debug_assert_eq!(previous.len(), query.len() + 1);
+    debug_assert_eq!(previous.len(), query_string.len() + 1);
 
     // If `previous[r]` describes a processed data prefix P, `current[r]`
     // describes P followed by `string_symbol`. Row zero therefore inserts the
-    // new data symbol into an empty query.
-    let mut current = Vec::with_capacity(query.len() + 1);
+    // new data symbol into an empty query string.
+    let mut current = Vec::with_capacity(query_string.len() + 1);
     current.push(add_distance(
         previous[0],
         costs.insertion(&string_symbol).get(),
     ));
-    for (query_index, query_symbol) in query.iter().enumerate() {
+    for (query_index, query_symbol) in query_string.iter().enumerate() {
         // The three predecessors consume both symbols, only the string symbol,
         // or only the query symbol, respectively. This fixes the direction as
-        // wed(query, string prefix).
+        // wed(query_string, string prefix).
         let substitution = add_distance(
             previous[query_index],
             costs.substitution(query_symbol, &string_symbol).get(),

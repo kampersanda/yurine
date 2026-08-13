@@ -19,9 +19,9 @@ use crate::types::{Position, Symbol};
 /// but would not change search results.
 ///
 /// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
-/// outside `query`.
+/// outside `query_string`.
 pub(super) fn generate_candidates<C>(
-    query: &[Symbol],
+    query_string: &[Symbol],
     selected: &[Position],
     eta: Cost,
     index: &PostingsIndex,
@@ -35,11 +35,11 @@ where
 
     for selected_position in selected {
         let query_symbol =
-            query
+            query_string
                 .get(selected_position.as_usize())
                 .ok_or(Error::InvalidQueryPosition {
                     position: *selected_position,
-                    query_len: query.len(),
+                    query_len: query_string.len(),
                 })?;
         for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
             for posting in index.postings(neighbor) {
@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_selected_position_outside_the_query() {
+    fn rejects_selected_position_outside_the_query_string() {
         let result = generate_candidates(
             &[Symbol::new(0)],
             &[Position::new(1)],

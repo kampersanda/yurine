@@ -13,7 +13,7 @@ use crate::vocabulary::Vocabulary;
 /// Known tokens use their vocabulary symbols. Query-only tokens use symbols
 /// starting at `vocabulary.len()` and exist only for this search call.
 pub(super) struct EncodedQuery<T> {
-    symbols: Vec<Symbol>,
+    string: Vec<Symbol>,
     // `unknown_tokens[i]` is represented by the temporary symbol whose raw
     // value is `vocabulary.len() + i`.
     unknown_tokens: Vec<T>,
@@ -23,19 +23,19 @@ impl<T> EncodedQuery<T>
 where
     T: Clone + Eq + Hash,
 {
-    pub(super) fn new(tokens: Vec<T>, vocabulary: &Vocabulary<T>) -> Result<Self> {
-        let mut symbols = Vec::with_capacity(tokens.len());
+    pub(super) fn new(query_sequence: Vec<T>, vocabulary: &Vocabulary<T>) -> Result<Self> {
+        let mut query_string = Vec::with_capacity(query_sequence.len());
         let mut unknown_tokens = Vec::new();
         let mut unknown_symbols = HashMap::new();
 
-        for token in tokens {
+        for token in query_sequence {
             let symbol = vocabulary.symbol(&token);
             if symbol.is_unknown() {
                 // Reuse one temporary symbol for repeated occurrences so a
                 // query token keeps a stable identity throughout filtering
                 // and verification.
                 if let Some(symbol) = unknown_symbols.get(&token) {
-                    symbols.push(*symbol);
+                    query_string.push(*symbol);
                 } else {
                     let index = vocabulary
                         .len()
@@ -44,21 +44,21 @@ where
                     let symbol = Symbol::from_usize(index)?;
                     unknown_symbols.insert(token.clone(), symbol);
                     unknown_tokens.push(token);
-                    symbols.push(symbol);
+                    query_string.push(symbol);
                 }
             } else {
-                symbols.push(symbol);
+                query_string.push(symbol);
             }
         }
 
         Ok(Self {
-            symbols,
+            string: query_string,
             unknown_tokens,
         })
     }
 
-    pub(super) fn symbols(&self) -> &[Symbol] {
-        &self.symbols
+    pub(super) fn string(&self) -> &[Symbol] {
+        &self.string
     }
 
     pub(super) fn costs<'a, C>(
@@ -146,10 +146,10 @@ mod tests {
         builder.insert('a');
         let vocabulary = builder.build().unwrap();
 
-        let query = EncodedQuery::new(vec!['x', 'y', 'x'], &vocabulary).unwrap();
+        let encoded_query = EncodedQuery::new(vec!['x', 'y', 'x'], &vocabulary).unwrap();
 
         assert_eq!(
-            query.symbols(),
+            encoded_query.string(),
             [Symbol::new(1), Symbol::new(2), Symbol::new(1)]
         );
     }
@@ -159,8 +159,8 @@ mod tests {
         let mut builder = VocabularyBuilder::new();
         builder.insert('a');
         let vocabulary = builder.build().unwrap();
-        let query = EncodedQuery::new(vec!['a', 'x'], &vocabulary).unwrap();
-        let encoded_costs = query.costs(&vocabulary, &CharacterCosts);
+        let encoded_query = EncodedQuery::new(vec!['a', 'x'], &vocabulary).unwrap();
+        let encoded_costs = encoded_query.costs(&vocabulary, &CharacterCosts);
         let known = Symbol::new(0);
         let query_only = Symbol::new(1);
 

@@ -24,7 +24,8 @@ use tokenization::{CharacterTokenizer, Tokenizer, WhitespaceTokenizer};
 #[command(version)]
 struct Options {
     /// Query source text.
-    query: String,
+    #[arg(value_name = "QUERY")]
+    query_source_text: String,
 
     /// File containing one source text per line; reads standard input if omitted or '-'.
     corpus: Option<PathBuf>,
@@ -64,14 +65,18 @@ fn main() -> ExitCode {
 }
 
 fn run(options: Options) -> Result<()> {
-    let corpus = read_corpus(options.corpus.as_deref())?;
+    let source_texts = read_source_texts(options.corpus.as_deref())?;
     let matches = match options.tokenizer {
-        TokenizerKind::Character => search(&corpus, &options, CharacterTokenizer),
-        TokenizerKind::Whitespace => search(&corpus, &options, WhitespaceTokenizer),
+        TokenizerKind::Character => {
+            search_source_texts(&source_texts, &options, CharacterTokenizer)
+        }
+        TokenizerKind::Whitespace => {
+            search_source_texts(&source_texts, &options, WhitespaceTokenizer)
+        }
     }
     .context("search failed")?;
 
-    write_matches(io::stdout().lock(), &corpus, &matches).context("failed to write results")
+    write_matches(io::stdout().lock(), &source_texts, &matches).context("failed to write results")
 }
 
 fn parse_cost(text: &str) -> Result<Cost, String> {
@@ -90,7 +95,7 @@ fn parse_threshold(text: &str) -> Result<Cost, String> {
     }
 }
 
-fn read_corpus(path: Option<&Path>) -> Result<Vec<String>> {
+fn read_source_texts(path: Option<&Path>) -> Result<Vec<String>> {
     match path {
         Some(path) if path != Path::new("-") => {
             let file = File::open(path)
@@ -106,8 +111,8 @@ fn read_lines(reader: impl BufRead) -> io::Result<Vec<String>> {
     reader.lines().collect()
 }
 
-fn search<T>(
-    corpus: &[String],
+fn search_source_texts<T>(
+    source_texts: &[String],
     options: &Options,
     tokenizer: impl Tokenizer<Token = T>,
 ) -> Result<Vec<LocatedMatch>>
@@ -119,8 +124,8 @@ where
         None => RuntimeCosts::levenshtein(),
     };
     let mut builder = SearchEngineBuilder::new(costs);
-    let mut source_token_ranges = Vec::with_capacity(corpus.len());
-    for source_text in corpus {
+    let mut source_token_ranges = Vec::with_capacity(source_texts.len());
+    for source_text in source_texts {
         let (sequence, ranges): (Vec<_>, Vec<_>) = tokenizer
             .tokenize(source_text)
             .into_iter()
@@ -134,12 +139,12 @@ where
     if let Some(eta) = options.eta {
         params = params.with_eta(eta);
     }
-    let query: Vec<_> = tokenizer
-        .tokenize(&options.query)
+    let query_sequence: Vec<_> = tokenizer
+        .tokenize(&options.query_source_text)
         .into_iter()
         .map(|token| token.value)
         .collect();
-    let matches = engine.range_search(&query, &params)?;
+    let matches = engine.range_search(&query_sequence, &params)?;
     Ok(matches
         .into_iter()
         .map(|matched| locate_match(matched, &source_token_ranges))
@@ -154,21 +159,21 @@ struct LocatedMatch {
 }
 
 fn locate_match(matched: Match, source_token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
-    // Every corpus line is passed to `add_sequence` in order, so `StringId`
+    // Every source text is passed to `add_sequence` in order, so `StringId`
     // indexes `source_token_ranges`. Matches are always non-empty token ranges.
     let ranges = &source_token_ranges[matched.string_id.as_usize()];
-    let start = matched.token_range.start.as_usize();
-    let end = matched.token_range.end.as_usize();
+    let token_start = matched.token_range.start.as_usize();
+    let token_end = matched.token_range.end.as_usize();
     LocatedMatch {
         string_id: matched.string_id,
-        byte_range: ranges[start].start..ranges[end - 1].end,
+        byte_range: ranges[token_start].start..ranges[token_end - 1].end,
         distance: matched.distance,
     }
 }
 
 fn write_matches(
     output: impl Write,
-    corpus: &[String],
+    source_texts: &[String],
     matches: &[LocatedMatch],
 ) -> csv::Result<()> {
     let mut writer = WriterBuilder::new()
@@ -178,14 +183,14 @@ fn write_matches(
         .from_writer(output);
 
     for matched in matches {
-        let source = &corpus[matched.string_id.as_usize()];
-        let text = &source[matched.byte_range.clone()];
+        let source_text = &source_texts[matched.string_id.as_usize()];
+        let matched_text = &source_text[matched.byte_range.clone()];
         writer.write_record([
             matched.string_id.to_string(),
             matched.distance.to_string(),
             matched.byte_range.start.to_string(),
             matched.byte_range.end.to_string(),
-            text.to_owned(),
+            matched_text.to_owned(),
         ])?;
     }
     writer.flush()?;
@@ -203,7 +208,9 @@ mod tests {
     use yurine::costs::Cost;
     use yurine::types::StringId;
 
-    use super::{LocatedMatch, Options, TokenizerKind, read_lines, search, write_matches};
+    use super::{
+        LocatedMatch, Options, TokenizerKind, read_lines, search_source_texts, write_matches,
+    };
     use crate::tokenization::{CharacterTokenizer, WhitespaceTokenizer};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -259,7 +266,7 @@ mod tests {
         assert_eq!(
             options,
             Options {
-                query: "hello world".to_owned(),
+                query_source_text: "hello world".to_owned(),
                 corpus: Some(PathBuf::from("corpus.txt")),
                 threshold: Cost::new_const(1.5),
                 eta: Some(Cost::new_const(0.25)),
@@ -291,15 +298,15 @@ mod tests {
 
     #[test]
     fn reads_one_source_text_per_line() {
-        let corpus = read_lines(Cursor::new("東京\r\n京都\n\n")).unwrap();
-        assert_eq!(corpus, ["東京", "京都", ""]);
+        let source_texts = read_lines(Cursor::new("東京\r\n京都\n\n")).unwrap();
+        assert_eq!(source_texts, ["東京", "京都", ""]);
     }
 
     #[test]
     fn searches_with_character_tokenization() {
-        let corpus = vec!["東京都".to_owned(), "京都市".to_owned()];
+        let source_texts = vec!["東京都".to_owned(), "京都市".to_owned()];
         let options = Options {
-            query: "東京".to_owned(),
+            query_source_text: "東京".to_owned(),
             corpus: None,
             threshold: Cost::ZERO,
             eta: None,
@@ -307,7 +314,7 @@ mod tests {
             costs: None,
         };
 
-        let matches = search(&corpus, &options, CharacterTokenizer).unwrap();
+        let matches = search_source_texts(&source_texts, &options, CharacterTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].string_id.get(), 0);
         assert_eq!(matches[0].byte_range, 0..6);
@@ -315,9 +322,9 @@ mod tests {
 
     #[test]
     fn searches_with_whitespace_tokenization() {
-        let corpus = vec!["new york city".to_owned(), "york new".to_owned()];
+        let source_texts = vec!["new york city".to_owned(), "york new".to_owned()];
         let options = Options {
-            query: "new york".to_owned(),
+            query_source_text: "new york".to_owned(),
             corpus: None,
             threshold: Cost::ZERO,
             eta: None,
@@ -325,7 +332,7 @@ mod tests {
             costs: None,
         };
 
-        let matches = search(&corpus, &options, WhitespaceTokenizer).unwrap();
+        let matches = search_source_texts(&source_texts, &options, WhitespaceTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..8);
     }
@@ -349,7 +356,7 @@ mod tests {
             }"#,
         );
         let options = Options {
-            query: "x".to_owned(),
+            query_source_text: "x".to_owned(),
             corpus: None,
             threshold: Cost::new_const(0.25),
             eta: Some(Cost::new_const(0.25)),
@@ -357,7 +364,8 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["あ".to_owned()], &options, CharacterTokenizer).unwrap();
+        let matches =
+            search_source_texts(&["あ".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
@@ -382,7 +390,7 @@ mod tests {
             }"#,
         );
         let options = Options {
-            query: "colour".to_owned(),
+            query_source_text: "colour".to_owned(),
             corpus: None,
             threshold: Cost::new_const(0.25),
             eta: Some(Cost::new_const(0.25)),
@@ -390,7 +398,9 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["color palette".to_owned()], &options, WhitespaceTokenizer).unwrap();
+        let matches =
+            search_source_texts(&["color palette".to_owned()], &options, WhitespaceTokenizer)
+                .unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..5);
@@ -413,7 +423,7 @@ mod tests {
             }"#,
         );
         let options = Options {
-            query: "x".to_owned(),
+            query_source_text: "x".to_owned(),
             corpus: None,
             threshold: Cost::new_const(0.25),
             eta: Some(Cost::new_const(0.25)),
@@ -421,7 +431,7 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["a".to_owned()], &options, CharacterTokenizer).unwrap();
+        let matches = search_source_texts(&["a".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..1);
@@ -444,7 +454,7 @@ mod tests {
             }"#,
         );
         let options = Options {
-            query: "colour".to_owned(),
+            query_source_text: "colour".to_owned(),
             corpus: None,
             threshold: Cost::new_const(0.25),
             eta: Some(Cost::new_const(0.25)),
@@ -452,7 +462,9 @@ mod tests {
             costs: Some(config),
         };
 
-        let matches = search(&["color palette".to_owned()], &options, WhitespaceTokenizer).unwrap();
+        let matches =
+            search_source_texts(&["color palette".to_owned()], &options, WhitespaceTokenizer)
+                .unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..5);
@@ -461,7 +473,7 @@ mod tests {
 
     #[test]
     fn csv_writer_quotes_tabs_in_output_fields() {
-        let corpus = vec!["a\tb".to_owned()];
+        let source_texts = vec!["a\tb".to_owned()];
         let matches = vec![LocatedMatch {
             string_id: StringId::new(0),
             byte_range: 0..3,
@@ -469,7 +481,7 @@ mod tests {
         }];
         let mut output = Vec::new();
 
-        write_matches(&mut output, &corpus, &matches).unwrap();
+        write_matches(&mut output, &source_texts, &matches).unwrap();
 
         assert_eq!(String::from_utf8(output).unwrap(), "0\t0\t0\t3\t\"a\tb\"\n");
     }

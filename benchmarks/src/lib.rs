@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 
-pub const DEFAULT_QUERY: &str = "t0000 t0001 t0002 t0003";
+pub const DEFAULT_QUERY_SOURCE_TEXT: &str = "t0000 t0001 t0002 t0003";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CorpusConfig {
-    pub strings: usize,
-    pub tokens_per_string: usize,
+    pub sequences: usize,
+    pub tokens_per_sequence: usize,
     pub vocabulary: usize,
     pub hot_vocabulary: usize,
     pub seed: u64,
@@ -14,8 +14,8 @@ pub struct CorpusConfig {
 impl Default for CorpusConfig {
     fn default() -> Self {
         Self {
-            strings: 20_000,
-            tokens_per_string: 32,
+            sequences: 20_000,
+            tokens_per_sequence: 32,
             vocabulary: 256,
             hot_vocabulary: 8,
             seed: 0x59d2_f15d_24b7_3a91,
@@ -45,16 +45,16 @@ impl CorpusConfig {
     }
 }
 
-pub fn write_corpus(mut output: impl Write, config: CorpusConfig) -> io::Result<()> {
+pub fn write_data_sequences(mut output: impl Write, config: CorpusConfig) -> io::Result<()> {
     config.validate()?;
 
     let mut state = config.seed;
-    for string_index in 0..config.strings {
-        for token_index in 0..config.tokens_per_string {
+    for sequence_index in 0..config.sequences {
+        for token_index in 0..config.tokens_per_sequence {
             if token_index != 0 {
                 output.write_all(b" ")?;
             }
-            let token = if string_index % 128 == 0 && token_index < 4 {
+            let token = if sequence_index % 128 == 0 && token_index < 4 {
                 token_index
             } else {
                 let random = next_random(&mut state) as usize;
@@ -83,13 +83,13 @@ fn next_random(state: &mut u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CorpusConfig, write_corpus};
+    use super::{CorpusConfig, write_data_sequences};
 
     #[test]
-    fn synthetic_corpus_is_reproducible() {
+    fn synthetic_data_sequences_are_reproducible() {
         let config = CorpusConfig {
-            strings: 4,
-            tokens_per_string: 6,
+            sequences: 4,
+            tokens_per_sequence: 6,
             vocabulary: 16,
             hot_vocabulary: 4,
             seed: 7,
@@ -97,8 +97,8 @@ mod tests {
         let mut first = Vec::new();
         let mut second = Vec::new();
 
-        write_corpus(&mut first, config).unwrap();
-        write_corpus(&mut second, config).unwrap();
+        write_data_sequences(&mut first, config).unwrap();
+        write_data_sequences(&mut second, config).unwrap();
 
         assert_eq!(first, second);
         assert_eq!(first.iter().filter(|byte| **byte == b'\n').count(), 4);
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_seed() {
-        let result = write_corpus(
+        let result = write_data_sequences(
             Vec::new(),
             CorpusConfig {
                 seed: 0,
@@ -119,8 +119,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_vocabulary_smaller_than_fixed_query() {
-        let result = write_corpus(
+    fn rejects_vocabulary_smaller_than_fixed_query_sequence() {
+        let result = write_data_sequences(
             Vec::new(),
             CorpusConfig {
                 vocabulary: 3,
