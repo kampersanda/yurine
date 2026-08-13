@@ -13,13 +13,14 @@ use yurine::costs::{Cost, levenshtein::LevenshteinCosts};
 use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 
 let mut builder = SearchEngineBuilder::new();
-builder.add_sequence(['東', '京', '都'])?;
+builder.add_sequence(["Jinbocho", "is", "a", "book", "town"])?;
+builder.add_sequence(["Jinbocho", "is", "famous", "for", "curry"])?;
 
 let engine = builder.build()?;
 let matches = engine
     .range_searcher(LevenshteinCosts::new())
     .search(
-        &['東', '京'],
+        &["Jinbocho", "is", "a", "book", "town"],
         &RangeSearchParams::new(Cost::ZERO),
     )?;
 
@@ -59,8 +60,9 @@ The workspace includes the `yurine` command for searching newline-delimited
 text. Run it from the repository with:
 
 ```console
-$ printf '東京都\n京都市\n' | cargo run -p yurine-cli -- '東京'
-0	0	0	6	東京
+$ printf 'Jinbocho is a book town\nJinbocho is famous for curry\n' | \
+    cargo run -p yurine-cli -- --tokenizer whitespace 'Jinbocho is a book town' -
+0	0	0	23	Jinbocho is a book town
 ```
 
 Run `cargo run -p yurine-cli -- --help` for tokenization, thresholds, corpora,

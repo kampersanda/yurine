@@ -11,7 +11,7 @@
 //!
 //! ```
 //! use tempfile::tempdir;
-//! use yurine::persistence::CharCodec;
+//! use yurine::persistence::StringCodec;
 //! use yurine::search::{SearchEngine, SearchEngineBuilder};
 //!
 //! # fn main() -> yurine::errors::Result<()> {
@@ -19,10 +19,10 @@
 //! let path = directory.path().join("index.yurine");
 //!
 //! let mut builder = SearchEngineBuilder::new();
-//! builder.add_sequence(['東', '京'])?;
-//! builder.build()?.save_with(&path, &CharCodec)?;
+//! builder.add_sequence(["Jinbocho", "book", "town", "curry"].map(str::to_owned))?;
+//! builder.build()?.save_with(&path, &StringCodec)?;
 //!
-//! let engine = SearchEngine::open_with(&path, &CharCodec)?;
+//! let engine = SearchEngine::open_with(&path, &StringCodec)?;
 //! engine.verify()?;
 //! # Ok(())
 //! # }

@@ -13,20 +13,20 @@
 //!
 //! # fn main() -> yurine::errors::Result<()> {
 //! let mut builder = SearchEngineBuilder::new();
-//! let tokyo = builder.add_sequence(['東', '京', '都'])?;
-//! builder.add_sequence(['京', '都', '市'])?;
+//! let book_town = builder.add_sequence(["Jinbocho", "is", "a", "book", "town"])?;
+//! builder.add_sequence(["Jinbocho", "is", "famous", "for", "curry"])?;
 //!
 //! let engine = builder.build()?;
 //! let searcher = engine.range_searcher(LevenshteinCosts::new());
 //! let matches = searcher.search(
-//!     &['東', '京'],
+//!     &["Jinbocho", "is", "a", "book", "town"],
 //!     &RangeSearchParams::new(Cost::ZERO),
 //! )?;
 //!
 //! assert_eq!(matches.len(), 1);
-//! assert_eq!(matches[0].sequence_id, tokyo);
+//! assert_eq!(matches[0].sequence_id, book_town);
 //! assert_eq!(matches[0].token_range.start.get(), 0);
-//! assert_eq!(matches[0].token_range.end.get(), 2);
+//! assert_eq!(matches[0].token_range.end.get(), 5);
 //! # Ok(())
 //! # }
 //! ```
