@@ -47,6 +47,7 @@ $ target/release/yurine --help
 - `--eta <NUMBER>` overrides an internal candidate-generation radius. Most
   users should leave it unset; it affects filtering performance, not the
   distance threshold used to verify results.
+- `--timing` reports the elapsed time of each stage on standard error.
 
 Use `--help` for the generated command reference.
 
@@ -85,6 +86,41 @@ Results are headerless, tab-delimited CSV records with these fields:
 
 CSV quoting is applied when a field contains a tab, quote, or newline. Results
 are ordered by sequence ID, start offset, then end offset.
+
+## Timing
+
+`--timing` reports how long each stage took. The report goes to standard error,
+so it never mixes with the results on standard output:
+
+```console
+$ cargo run -p yurine-cli --release -- \
+    --timing \
+    --tokenizer whitespace \
+    --threshold 1 \
+    'book district known for curry' \
+    corpus.txt
+0	1	14	39	book town known for curry
+timing: read=0.097ms costs=0.000ms build=0.064ms search=0.061ms total=0.317ms
+```
+
+| Stage | Covers |
+| --- | --- |
+| `read` | Reading the corpus |
+| `costs` | Loading the `--costs` configuration and its data files |
+| `build` | Tokenizing the corpus and building the index |
+| `search` | Tokenizing the query and searching |
+| `total` | The whole run, including writing the results |
+
+Every stage is always reported, so `costs` is `0.000ms` when `--costs` is
+omitted. Values are always in milliseconds with three decimal places, and the
+difference between `total` and the sum of the stages is output and start-up
+overhead.
+
+Each stage is measured once, without warm-up or repetition, so the numbers vary
+between runs. Build a release binary before comparing them, and use the
+[`benchmarks/`](../benchmarks/) crate for rigorous measurement. When the corpus
+comes from standard input, `read` includes time spent waiting for the upstream
+process.
 
 ## Custom edit costs
 
