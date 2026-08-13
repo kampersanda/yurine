@@ -42,9 +42,10 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error if the supplied vector has the wrong dimension,
-    /// contains a non-finite value, or has zero L2 norm. The store is unchanged
-    /// when validation fails.
+    /// Returns an error if the store cannot represent another embedding index,
+    /// or if the supplied vector has the wrong dimension, contains a non-finite
+    /// value, or has zero L2 norm. The store is unchanged when validation
+    /// fails.
     pub fn insert(
         &mut self,
         token: T,
@@ -87,7 +88,7 @@ where
             }
             Entry::Vacant(entry) => {
                 let index = u32::try_from(self.embeddings.len() / dimension)
-                    .expect("number of embeddings exceeds u32::MAX");
+                    .map_err(|_| Error::EmbeddingIndexOverflow)?;
                 entry.insert(index);
                 self.embeddings.extend(embedding);
                 Ok(None)
