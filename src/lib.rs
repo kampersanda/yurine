@@ -146,3 +146,9 @@ mod storage;
 mod store;
 pub mod types;
 mod vocabulary;
+
+// Keep README examples in the same doctest suite as the public API docs without
+// adding the README itself to the rendered crate documentation.
+#[cfg(all(doctest, feature = "persist"))]
+#[doc = include_str!("../README.md")]
+mod readme {}

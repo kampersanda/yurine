@@ -14,25 +14,28 @@ it does not mean exact string matching.
 use yurine::costs::{Cost, custom::CustomCosts};
 use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 
-let mut builder = SearchEngineBuilder::new();
-let jinbocho = builder.add_sequence([
-    "Jinbocho", "is", "a", "book", "town", "known", "for", "curry",
-])?;
+fn main() -> yurine::errors::Result<()> {
+    let mut builder = SearchEngineBuilder::new();
+    let jinbocho = builder.add_sequence([
+        "Jinbocho", "is", "a", "book", "town", "known", "for", "curry",
+    ])?;
 
-let engine = builder.build()?;
-let mut costs = CustomCosts::default();
-costs.set_substitution("district", "town", Cost::new_const(0.25));
-let matches = engine
-    .range_searcher(costs)
-    .search(
-        &["book", "district", "known", "for", "curry"],
-        &RangeSearchParams::new(Cost::new_const(0.25)),
-    )?;
+    let engine = builder.build()?;
+    let mut costs = CustomCosts::default();
+    costs.set_substitution("district", "town", Cost::new_const(0.25));
+    let matches = engine
+        .range_searcher(costs)
+        .search(
+            &["book", "district", "known", "for", "curry"],
+            &RangeSearchParams::new(Cost::new_const(0.25)),
+        )?;
 
-assert_eq!(matches[0].sequence_id, jinbocho);
-assert_eq!(matches[0].distance, Cost::new_const(0.25));
-assert_eq!(matches[0].token_range.start.get(), 3);
-assert_eq!(matches[0].token_range.end.get(), 8);
+    assert_eq!(matches[0].sequence_id, jinbocho);
+    assert_eq!(matches[0].distance, Cost::new_const(0.25));
+    assert_eq!(matches[0].token_range.start.get(), 3);
+    assert_eq!(matches[0].token_range.end.get(), 8);
+    Ok(())
+}
 ```
 
 The query matches the `book town known for curry` segment rather than the whole
@@ -50,24 +53,27 @@ use yurine::costs::Cost;
 use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
 use yurine::search::{SearchEngineBuilder, range_search::RangeSearchParams};
 
-let mut builder = SearchEngineBuilder::new();
-builder.add_sequence([
-    "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
-])?;
-let engine = builder.build()?;
+fn main() -> yurine::errors::Result<()> {
+    let mut builder = SearchEngineBuilder::new();
+    builder.add_sequence([
+        "Visitors", "enjoy", "bookstores", "and", "curry", "in", "Jinbocho",
+    ])?;
+    let engine = builder.build()?;
 
-let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
-embeddings.insert("bookshops", [1.0, 0.0])?;
-embeddings.insert("bookstores", [0.8, 0.6])?;
-let costs = CosineEmbeddingCosts::new(embeddings.build());
+    let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+    embeddings.insert("bookshops", [1.0, 0.0])?;
+    embeddings.insert("bookstores", [0.8, 0.6])?;
+    let costs = CosineEmbeddingCosts::new(embeddings.build());
 
-let matches = engine.range_searcher(costs).search(
-    &["bookshops", "and", "curry"],
-    &RangeSearchParams::new(Cost::new_const(0.2)),
-)?;
+    let matches = engine.range_searcher(costs).search(
+        &["bookshops", "and", "curry"],
+        &RangeSearchParams::new(Cost::new_const(0.2)),
+    )?;
 
-assert_eq!(matches[0].token_range.start.get(), 2);
-assert_eq!(matches[0].token_range.end.get(), 5);
+    assert_eq!(matches[0].token_range.start.get(), 2);
+    assert_eq!(matches[0].token_range.end.get(), 5);
+    Ok(())
+}
 ```
 
 Here, `bookshops` matches `bookstores` by cosine distance, returning the
@@ -83,12 +89,21 @@ engines, embedding stores, and edit-cost policies:
 use yurine::persistence::StringCodec;
 use yurine::search::{SearchEngine, SearchEngineBuilder};
 
-let mut builder = SearchEngineBuilder::new();
-builder.add_sequence(["Jinbocho", "book", "town"].map(str::to_owned))?;
-builder.build()?.save_with("index.yurine", &StringCodec)?;
+fn main() -> yurine::errors::Result<()> {
+    let path = std::env::temp_dir().join(format!(
+        "yurine-example-{}.index",
+        std::process::id(),
+    ));
+    let mut builder = SearchEngineBuilder::new();
+    builder.add_sequence(["Jinbocho", "book", "town"].map(str::to_owned))?;
+    builder.build()?.save_with(&path, &StringCodec)?;
 
-let engine = SearchEngine::open_with("index.yurine", &StringCodec)?;
-engine.verify()?;
+    let engine = SearchEngine::open_with(&path, &StringCodec)?;
+    engine.verify()?;
+    drop(engine);
+    std::fs::remove_file(path).expect("remove temporary index");
+    Ok(())
+}
 ```
 
 Build with `--features persist`. Opened indexes keep their large corpus and
@@ -112,10 +127,12 @@ Enable all documented persistence APIs with:
 $ cargo doc --no-deps --all-features --open
 ```
 
-Rust Doc examples are tested with `cargo test --doc`. This README intentionally
-keeps its example introductory and does not duplicate detailed API guidance.
-New public behavior and examples should be documented in `src/lib.rs` or on the
-relevant public item so they remain close to the code and can be tested.
+Rust Doc examples are tested with `cargo test --doc`. Run
+`cargo test --doc --all-features` to test the README examples as well, including
+persistence. This README intentionally keeps its examples introductory and does
+not duplicate detailed API guidance. New public behavior and examples should be
+documented in `src/lib.rs` or on the relevant public item so they remain close
+to the code and can be tested.
 
 ## Command-line search
 
