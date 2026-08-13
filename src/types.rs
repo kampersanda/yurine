@@ -6,28 +6,29 @@ use std::fmt::Display;
 /// Identifies a data sequence by its insertion order.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SequenceId(u32);
+pub(crate) struct SequenceId(u32);
 
 impl SequenceId {
     /// Creates an identifier from its zero-based integer representation.
-    pub const fn new(value: u32) -> Self {
+    #[cfg(test)]
+    pub(crate) const fn new(value: u32) -> Self {
         Self(value)
     }
 
     /// Returns the zero-based integer representation.
-    pub const fn get(self) -> u32 {
+    pub(crate) const fn get(self) -> u32 {
         self.0
     }
 
     /// Creates an identifier from a usize value.
-    pub fn from_usize(value: usize) -> Result<Self> {
+    pub(crate) fn from_usize(value: usize) -> Result<Self> {
         u32::try_from(value)
             .map(Self)
             .map_err(|_| Error::SequenceIdOverflow)
     }
 
     /// Returns the identifier as a usize value.
-    pub fn as_usize(self) -> usize {
+    pub(crate) fn as_usize(self) -> usize {
         usize::try_from(self.0).unwrap()
     }
 }
@@ -45,28 +46,28 @@ impl Display for SequenceId {
 /// same numeric value.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Position(u32);
+pub(crate) struct Position(u32);
 
 impl Position {
     /// Creates a position from its zero-based integer representation.
-    pub const fn new(value: u32) -> Self {
+    pub(crate) const fn new(value: u32) -> Self {
         Self(value)
     }
 
     /// Returns the zero-based integer representation.
-    pub const fn get(self) -> u32 {
+    pub(crate) const fn get(self) -> u32 {
         self.0
     }
 
     /// Creates a position from a usize value.
-    pub fn from_usize(value: usize) -> Result<Self> {
+    pub(crate) fn from_usize(value: usize) -> Result<Self> {
         u32::try_from(value)
             .map(Self)
             .map_err(|_| Error::PositionOverflow)
     }
 
     /// Returns the position as a usize value.
-    pub fn as_usize(self) -> usize {
+    pub(crate) fn as_usize(self) -> usize {
         usize::try_from(self.0).unwrap()
     }
 }
@@ -142,7 +143,7 @@ mod tests {
     use crate::errors::Error;
 
     #[test]
-    fn fixed_width_values_round_trip_through_public_representations() {
+    fn fixed_width_values_round_trip_through_primitive_representations() {
         let sequence_id = SequenceId::from_usize(12).unwrap();
         let position = Position::from_usize(34).unwrap();
         let symbol = Symbol::from_usize(56).unwrap();

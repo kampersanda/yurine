@@ -40,7 +40,7 @@ where
             query_string
                 .get(selected_position.as_usize())
                 .ok_or(Error::InvalidQueryPosition {
-                    position: *selected_position,
+                    position: selected_position.as_usize(),
                     query_len: query_string.len(),
                 })?;
         for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(
             result,
             Err(Error::InvalidQueryPosition {
-                position: Position::new(1),
+                position: 1,
                 query_len: 1,
             })
         );

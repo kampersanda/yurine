@@ -17,11 +17,12 @@ use crate::types::{Position, SequenceId, Symbol};
 /// The threshold is inclusive: a result is returned when its distance is less
 /// than or equal to [`Self::threshold`]. Most callers only need [`Self::new`];
 /// [`Self::with_eta`] is a filtering-performance tuning control and does not
-/// change which results are correct.
+/// change which results are correct. Both values must be finite and
+/// non-negative; they are validated when a search starts.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RangeSearchParams {
-    threshold: Cost,
-    eta: Option<Cost>,
+    threshold: f32,
+    eta: Option<f32>,
 }
 
 /// Measurements from the filtering phase of one range search.
@@ -54,7 +55,7 @@ pub struct RangeSearcher<'a, T, C> {
 
 impl RangeSearchParams {
     /// Creates parameters with automatic eta.
-    pub const fn new(threshold: Cost) -> Self {
+    pub const fn new(threshold: f32) -> Self {
         Self {
             threshold,
             eta: None,
@@ -66,18 +67,18 @@ impl RangeSearchParams {
     /// Leave this unset unless profiling shows that the automatic value is a
     /// bottleneck. The radius affects candidate generation, not the distance
     /// threshold used to verify results.
-    pub const fn with_eta(mut self, eta: Cost) -> Self {
+    pub const fn with_eta(mut self, eta: f32) -> Self {
         self.eta = Some(eta);
         self
     }
 
     /// Returns the inclusive distance threshold.
-    pub const fn threshold(&self) -> Cost {
+    pub const fn threshold(&self) -> f32 {
         self.threshold
     }
 
     /// Returns the explicit eta, or `None` when eta is automatic.
-    pub const fn eta(&self) -> Option<Cost> {
+    pub const fn eta(&self) -> Option<f32> {
         self.eta
     }
 }
@@ -143,8 +144,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty query or if the configured costs cannot be
-    /// represented safely by the search algorithm.
+    /// Returns an error for an empty query, invalid parameters, or costs that
+    /// cannot be represented safely by the search algorithm.
     pub fn search(&self, query_sequence: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
         self.search_with_metrics(query_sequence, params)
             .map(|(matches, _)| matches)
@@ -157,11 +158,12 @@ where
         query_sequence: &[T],
         params: &RangeSearchParams,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
+        let threshold = Cost::new(params.threshold)?;
+        let eta = params.eta.map(Cost::new).transpose()?;
         let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.engine.vocabulary)?;
         let costs = encoded_query.costs(&self.engine.vocabulary, &self.costs);
-        let threshold = params.threshold;
         // strict_threshold(threshold)?;
-        let eta = match params.eta {
+        let eta = match eta {
             Some(eta) => eta,
             None => automatic_eta(threshold, encoded_query.string().len())?,
         };
@@ -249,7 +251,7 @@ where
         let string_id = SequenceId::from_usize(raw_id)?;
         let string = corpus
             .string(string_id)?
-            .ok_or(Error::UnknownString(string_id))?;
+            .ok_or(Error::UnknownString(string_id.as_usize()))?;
         if !string.is_empty() {
             candidates.push(Candidate {
                 string_id,
@@ -330,16 +332,16 @@ mod tests {
         SearchEngine::from_parts(vocabulary, index_builder.build(), store_builder.build(2)).unwrap()
     }
 
-    fn expected_matches(distance: Cost) -> Vec<Match> {
+    fn expected_matches(distance: f32) -> Vec<Match> {
         vec![
             Match {
-                sequence_id: SequenceId::new(0),
-                token_range: Position::new(0)..Position::new(1),
+                sequence_id: 0,
+                token_range: 0..1,
                 distance,
             },
             Match {
-                sequence_id: SequenceId::new(1),
-                token_range: Position::new(0)..Position::new(1),
+                sequence_id: 1,
+                token_range: 0..1,
                 distance,
             },
         ]
@@ -350,10 +352,10 @@ mod tests {
         let engine = engine();
         let matches = engine
             .range_searcher(CharacterCosts)
-            .search(&['y'], &RangeSearchParams::new(Cost::new_const(0.4)))
+            .search(&['y'], &RangeSearchParams::new(0.4))
             .unwrap();
 
-        assert_eq!(matches, expected_matches(Cost::new_const(0.4)));
+        assert_eq!(matches, expected_matches(0.4));
     }
 
     #[test]
@@ -361,18 +363,18 @@ mod tests {
         let engine = engine();
         let matches = engine
             .range_searcher(CharacterCosts)
-            .search(&['x', 'a'], &RangeSearchParams::new(Cost::new_const(0.25)))
+            .search(&['x', 'a'], &RangeSearchParams::new(0.25))
             .unwrap();
 
-        assert_eq!(matches, expected_matches(Cost::new_const(0.25)));
+        assert_eq!(matches, expected_matches(0.25));
     }
 
     #[test]
     fn searcher_can_serve_concurrent_queries() {
         let engine = engine();
         let searcher = engine.range_searcher(CharacterCosts);
-        let substitution_params = RangeSearchParams::new(Cost::new_const(0.4));
-        let deletion_params = RangeSearchParams::new(Cost::new_const(0.25));
+        let substitution_params = RangeSearchParams::new(0.4);
+        let deletion_params = RangeSearchParams::new(0.25);
 
         std::thread::scope(|scope| {
             let substitution =
@@ -387,21 +389,21 @@ mod tests {
     #[test]
     fn one_engine_accepts_different_cost_policies() {
         let engine = engine();
-        let params = RangeSearchParams::new(Cost::new_const(0.4));
+        let params = RangeSearchParams::new(0.4);
         let character = engine.range_searcher(CharacterCosts);
         let levenshtein = engine.range_searcher(LevenshteinCosts::new());
 
         assert_eq!(
             character.search(&['y'], &params).unwrap(),
-            expected_matches(Cost::new_const(0.4))
+            expected_matches(0.4)
         );
         assert!(levenshtein.search(&['y'], &params).unwrap().is_empty());
     }
 
     #[test]
     fn parameters_expose_threshold_and_optional_eta() {
-        let threshold = Cost::new_const(0.75);
-        let eta = Cost::new_const(0.25);
+        let threshold = 0.75;
+        let eta = 0.25;
 
         let automatic = RangeSearchParams::new(threshold);
         let explicit = automatic.with_eta(eta);
@@ -410,6 +412,21 @@ mod tests {
         assert_eq!(automatic.eta(), None);
         assert_eq!(explicit.threshold(), threshold);
         assert_eq!(explicit.eta(), Some(eta));
+    }
+
+    #[test]
+    fn rejects_invalid_public_search_parameters() {
+        let engine = engine();
+        let searcher = engine.range_searcher(CharacterCosts);
+
+        assert!(matches!(
+            searcher.search(&['a'], &RangeSearchParams::new(f32::NAN)),
+            Err(Error::InvalidCost(value)) if value.is_nan()
+        ));
+        assert_eq!(
+            searcher.search(&['a'], &RangeSearchParams::new(0.0).with_eta(-1.0)),
+            Err(Error::InvalidCost(-1.0))
+        );
     }
 
     #[test]
@@ -423,10 +440,10 @@ mod tests {
         let engine = engine();
         let matches = engine
             .range_searcher(CharacterCosts)
-            .search(&['x'], &RangeSearchParams::new(Cost::ONE))
+            .search(&['x'], &RangeSearchParams::new(1.0))
             .unwrap();
 
-        assert_eq!(matches, expected_matches(Cost::ONE));
+        assert_eq!(matches, expected_matches(1.0));
     }
 
     #[test]
@@ -434,7 +451,7 @@ mod tests {
         let engine = engine();
         let result = engine
             .range_searcher(CharacterCosts)
-            .search(&[], &RangeSearchParams::new(Cost::ZERO));
+            .search(&[], &RangeSearchParams::new(0.0));
 
         assert_eq!(result, Err(Error::ThresholdSubsequenceUnavailable));
     }
@@ -476,7 +493,7 @@ mod tests {
         let filtered = searcher
             .search(
                 &['x', 'y'],
-                &RangeSearchParams::new(threshold).with_eta(eta),
+                &RangeSearchParams::new(threshold.into()).with_eta(eta.into()),
             )
             .unwrap();
         let exhaustive = verify_exhaustively(
@@ -489,7 +506,7 @@ mod tests {
 
         assert_eq!(filtered, exhaustive);
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].sequence_id, SequenceId::new(0));
-        assert_eq!(filtered[0].token_range, Position::new(0)..Position::new(2));
+        assert_eq!(filtered[0].sequence_id, 0);
+        assert_eq!(filtered[0].token_range, 0..2);
     }
 }

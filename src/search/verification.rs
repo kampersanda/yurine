@@ -7,7 +7,7 @@ use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
-use crate::types::{Position, SequenceId, Symbol};
+use crate::types::{SequenceId, Symbol};
 
 /// Verification algorithm used to check filtering candidates.
 pub(in crate::search) enum Verifier {
@@ -48,12 +48,12 @@ fn create_match(
     symbol_start: usize,
     symbol_end: usize,
     distance: Cost,
-) -> Result<Match> {
-    Ok(Match {
-        sequence_id: string_id,
-        token_range: Position::from_usize(symbol_start)?..Position::from_usize(symbol_end)?,
-        distance,
-    })
+) -> Match {
+    Match {
+        sequence_id: string_id.as_usize(),
+        token_range: symbol_start..symbol_end,
+        distance: distance.into(),
+    }
 }
 
 /// Validates that a candidate's string ID and positions are within bounds.
@@ -64,18 +64,18 @@ fn validated_candidate_string<'a>(
 ) -> Result<&'a [Symbol]> {
     let string = corpus
         .string(candidate.string_id)?
-        .ok_or(Error::UnknownString(candidate.string_id))?;
+        .ok_or(Error::UnknownString(candidate.string_id.as_usize()))?;
     let string_position = candidate.string_position.as_usize();
     if string_position >= string.len() {
         return Err(Error::InvalidStringPosition {
-            position: candidate.string_position,
+            position: string_position,
             string_len: string.len(),
         });
     }
     let query_position = candidate.query_position.as_usize();
     if query_position >= query_string.len() {
         return Err(Error::InvalidQueryPosition {
-            position: candidate.query_position,
+            position: query_position,
             query_len: query_string.len(),
         });
     }
@@ -215,29 +215,29 @@ mod tests {
             matches,
             [
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(1),
-                    distance: Cost::ONE,
+                    sequence_id: 0,
+                    token_range: 0..1,
+                    distance: 1.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(2),
-                    distance: Cost::ONE,
+                    sequence_id: 0,
+                    token_range: 0..2,
+                    distance: 1.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(3),
-                    distance: Cost::ONE,
+                    sequence_id: 0,
+                    token_range: 0..3,
+                    distance: 1.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(1)..Position::new(3),
-                    distance: Cost::ONE,
+                    sequence_id: 0,
+                    token_range: 1..3,
+                    distance: 1.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(2)..Position::new(3),
-                    distance: Cost::ONE,
+                    sequence_id: 0,
+                    token_range: 2..3,
+                    distance: 1.0,
                 },
             ]
         );
@@ -268,14 +268,14 @@ mod tests {
             matches,
             [
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(1),
-                    distance: Cost::ZERO,
+                    sequence_id: 0,
+                    token_range: 0..1,
+                    distance: 0.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(1)..Position::new(2),
-                    distance: Cost::ZERO,
+                    sequence_id: 0,
+                    token_range: 1..2,
+                    distance: 0.0,
                 },
             ]
         );
@@ -299,10 +299,7 @@ mod tests {
             &UnitCosts,
         );
 
-        assert_eq!(
-            result,
-            Err(crate::errors::Error::UnknownString(SequenceId::new(1)))
-        );
+        assert_eq!(result, Err(crate::errors::Error::UnknownString(1)));
     }
 
     #[test]
@@ -326,7 +323,7 @@ mod tests {
         assert_eq!(
             result,
             Err(crate::errors::Error::InvalidStringPosition {
-                position: Position::new(1),
+                position: 1,
                 string_len: 1,
             })
         );
@@ -353,7 +350,7 @@ mod tests {
         assert_eq!(
             result,
             Err(crate::errors::Error::InvalidQueryPosition {
-                position: Position::new(1),
+                position: 1,
                 query_len: 1,
             })
         );

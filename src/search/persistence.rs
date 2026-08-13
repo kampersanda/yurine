@@ -105,7 +105,6 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::costs::Cost;
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::persistence::{CharCodec, TokenCodec};
     use crate::search::SearchEngineBuilder;
@@ -140,7 +139,7 @@ mod tests {
         let owned = engine();
         owned.save_with(&path, &CharCodec).unwrap();
         let mapped = SearchEngine::open_with(&path, &CharCodec).unwrap();
-        let params = RangeSearchParams::new(Cost::ONE);
+        let params = RangeSearchParams::new(1.0);
 
         let owned_matches = owned
             .range_searcher(LevenshteinCosts::new())
@@ -289,7 +288,7 @@ mod tests {
         assert!(matches!(
             mapped
                 .range_searcher(LevenshteinCosts::new())
-                .search(&['a'], &RangeSearchParams::new(Cost::ZERO)),
+                .search(&['a'], &RangeSearchParams::new(0.0)),
             Err(Error::UnknownStringSymbol(u32::MAX))
         ));
     }

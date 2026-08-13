@@ -4,8 +4,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::types::{Position, SequenceId};
-
 /// An error type for the library.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
@@ -130,7 +128,7 @@ pub enum Error {
     #[error("query position {position} is out of bounds for query length {query_len}")]
     InvalidQueryPosition {
         /// The zero-based position supplied by the selector.
-        position: Position,
+        position: usize,
         /// The number of symbols in the query.
         query_len: usize,
     },
@@ -139,14 +137,14 @@ pub enum Error {
     #[error("string position {position} is out of bounds for string length {string_len}")]
     InvalidStringPosition {
         /// The zero-based position supplied by the candidate.
-        position: Position,
+        position: usize,
         /// The number of symbols in the referenced string.
         string_len: usize,
     },
 
     /// A candidate refers to a string that is not present in the corpus.
     #[error("unknown string id: {0}")]
-    UnknownString(SequenceId),
+    UnknownString(usize),
 
     /// No threshold subsequence can be constructed for the query, possibly
     /// because deletion costs are too small for the threshold.

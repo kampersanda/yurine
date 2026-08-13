@@ -197,9 +197,9 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     drop(source_contents);
     let file_backed_rss_after_open = file_backed_rss_bytes();
 
-    let mut params = RangeSearchParams::new(options.threshold);
+    let mut params = RangeSearchParams::new(options.threshold.into());
     if let Some(eta) = options.eta {
-        params = params.with_eta(eta);
+        params = params.with_eta(eta.into());
     }
     let cold_heap_start = reset_heap_peak();
     let engine_resident_heap = cold_heap_start;

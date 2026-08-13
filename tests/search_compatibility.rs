@@ -2,7 +2,6 @@ use yurine::costs::{Cost, EditCosts};
 use yurine::errors::Error;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::search::{SearchEngine, SearchEngineBuilder};
-use yurine::types::{Position, SequenceId};
 
 struct CompatibilityCosts;
 
@@ -56,39 +55,36 @@ fn assert_range_search_result_contract(engine: SearchEngine<char>) {
     let searcher = engine.range_searcher(CompatibilityCosts);
 
     let matches = searcher
-        .search(
-            &['東', '京'],
-            &RangeSearchParams::new(Cost::new_const(0.25)).with_eta(Cost::new_const(0.25)),
-        )
+        .search(&['東', '京'], &RangeSearchParams::new(0.25).with_eta(0.25))
         .unwrap();
 
     assert_eq!(
         matches,
         [
             yurine::search::Match {
-                sequence_id: SequenceId::new(0),
-                token_range: Position::new(1)..Position::new(3),
-                distance: Cost::ZERO,
+                sequence_id: 0,
+                token_range: 1..3,
+                distance: 0.0,
             },
             yurine::search::Match {
-                sequence_id: SequenceId::new(1),
-                token_range: Position::new(0)..Position::new(2),
-                distance: Cost::ZERO,
+                sequence_id: 1,
+                token_range: 0..2,
+                distance: 0.0,
             },
             yurine::search::Match {
-                sequence_id: SequenceId::new(2),
-                token_range: Position::new(0)..Position::new(2),
-                distance: Cost::new_const(0.25),
+                sequence_id: 2,
+                token_range: 0..2,
+                distance: 0.25,
             },
             yurine::search::Match {
-                sequence_id: SequenceId::new(3),
-                token_range: Position::new(0)..Position::new(2),
-                distance: Cost::ZERO,
+                sequence_id: 3,
+                token_range: 0..2,
+                distance: 0.0,
             },
             yurine::search::Match {
-                sequence_id: SequenceId::new(3),
-                token_range: Position::new(2)..Position::new(4),
-                distance: Cost::ZERO,
+                sequence_id: 3,
+                token_range: 2..4,
+                distance: 0.0,
             },
         ]
     );
@@ -104,7 +100,7 @@ fn repeated_postings_report_candidate_count_without_deduplication() {
     let searcher = engine.range_searcher(CompatibilityCosts);
 
     let (_, metrics) = searcher
-        .search_with_metrics(&['a', 'a'], &RangeSearchParams::new(Cost::ONE))
+        .search_with_metrics(&['a', 'a'], &RangeSearchParams::new(1.0))
         .unwrap();
 
     assert_eq!(metrics.selected_query_positions, 2);
@@ -120,16 +116,16 @@ fn exhaustive_fallback_result_contract_is_stable() {
     let searcher = engine.range_searcher(CompatibilityCosts);
 
     let (matches, metrics) = searcher
-        .search_with_metrics(&['a'], &RangeSearchParams::new(Cost::ONE))
+        .search_with_metrics(&['a'], &RangeSearchParams::new(1.0))
         .unwrap();
 
     assert!(metrics.used_exhaustive_verification);
     assert_eq!(
         matches,
         [yurine::search::Match {
-            sequence_id: SequenceId::new(0),
-            token_range: Position::new(0)..Position::new(1),
-            distance: Cost::ZERO,
+            sequence_id: 0,
+            token_range: 0..1,
+            distance: 0.0,
         }]
     );
 }
@@ -144,7 +140,7 @@ fn empty_query_sequence_error_contract_is_stable() {
     // This intentionally fixes the current error variant. Replacing it with a
     // dedicated empty-query error should be treated as an explicit API change.
     assert_eq!(
-        searcher.search(&[], &RangeSearchParams::new(Cost::ZERO)),
+        searcher.search(&[], &RangeSearchParams::new(0.0)),
         Err(Error::ThresholdSubsequenceUnavailable)
     );
 }

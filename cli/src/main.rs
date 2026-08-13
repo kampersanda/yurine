@@ -11,7 +11,6 @@ use csv::{Terminator, WriterBuilder};
 use yurine::costs::Cost;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::search::{Match, SearchEngineBuilder};
-use yurine::types::SequenceId;
 
 mod cost_config;
 mod tokenization;
@@ -135,9 +134,9 @@ where
         source_token_ranges.push(ranges);
     }
     let engine = builder.build()?;
-    let mut params = RangeSearchParams::new(options.threshold);
+    let mut params = RangeSearchParams::new(options.threshold.into());
     if let Some(eta) = options.eta {
-        params = params.with_eta(eta);
+        params = params.with_eta(eta.into());
     }
     let query_sequence: Vec<_> = tokenizer
         .tokenize(&options.query_source_text)
@@ -155,17 +154,17 @@ where
 
 #[derive(Debug, Clone, PartialEq)]
 struct LocatedMatch {
-    sequence_id: SequenceId,
+    sequence_id: usize,
     byte_range: Range<usize>,
-    distance: Cost,
+    distance: f32,
 }
 
 fn locate_match(matched: Match, source_token_ranges: &[Vec<Range<usize>>]) -> LocatedMatch {
-    // Every source text is passed to `add_sequence` in order, so `SequenceId`
+    // Every source text is passed to `add_sequence` in order, so the sequence ID
     // indexes `source_token_ranges`. Matches are always non-empty token ranges.
-    let ranges = &source_token_ranges[matched.sequence_id.as_usize()];
-    let token_start = matched.token_range.start.as_usize();
-    let token_end = matched.token_range.end.as_usize();
+    let ranges = &source_token_ranges[matched.sequence_id];
+    let token_start = matched.token_range.start;
+    let token_end = matched.token_range.end;
     LocatedMatch {
         sequence_id: matched.sequence_id,
         byte_range: ranges[token_start].start..ranges[token_end - 1].end,
@@ -185,7 +184,7 @@ fn write_matches(
         .from_writer(output);
 
     for matched in matches {
-        let source_text = &source_texts[matched.sequence_id.as_usize()];
+        let source_text = &source_texts[matched.sequence_id];
         let matched_text = &source_text[matched.byte_range.clone()];
         writer.write_record([
             matched.sequence_id.to_string(),
@@ -208,7 +207,6 @@ mod tests {
 
     use clap::{CommandFactory, Parser};
     use yurine::costs::Cost;
-    use yurine::types::SequenceId;
 
     use super::{
         LocatedMatch, Options, TokenizerKind, read_lines, search_source_texts, write_matches,
@@ -318,7 +316,7 @@ mod tests {
 
         let matches = search_source_texts(&source_texts, &options, CharacterTokenizer).unwrap();
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].sequence_id.get(), 0);
+        assert_eq!(matches[0].sequence_id, 0);
         assert_eq!(matches[0].byte_range, 0..6);
     }
 
@@ -370,7 +368,7 @@ mod tests {
             search_source_texts(&["あ".to_owned()], &options, CharacterTokenizer).unwrap();
 
         assert_eq!(matches.len(), 1);
-        assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+        assert!((matches[0].distance - 0.2).abs() < 1e-6);
     }
 
     #[test]
@@ -406,7 +404,7 @@ mod tests {
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].byte_range, 0..5);
-        assert!((matches[0].distance.get() - 0.2).abs() < 1e-6);
+        assert!((matches[0].distance - 0.2).abs() < 1e-6);
     }
 
     #[test]
@@ -477,9 +475,9 @@ mod tests {
     fn csv_writer_quotes_tabs_in_output_fields() {
         let source_texts = vec!["a\tb".to_owned()];
         let matches = vec![LocatedMatch {
-            sequence_id: SequenceId::new(0),
+            sequence_id: 0,
             byte_range: 0..3,
-            distance: Cost::ZERO,
+            distance: 0.0,
         }];
         let mut output = Vec::new();
 

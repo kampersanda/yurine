@@ -141,7 +141,7 @@ where
         // error cannot leave misleading partial statistics behind.
         let string = corpus
             .string(candidate.string_id)?
-            .ok_or(Error::UnknownString(candidate.string_id))?;
+            .ok_or(Error::UnknownString(candidate.string_id.as_usize()))?;
         let query_position = candidate.query_position.as_usize();
         let string_position = candidate.string_position.as_usize();
         let anchor_cost = costs
@@ -212,7 +212,12 @@ where
     let matches = substrings
         .into_iter()
         .map(|((string_id, symbol_start, symbol_end), distance)| {
-            create_match(string_id, symbol_start, symbol_end, Cost::new(distance)?)
+            Ok(create_match(
+                string_id,
+                symbol_start,
+                symbol_end,
+                Cost::new(distance)?,
+            ))
         })
         .collect::<Result<Vec<_>>>()?;
 

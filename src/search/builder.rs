@@ -40,11 +40,12 @@ where
     /// Returns [`crate::errors::Error::SequenceIdOverflow`] if the corpus has
     /// too many data sequences or [`crate::errors::Error::PositionOverflow`]
     /// if the sequence is too long.
-    pub fn add_sequence<I>(&mut self, sequence: I) -> Result<SequenceId>
+    pub fn add_sequence<I>(&mut self, sequence: I) -> Result<usize>
     where
         I: IntoIterator<Item = T>,
     {
-        let sequence_id = SequenceId::from_usize(self.sequences.len())?;
+        let sequence_id = self.sequences.len();
+        SequenceId::from_usize(sequence_id)?;
         let sequence: Vec<_> = sequence.into_iter().collect();
         Position::from_usize(sequence.len())?;
         self.sequences.push(sequence);
@@ -105,11 +106,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::SearchEngineBuilder;
-    use crate::costs::Cost;
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::search::Match;
     use crate::search::range_search::RangeSearchParams;
-    use crate::types::{Position, SequenceId};
 
     #[derive(Clone, Eq, Hash, PartialEq)]
     struct TokenWithoutDefault;
@@ -126,7 +125,7 @@ mod tests {
         assert!(
             engine
                 .range_searcher(LevenshteinCosts::new())
-                .search(&['a'], &RangeSearchParams::new(Cost::ZERO))
+                .search(&['a'], &RangeSearchParams::new(0.0))
                 .unwrap()
                 .is_empty()
         );
@@ -136,39 +135,30 @@ mod tests {
     fn preserves_insertion_ordered_ids_for_sequences() {
         let mut builder = SearchEngineBuilder::new();
 
-        assert_eq!(
-            builder.add_sequence(['東', '京']).unwrap(),
-            SequenceId::new(0)
-        );
-        assert_eq!(builder.add_sequence([]).unwrap(), SequenceId::new(1));
-        assert_eq!(
-            builder.add_sequence(['京', '都']).unwrap(),
-            SequenceId::new(2)
-        );
-        assert_eq!(
-            builder.add_sequence(['東', '京']).unwrap(),
-            SequenceId::new(3)
-        );
+        assert_eq!(builder.add_sequence(['東', '京']).unwrap(), 0);
+        assert_eq!(builder.add_sequence([]).unwrap(), 1);
+        assert_eq!(builder.add_sequence(['京', '都']).unwrap(), 2);
+        assert_eq!(builder.add_sequence(['東', '京']).unwrap(), 3);
 
         let matches = builder
             .build()
             .unwrap()
             .range_searcher(LevenshteinCosts::new())
-            .search(&['東', '京'], &RangeSearchParams::new(Cost::ZERO))
+            .search(&['東', '京'], &RangeSearchParams::new(0.0))
             .unwrap();
 
         assert_eq!(
             matches,
             [
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(2),
-                    distance: Cost::ZERO,
+                    sequence_id: 0,
+                    token_range: 0..2,
+                    distance: 0.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(3),
-                    token_range: Position::new(0)..Position::new(2),
-                    distance: Cost::ZERO,
+                    sequence_id: 3,
+                    token_range: 0..2,
+                    distance: 0.0,
                 },
             ]
         );
@@ -183,21 +173,21 @@ mod tests {
             .build()
             .unwrap()
             .range_searcher(LevenshteinCosts::new())
-            .search(&['a', 'a'], &RangeSearchParams::new(Cost::ZERO))
+            .search(&['a', 'a'], &RangeSearchParams::new(0.0))
             .unwrap();
 
         assert_eq!(
             matches,
             [
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(0)..Position::new(2),
-                    distance: Cost::ZERO,
+                    sequence_id: 0,
+                    token_range: 0..2,
+                    distance: 0.0,
                 },
                 Match {
-                    sequence_id: SequenceId::new(0),
-                    token_range: Position::new(1)..Position::new(3),
-                    distance: Cost::ZERO,
+                    sequence_id: 0,
+                    token_range: 1..3,
+                    distance: 0.0,
                 },
             ]
         );
@@ -212,9 +202,9 @@ mod tests {
             .build()
             .unwrap()
             .range_searcher(LevenshteinCosts::new())
-            .search(&[20_u16, 30], &RangeSearchParams::new(Cost::ZERO))
+            .search(&[20_u16, 30], &RangeSearchParams::new(0.0))
             .unwrap();
 
-        assert_eq!(matches[0].token_range, Position::new(1)..Position::new(3));
+        assert_eq!(matches[0].token_range, 1..3);
     }
 }
