@@ -1,15 +1,15 @@
 # Glossary
 
-| Term                      | Definition                                                                                                       |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Token**                 | A value that constitutes a sequence. The smallest unit of comparison and indexing in Yurine.                     |
-| **Sequence**              | A finite sequence of tokens.                                                                                     |
-| **Segment**               | A contiguous, non-empty range of tokens within a single sequence.                                                |
-| **Vocabulary**            | A mapping between vocabulary symbols and the distinct token values that appear in sequences added to the corpus. |
-| **Symbol**                | An integer ID used internally by Yurine to represent a token.                                                    |
-| **String**                | A finite sequence of symbols. Yurine's internal representation of a sequence encoded as symbols.                 |
-| **Substring**             | A contiguous, non-empty range of symbols within a single string.                                                 |
-| **Alphabet**              | The set of symbols contained in a vocabulary.                                                                    |
-| **Data sequence/string**  | A sequence/string registered in the index.                                                                       |
-| **Query sequence/string** | A sequence/string supplied by the caller at search time.                                                         |
-| **Corpus**                | An ordered collection of data strings.                                                                           |
+| Term                      | Definition                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Token**                 | A caller-provided value that Yurine treats as one indivisible unit for comparison and indexing.               |
+| **Sequence**              | A finite, ordered list of tokens.                                                                             |
+| **Segment**               | A non-empty contiguous portion of a sequence, identified by a range of token positions.                       |
+| **Vocabulary**            | The mapping between each distinct token in the data sequences and the symbol assigned to it.                  |
+| **Symbol**                | A compact integer identifier used internally to represent a token; it is meaningful only within its encoding. |
+| **String**                | The internal representation of a sequence as a finite, ordered list of symbols.                               |
+| **Substring**             | A non-empty contiguous portion of a string, identified by a range of symbol positions.                        |
+| **Alphabet**              | The set of distinct symbols occurring in the data strings of a corpus.                                        |
+| **Data sequence/string**  | A sequence submitted for indexing, or the string produced by encoding it.                                     |
+| **Query sequence/string** | A sequence submitted as a search query, or the string produced by encoding it for that search.                |
+| **Corpus**                | The ordered collection of strings produced from indexed data sequences.                                       |
