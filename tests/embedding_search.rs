@@ -2,19 +2,19 @@ use std::num::NonZeroUsize;
 
 use approx::assert_abs_diff_eq;
 use yurine::costs::Cost;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
+use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
 use yurine::search::SearchEngineBuilder;
 use yurine::search::range_search::RangeSearchParams;
 use yurine::types::{Position, SequenceId};
 
 #[test]
 fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
-    let mut embeddings = EmbeddingStore::new(NonZeroUsize::new(2).unwrap());
+    let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
     embeddings.insert('x', vec![1.0, 0.0]).unwrap();
     embeddings.insert('あ', vec![0.8, 0.6]).unwrap();
     embeddings.insert('b', vec![0.0, 1.0]).unwrap();
 
-    let costs = CosineEmbeddingCosts::new(embeddings);
+    let costs = CosineEmbeddingCosts::new(embeddings.build());
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['あ', 'b']).unwrap();
     let engine = builder.build().unwrap();
@@ -31,4 +31,41 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
     assert_eq!(matches[0].sequence_id, SequenceId::new(0));
     assert_eq!(matches[0].token_range, Position::new(0)..Position::new(1));
     assert_abs_diff_eq!(matches[0].distance.get(), 0.2, epsilon = 1e-6);
+}
+
+#[cfg(feature = "persist")]
+#[test]
+fn mapped_embeddings_and_costs_preserve_search_results() {
+    use tempfile::tempdir;
+    use yurine::costs::embedding::EmbeddingStore;
+    use yurine::persistence::CharCodec;
+
+    let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+    embeddings.insert('x', [1.0, 0.0]).unwrap();
+    embeddings.insert('あ', [0.8, 0.6]).unwrap();
+    let embeddings = embeddings.build();
+    let owned_costs = CosineEmbeddingCosts::new(embeddings.clone());
+
+    let directory = tempdir().unwrap();
+    let embedding_path = directory.path().join("embeddings.yurine");
+    let costs_path = directory.path().join("costs.yurine");
+    embeddings.save_with(&embedding_path, &CharCodec).unwrap();
+    owned_costs.save(&costs_path).unwrap();
+    let mapped = EmbeddingStore::open_with(embedding_path, &CharCodec).unwrap();
+    let mapped_costs = CosineEmbeddingCosts::open(costs_path, mapped).unwrap();
+
+    let mut builder = SearchEngineBuilder::new();
+    builder.add_sequence(['あ']).unwrap();
+    let engine = builder.build().unwrap();
+    let params = RangeSearchParams::new(Cost::new_const(0.25));
+    let owned = engine
+        .range_searcher(owned_costs)
+        .search(&['x'], &params)
+        .unwrap();
+    let mapped = engine
+        .range_searcher(mapped_costs)
+        .search(&['x'], &params)
+        .unwrap();
+
+    assert_eq!(mapped, owned);
 }

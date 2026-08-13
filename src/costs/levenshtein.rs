@@ -2,6 +2,9 @@
 
 use super::{Cost, EditCosts};
 
+#[cfg(feature = "persist")]
+mod persistence;
+
 /// Unit costs for the Levenshtein distance.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LevenshteinCosts;

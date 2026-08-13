@@ -5,6 +5,9 @@ use std::hash::Hash;
 
 use super::{Cost, EditCosts};
 
+#[cfg(feature = "persist")]
+mod persistence;
+
 /// Editable costs for weighted edit distance.
 ///
 /// Each operation initially uses its default cost. Token-specific costs can be

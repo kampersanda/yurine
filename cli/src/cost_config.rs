@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use yurine::costs::custom::CustomCosts;
-use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
+use yurine::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore, EmbeddingStoreBuilder};
 use yurine::costs::levenshtein::LevenshteinCosts;
 use yurine::costs::{Cost, EditCosts};
 
@@ -223,7 +223,7 @@ where
                     path.display()
                 )
             })?;
-            store = Some(EmbeddingStore::new(dimension));
+            store = Some(EmbeddingStoreBuilder::new(dimension));
         }
 
         let previous = store
@@ -244,7 +244,9 @@ where
         }
     }
 
-    store.with_context(|| format!("embedding file '{}' is empty", path.display()))
+    store
+        .map(EmbeddingStoreBuilder::build)
+        .with_context(|| format!("embedding file '{}' is empty", path.display()))
 }
 
 fn load_custom_costs<T>(

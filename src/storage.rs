@@ -13,6 +13,16 @@ pub(crate) enum Storage<T> {
     Mapped(MappedSlice<T>),
 }
 
+impl<T: Clone> Clone for Storage<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Owned(values) => Self::Owned(values.clone()),
+            #[cfg(feature = "persist")]
+            Self::Mapped(values) => Self::Mapped(values.clone()),
+        }
+    }
+}
+
 impl<T> Storage<T> {
     /// Returns the values independently of their backing storage.
     pub(crate) fn as_slice(&self) -> &[T] {

@@ -73,6 +73,57 @@ then atomically renames it. Published snapshots must never be modified or
 truncated in place while mapped. On Windows, replacing a snapshot that another
 process has mapped can fail; publish a new path or wait for readers to close it.
 
+### Persistent embeddings and built-in costs
+
+`EmbeddingStore` is immutable. Build one with `EmbeddingStoreBuilder`, then
+save or use it for cosine costs:
+
+```rust
+use std::num::NonZeroUsize;
+use yurine::costs::embedding::{
+    CosineEmbeddingCosts, EmbeddingStore, EmbeddingStoreBuilder,
+};
+use yurine::persistence::CharCodec;
+
+# fn example() -> yurine::errors::Result<()> {
+let mut builder = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
+builder.insert('東', [1.0, 0.0])?;
+let embeddings = builder.build();
+embeddings.save_with("embeddings.yurine", &CharCodec)?;
+
+let mapped = EmbeddingStore::open_with("embeddings.yurine", &CharCodec)?;
+let costs = CosineEmbeddingCosts::new(mapped.clone());
+costs.save("cosine-costs.yurine")?;
+
+let costs = CosineEmbeddingCosts::open("cosine-costs.yurine", mapped)?;
+costs.verify()?;
+# Ok(())
+# }
+```
+
+This replaces the former mutable `EmbeddingStore::new`/`insert` workflow: call
+`EmbeddingStoreBuilder::new`, insert rows, and finish with `build`.
+
+The embedding file stores token offsets/blob, a small dimension record, and a
+contiguous little-endian `f32` matrix. Only the token index is rebuilt in heap
+memory; the matrix remains mmap-backed. Rows are checked for finite, non-zero,
+normalized values on first access, and the result is cached. A damaged row
+behaves as a missing embedding in normal search, while `verify` scans all rows
+and reports the corruption. Call `verify` immediately after opening an
+untrusted embedding snapshot to avoid silently applying the configured
+missing-embedding cost.
+
+Saving retains only encoded token metadata and row indices in memory. Vector
+rows are streamed directly from the existing owned or mmap backing, so saving
+does not materialize a second copy of a multi-gigabyte matrix.
+
+`LevenshteinCosts::save`/`open`, `CustomCosts::save_with`/`open_with`, and
+`CosineEmbeddingCosts::save`/`open` use independent files. Cosine-cost files
+contain only their three constants: callers explicitly supply the separately
+opened embedding store. Custom rules are sorted by encoded token bytes, so the
+same logical policy and codec produce identical files. All persisted cost
+values are decoded as `f32` and validated before becoming `Cost` values.
+
 ## Command-line search
 
 The `yurine-cli` package provides the `yurine` binary. It reads one source text

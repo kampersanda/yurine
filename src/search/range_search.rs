@@ -252,7 +252,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::{MinCandidateSelector, RangeSearchParams, automatic_eta, verify_exhaustively};
-    use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStore};
+    use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
@@ -427,14 +427,14 @@ mod tests {
 
     #[test]
     fn embedding_filter_and_verify_matches_exhaustive_verification() {
-        let mut embeddings = EmbeddingStore::new(NonZeroUsize::new(2).unwrap());
+        let mut embeddings = EmbeddingStoreBuilder::new(NonZeroUsize::new(2).unwrap());
         embeddings.insert('x', vec![0.8, 0.6]).unwrap();
         embeddings.insert('y', vec![0.6, 0.8]).unwrap();
         embeddings.insert('a', vec![1.0, 0.0]).unwrap();
         embeddings.insert('b', vec![0.0, 1.0]).unwrap();
         embeddings.insert('c', vec![-1.0, 0.0]).unwrap();
 
-        let costs = CosineEmbeddingCosts::new(embeddings);
+        let costs = CosineEmbeddingCosts::new(embeddings.build());
         let mut builder = SearchEngineBuilder::new();
         builder.add_sequence(['a', 'b']).unwrap();
         builder.add_sequence(['b', 'a']).unwrap();
