@@ -18,6 +18,10 @@ pub enum Error {
     #[error("symbol exceeds u32")]
     SymbolOverflow,
 
+    /// An embedding store contains too many embeddings for a `u32` index.
+    #[error("embedding index exceeds u32")]
+    EmbeddingIndexOverflow,
+
     /// A string contains a symbol that is not present in its vocabulary.
     #[error("string symbol {0} is not present in the vocabulary")]
     UnknownStringSymbol(Symbol),
