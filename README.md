@@ -16,7 +16,8 @@ Query:                  book district known
 ## Key characteristics
 
 - **Segment search:** finds matching ranges within longer sequences.
-- **Weighted edits:** costs can vary by token, operation, and direction.
+- **Weighted edits:** costs can vary by token, operation, and direction; they
+  need not be symmetric or satisfy the triangle inequality.
 - **Embedding costs:** cosine distance can make semantically related tokens
   with different spellings, such as `literature` and `books`, inexpensive
   substitutions.
