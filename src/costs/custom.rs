@@ -1,7 +1,8 @@
 //! Customizable edit costs.
 
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use hashbrown::HashMap;
 
 use super::{Cost, EditCosts};
 

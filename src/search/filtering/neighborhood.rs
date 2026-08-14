@@ -1,6 +1,6 @@
 //! Substitution neighborhoods.
 
-use std::collections::HashSet;
+use hashbrown::HashSet;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};

@@ -1,11 +1,12 @@
 //! Static token embeddings for edit-cost policies.
 
 use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::OnceLock;
+
+use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 
 use super::{Cost, EditCosts};
 use crate::errors::{Error, Result};
