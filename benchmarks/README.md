@@ -104,7 +104,7 @@ Output is tab-separated `metric`, `value`, and `unit`. It includes:
 - engine-resident heap after releasing the input corpus,
 - whether exhaustive verification was used, selected query positions, and the
   generated candidate count,
-- the number of substitution evaluations one search performs,
+- the number of calls one search makes into the cost policy,
 - the embedding matrix's shape, seed, build time, and heap, under
   `--costs cosine` only.
 
@@ -113,11 +113,16 @@ over few runs drifts with a single outlier, and comparing two implementations by
 means over three runs has already produced a ratio that fifteen runs did not
 confirm. Raise `--warm-runs` when comparing changes rather than reading one run.
 
-`substitution_calls` counts calls into the cost policy for one search. It is the
-direct measure of how much work filtering asks of the vocabulary, so a change
-that removes a redundant scan shows up here without needing a timing. The
-counted search runs after the timed ones and uses a counting wrapper around the
-same policy, so counting never enters a reported duration.
+`substitution_calls` counts every `EditCosts::substitution` call one search
+makes, across both phases: filtering evaluates the vocabulary against each
+query position, and verification evaluates aligned token pairs. It isolates the
+vocabulary scans only on a filtering-dominated workload, such as the rare-token
+query above, where the candidate count is small enough that verification
+contributes little. Read it against `generated_candidates` to tell the two
+apart. A change that removes a redundant scan then shows up here without
+needing a timing. The counted search runs after the timed ones and uses a
+counting wrapper around the same policy, so counting never enters a reported
+duration.
 
 `getrusage` supplies peak RSS on Linux and macOS. It is cumulative within the
 process, so search RSS includes any earlier construction peak. Heap peaks are

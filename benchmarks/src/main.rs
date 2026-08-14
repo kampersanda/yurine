@@ -256,6 +256,10 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     drop(source_texts);
     drop(source_contents);
     let file_backed_rss_after_open = file_backed_rss_bytes();
+    // The engine, plus the embedding matrix under cosine costs, is all that
+    // stays resident here. Sample it before the query sequence and the timing
+    // buffer add anything, so the metric does not grow with `--warm-runs`.
+    let engine_resident_heap = reset_heap_peak();
 
     let mut params = RangeSearchParams::new(options.threshold.into());
     if let Some(eta) = options.eta {
@@ -283,7 +287,6 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         )?,
     };
     let SearchOutcome {
-        engine_resident_heap,
         cold_elapsed,
         cold_heap_start,
         cold_heap_peak,
@@ -399,7 +402,6 @@ fn distinct_tokens(source_texts: &[String]) -> Vec<String> {
 /// Measurements of one cold search, `warm_runs` warm searches, and one counted
 /// search.
 struct SearchOutcome {
-    engine_resident_heap: usize,
     cold_elapsed: Duration,
     cold_heap_start: usize,
     cold_heap_peak: usize,
@@ -438,7 +440,6 @@ where
     let searcher = engine.range_searcher(BorrowedCosts(costs));
 
     let cold_heap_start = reset_heap_peak();
-    let engine_resident_heap = cold_heap_start;
     let cold_start = Instant::now();
     let (cold_matches, metrics) = searcher.search_with_metrics(query_sequence, params)?;
     let cold_elapsed = cold_start.elapsed();
@@ -472,7 +473,6 @@ where
     let warm_total: Duration = warm_samples.iter().sum();
     warm_samples.sort_unstable();
     Ok(SearchOutcome {
-        engine_resident_heap,
         cold_elapsed,
         cold_heap_start,
         cold_heap_peak,
@@ -480,7 +480,7 @@ where
         file_backed_rss_after_cold,
         cold_match_count,
         warm_mean_elapsed: warm_total / warm_runs as u32,
-        warm_median_elapsed: warm_samples[warm_samples.len() / 2],
+        warm_median_elapsed: median(&warm_samples),
         warm_min_elapsed: warm_samples[0],
         warm_heap_start,
         warm_heap_peak,
@@ -490,6 +490,17 @@ where
         substitution_calls: substitution_calls.get(),
         metrics,
     })
+}
+
+/// Returns the median of ascending `samples`, averaging the two central ones
+/// for an even count.
+fn median(samples: &[Duration]) -> Duration {
+    let middle = samples.len() / 2;
+    if samples.len().is_multiple_of(2) {
+        (samples[middle - 1] + samples[middle]) / 2
+    } else {
+        samples[middle]
+    }
 }
 
 /// Lends one cost policy to a searcher, which owns whatever it is given.
@@ -612,10 +623,11 @@ fn peak_rss_bytes() -> u64 {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::time::Duration;
 
     use clap::{CommandFactory, Parser};
 
-    use super::{Command, CostsPolicy, GenerateOptions, Options, generate};
+    use super::{Command, CostsPolicy, GenerateOptions, Options, generate, median};
     use yurine::costs::Cost;
     use yurine_benchmarks::{CorpusConfig, DEFAULT_QUERY_SOURCE_TEXT, EmbeddingConfig};
 
@@ -686,6 +698,15 @@ mod tests {
             panic!("expected measure command");
         };
         assert_eq!(automatic.eta, None);
+    }
+
+    #[test]
+    fn median_averages_the_two_central_samples_of_an_even_count() {
+        let samples: Vec<_> = [10, 20, 30, 50].map(Duration::from_nanos).to_vec();
+
+        assert_eq!(median(&samples), Duration::from_nanos(25));
+        assert_eq!(median(&samples[..3]), Duration::from_nanos(20));
+        assert_eq!(median(&samples[..1]), Duration::from_nanos(10));
     }
 
     #[test]
