@@ -23,12 +23,15 @@ have unit cost.
 
 ```console
 yurine index [OPTIONS] <INDEX> [CORPUS]
+yurine costs [OPTIONS] <COSTS> <SNAPSHOT>
 yurine search [OPTIONS] <INDEX> <QUERY>
 ```
 
 `INDEX` is the index directory: `index` creates it, and `search` reads it.
 `CORPUS` is a file containing one source text per line; when it is omitted or
 is `-`, `index` reads standard input. `QUERY` is the text to search for.
+`COSTS` is a cost configuration, and `SNAPSHOT` the directory `costs` compiles
+it into.
 
 To build a standalone binary:
 
@@ -43,18 +46,26 @@ $ target/release/yurine --help
   `character`.
 - `--timing` reports the elapsed time of each stage on standard error.
 
+### `costs` options
+
+- `--tokenizer character|whitespace` selects the tokenization the snapshot is
+  compiled for. It defaults to `character` and must match the index the
+  snapshot is searched with.
+- `--timing` reports the elapsed time of each stage on standard error.
+
 ### `search` options
 
 - `-t, --threshold <NUMBER>` sets the inclusive maximum edit distance. It
   defaults to `0`.
-- `--costs <FILE>` loads a custom or embedding-based cost policy.
+- `--costs <PATH>` loads a custom or embedding-based cost policy, either from a
+  configuration file or from a snapshot directory built by `costs`.
 - `--eta <NUMBER>` overrides an internal candidate-generation radius. Most
   users should leave it unset; it affects filtering performance, not the
   distance threshold used to verify results.
-- `--verify` checks the internal integrity of `engine.yurine` before searching
-  it, reading the whole file. It does not check the stored source texts, so a
-  reported match is quoted as stored even if `sources.txt` no longer agrees
-  with the search index.
+- `--verify` checks the internal integrity of `engine.yurine` and of the edit
+  costs before searching, reading the whole file in both cases. It does not
+  check the stored source texts, so a reported match is quoted as stored even
+  if `sources.txt` no longer agrees with the search index.
 - `--timing` reports the elapsed time of each stage on standard error.
 
 There is no `--tokenizer` option on `search`. The query is tokenized with the
@@ -104,6 +115,42 @@ the previous index usable. Its `.tmp` files stay behind and are reused by the
 next run. Do not rebuild an index while it is being searched, because a search
 maps `engine.yurine` for as long as it runs.
 
+## Cost snapshot directory
+
+A cost configuration is parsed on every search, which dominates the run time
+once the policy covers a large vocabulary. `yurine costs` parses it once and
+writes the result in the same persisted form the index uses, so a search opens
+it instead:
+
+```console
+$ cargo run -p yurine-cli --release -- costs --tokenizer whitespace \
+    costs.json costs.snapshot
+$ cargo run -p yurine-cli --release -- search --timing \
+    --costs costs.snapshot --threshold 0.2 corpus.index 'literature and curry'
+```
+
+| File | Contents |
+| --- | --- |
+| `metadata.json` | Format version, cost policy kind, and tokenizer |
+| `costs.yurine` | The cost policy |
+| `store.yurine` | The embeddings, memory-mapped when searching; embedding policies only |
+
+A snapshot is independent of any index: one policy can be used with several
+indexes, and one index with several policies. Only the tokenizer has to agree,
+because it decides how the tokens of a configuration are read, and a search
+rejects a snapshot compiled for a different one.
+
+Like an index, a snapshot is immutable and is replaced by recompiling the
+configuration. The files are written under temporary names, ending in `.tmp`,
+and are only put in place once all of them have been written; `metadata.json`,
+without which the other files are not read, is replaced last. A run that fails
+while reading its configuration or writing the cost files therefore leaves the
+previous snapshot usable. Do not recompile a snapshot while it is being
+searched, because a search maps `store.yurine` for as long as it runs.
+
+Searching with a configuration file keeps working, so a snapshot is worth
+building only for a policy that is searched more than once.
+
 ## Output
 
 Results are headerless, tab-delimited CSV records with these fields:
@@ -129,6 +176,10 @@ $ cargo run -p yurine-cli --release -- index --timing \
     --tokenizer whitespace corpus.index corpus.txt
 timing: read=0.403ms build=0.103ms save=8.422ms total=9.072ms
 
+$ cargo run -p yurine-cli --release -- costs --timing \
+    --tokenizer whitespace costs.json costs.snapshot
+timing: read=0.337ms save=15.708ms total=16.101ms
+
 $ cargo run -p yurine-cli --release -- search --timing \
     --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
@@ -141,8 +192,11 @@ timing: open=0.162ms costs=0.000ms search=0.050ms total=0.254ms
 | `index` | `build` | Building the index |
 | `index` | `save` | Writing the index and its metadata |
 | `index` | `total` | The whole run |
+| `costs` | `read` | Reading the cost configuration and its data files |
+| `costs` | `save` | Writing the snapshot and its metadata |
+| `costs` | `total` | The whole run |
 | `search` | `open` | Reading the metadata and opening the index, including `--verify` |
-| `search` | `costs` | Loading the `--costs` configuration and its data files |
+| `search` | `costs` | Loading `--costs`, whether a configuration or a snapshot, including `--verify` |
 | `search` | `search` | Tokenizing the query and searching |
 | `search` | `total` | The whole run, including writing the results |
 
@@ -262,8 +316,8 @@ fields default to `1.0`.
 Paths in a cost configuration are resolved relative to that configuration
 file, not the current working directory.
 
-Cost policies are loaded on every search. Only the index is prebuilt, so a
-large embedding file is read again for each query.
+A cost configuration is read on every search, so compile a large embedding file
+into a [cost snapshot](#cost-snapshot-directory) once and search that instead.
 
 ## Preparing corpora and embeddings
 

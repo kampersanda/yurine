@@ -28,6 +28,24 @@ impl<T> RuntimeCosts<T> {
     }
 }
 
+impl<T> RuntimeCosts<T>
+where
+    T: Eq + Hash,
+{
+    /// Fully validates the cost policy, as a search index is validated.
+    ///
+    /// Costs built from a configuration are validated as they are read, so
+    /// this only rejects a snapshot that was corrupted after it was written.
+    pub(crate) fn verify(&self) -> Result<()> {
+        match self {
+            Self::Levenshtein(costs) => costs.verify(),
+            Self::Embedding(costs) => costs.verify(),
+            Self::Custom(costs) => costs.verify(),
+        }
+        .context("the edit costs are invalid")
+    }
+}
+
 impl<T> EditCosts<T> for RuntimeCosts<T>
 where
     T: Eq + Hash,

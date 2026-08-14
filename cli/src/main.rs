@@ -13,6 +13,7 @@ use yurine::persistence::{CharCodec, StringCodec, TokenCodec};
 use yurine::{Cost, Match, RangeSearchParams, SearchEngine, SearchEngineBuilder};
 
 mod cost_config;
+mod cost_snapshot;
 mod index;
 mod tokenization;
 
@@ -32,6 +33,8 @@ struct Options {
 enum Command {
     /// Build a reusable index from newline-delimited source texts.
     Index(IndexOptions),
+    /// Compile an edit-cost configuration into a reusable snapshot.
+    Costs(CostsOptions),
     /// Search a prebuilt index.
     Search(SearchOptions),
 }
@@ -58,6 +61,27 @@ struct IndexOptions {
 }
 
 #[derive(Debug, Args, PartialEq)]
+struct CostsOptions {
+    /// JSON file describing the edit-cost policy.
+    #[arg(value_name = "COSTS")]
+    costs: PathBuf,
+
+    /// Directory to write the snapshot to; created if it does not exist.
+    #[arg(value_name = "SNAPSHOT")]
+    snapshot: PathBuf,
+
+    /// Tokenization of the indexes the snapshot is searched with.
+    #[arg(long, value_enum, default_value_t = TokenizerKind::Character)]
+    tokenizer: TokenizerKind,
+
+    /// Report the elapsed time of each stage on standard error.
+    ///
+    /// Each stage is measured once, without warm-up or repetition.
+    #[arg(long)]
+    timing: bool,
+}
+
+#[derive(Debug, Args, PartialEq)]
 struct SearchOptions {
     /// Directory holding an index built by the 'index' command.
     #[arg(value_name = "INDEX")]
@@ -75,11 +99,13 @@ struct SearchOptions {
     #[arg(long, value_parser = parse_cost)]
     eta: Option<Cost>,
 
-    /// JSON file describing the edit-cost policy.
+    /// JSON file describing the edit-cost policy, or a snapshot directory
+    /// built by the 'costs' command.
     #[arg(long)]
     costs: Option<PathBuf>,
 
-    /// Check the internal integrity of the search index before searching it.
+    /// Check the internal integrity of the search index and the edit costs
+    /// before searching.
     ///
     /// The stored source texts are not checked, so a match is reported as
     /// stored even if they no longer agree with the search index.
@@ -96,6 +122,7 @@ struct SearchOptions {
 fn main() -> ExitCode {
     let result = match Options::parse().command {
         Command::Index(options) => run_index(&options),
+        Command::Costs(options) => run_costs(&options),
         Command::Search(options) => run_search(&options),
     };
     match result {
@@ -118,6 +145,21 @@ fn run_index(options: &IndexOptions) -> Result<()> {
     if options.timing {
         timings.total = started.elapsed();
         write_index_timings(io::stderr().lock(), &timings).context("failed to write timings")?;
+    }
+    Ok(())
+}
+
+fn run_costs(options: &CostsOptions) -> Result<()> {
+    let started = Instant::now();
+    let mut timings = match options.tokenizer {
+        TokenizerKind::Character => build_costs(options, CharacterTokenizer, &CharCodec),
+        TokenizerKind::Whitespace => build_costs(options, WhitespaceTokenizer, &StringCodec),
+    }
+    .context("failed to build the cost snapshot")?;
+
+    if options.timing {
+        timings.total = started.elapsed();
+        write_costs_timings(io::stderr().lock(), &timings).context("failed to write timings")?;
     }
     Ok(())
 }
@@ -196,6 +238,35 @@ where
     Ok(timings)
 }
 
+fn build_costs<T, C>(
+    options: &CostsOptions,
+    tokenizer: impl Tokenizer<Token = T>,
+    codec: &C,
+) -> Result<CostsTimings>
+where
+    T: Clone + Eq + Hash,
+    C: TokenCodec<T>,
+{
+    let directory = options.snapshot.as_path();
+    std::fs::create_dir_all(directory).with_context(|| {
+        format!(
+            "failed to create cost snapshot directory '{}'",
+            directory.display()
+        )
+    })?;
+
+    let read_start = Instant::now();
+    let mut timings = CostsTimings::default();
+    let costs = cost_config::load(&options.costs, &tokenizer)?;
+    timings.read = read_start.elapsed();
+
+    let save_start = Instant::now();
+    cost_snapshot::save(directory, &costs, options.tokenizer, codec)?;
+    timings.save = save_start.elapsed();
+
+    Ok(timings)
+}
+
 fn read_corpus(path: Option<&Path>) -> Result<Box<dyn BufRead>> {
     match path {
         Some(path) if path != Path::new("-") => {
@@ -213,18 +284,10 @@ fn find_matches(options: &SearchOptions) -> Result<(Vec<LocatedMatch>, SearchTim
     let metadata_elapsed = metadata_start.elapsed();
 
     let (matches, mut timings) = match metadata.tokenizer {
-        TokenizerKind::Character => search_index(
-            options,
-            metadata.sequence_count,
-            CharacterTokenizer,
-            &CharCodec,
-        ),
-        TokenizerKind::Whitespace => search_index(
-            options,
-            metadata.sequence_count,
-            WhitespaceTokenizer,
-            &StringCodec,
-        ),
+        TokenizerKind::Character => search_index(options, metadata, CharacterTokenizer, &CharCodec),
+        TokenizerKind::Whitespace => {
+            search_index(options, metadata, WhitespaceTokenizer, &StringCodec)
+        }
     }?;
     timings.open += metadata_elapsed;
     Ok((matches, timings))
@@ -232,7 +295,7 @@ fn find_matches(options: &SearchOptions) -> Result<(Vec<LocatedMatch>, SearchTim
 
 fn search_index<T, C>(
     options: &SearchOptions,
-    sequence_count: usize,
+    metadata: index::Metadata,
     tokenizer: impl Tokenizer<Token = T>,
     codec: &C,
 ) -> Result<(Vec<LocatedMatch>, SearchTimings)>
@@ -248,14 +311,20 @@ where
     if options.verify {
         engine.verify()?;
     }
-    let mut sources = SourceReader::open(directory, sequence_count)?;
+    let mut sources = SourceReader::open(directory, metadata.sequence_count)?;
     timings.open = open_start.elapsed();
 
+    // A snapshot is a directory, a configuration a file, so the two forms of
+    // '--costs' are told apart without a second option.
     let costs_start = Instant::now();
     let costs = match &options.costs {
+        Some(path) if path.is_dir() => cost_snapshot::open(path, metadata.tokenizer, codec)?,
         Some(path) => cost_config::load(path, &tokenizer)?,
         None => RuntimeCosts::levenshtein(),
     };
+    if options.verify {
+        costs.verify()?;
+    }
     timings.costs = costs_start.elapsed();
 
     let search_start = Instant::now();
@@ -289,6 +358,17 @@ struct IndexTimings {
     total: Duration,
 }
 
+/// Elapsed time of each stage of building a cost snapshot.
+///
+/// `total` is measured by the caller because it covers work outside the build
+/// itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CostsTimings {
+    read: Duration,
+    save: Duration,
+    total: Duration,
+}
+
 /// Elapsed time of each stage of a single search.
 ///
 /// `total` is measured by the caller because it covers work outside the search
@@ -307,6 +387,16 @@ fn write_index_timings(mut output: impl Write, timings: &IndexTimings) -> io::Re
         "timing: read={} build={} save={} total={}",
         format_milliseconds(timings.read),
         format_milliseconds(timings.build),
+        format_milliseconds(timings.save),
+        format_milliseconds(timings.total),
+    )
+}
+
+fn write_costs_timings(mut output: impl Write, timings: &CostsTimings) -> io::Result<()> {
+    writeln!(
+        output,
+        "timing: read={} save={} total={}",
+        format_milliseconds(timings.read),
         format_milliseconds(timings.save),
         format_milliseconds(timings.total),
     )
@@ -413,9 +503,9 @@ mod tests {
     use yurine::costs::Cost;
 
     use super::{
-        Command, IndexOptions, IndexTimings, LocatedMatch, Options, SearchOptions, SearchTimings,
-        TokenizerKind, find_matches, run_index, write_index_timings, write_matches,
-        write_search_timings,
+        Command, CostsOptions, CostsTimings, IndexOptions, IndexTimings, LocatedMatch, Options,
+        SearchOptions, SearchTimings, TokenizerKind, find_matches, run_costs, run_index,
+        write_costs_timings, write_index_timings, write_matches, write_search_timings,
     };
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -466,6 +556,19 @@ mod tests {
         })
         .unwrap();
         index
+    }
+
+    /// Compiles a cost configuration into a snapshot and returns its path.
+    fn build_costs(directory: &TestDirectory, tokenizer: TokenizerKind, costs: PathBuf) -> PathBuf {
+        let snapshot = directory.path().join("costs-snapshot");
+        run_costs(&CostsOptions {
+            costs,
+            snapshot: snapshot.clone(),
+            tokenizer,
+            timing: false,
+        })
+        .unwrap();
+        snapshot
     }
 
     fn search_options(index: PathBuf, query_source_text: &str, threshold: Cost) -> SearchOptions {
@@ -542,6 +645,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_costs_options() {
+        let options = Options::try_parse_from([
+            "yurine",
+            "costs",
+            "--tokenizer",
+            "whitespace",
+            "--timing",
+            "costs.json",
+            "costs-snapshot",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            options.command,
+            Command::Costs(CostsOptions {
+                costs: PathBuf::from("costs.json"),
+                snapshot: PathBuf::from("costs-snapshot"),
+                tokenizer: TokenizerKind::Whitespace,
+                timing: true,
+            })
+        );
+    }
+
+    #[test]
     fn optional_flags_default_to_disabled() {
         let options = Options::try_parse_from(["yurine", "search", "index-directory", "query"])
             .unwrap()
@@ -565,6 +692,8 @@ mod tests {
         assert!(Options::try_parse_from(["yurine"]).is_err());
         assert!(Options::try_parse_from(["yurine", "query"]).is_err());
         assert!(Options::try_parse_from(["yurine", "index"]).is_err());
+        assert!(Options::try_parse_from(["yurine", "costs"]).is_err());
+        assert!(Options::try_parse_from(["yurine", "costs", "costs.json"]).is_err());
         assert!(Options::try_parse_from(["yurine", "search", "index-directory"]).is_err());
         assert!(
             Options::try_parse_from(["yurine", "search", "--tokenizer", "character", "i", "q"])
@@ -826,6 +955,124 @@ mod tests {
     }
 
     #[test]
+    fn a_cost_snapshot_searches_like_its_configuration() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "embeddings.jsonl",
+            concat!(
+                "{\"token\":\"x\",\"embedding\":[1.0,0.0]}\n",
+                "{\"token\":\"あ\",\"embedding\":[0.8,0.6]}\n"
+            ),
+        );
+        let costs = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "embedding",
+                "embeddings": {"path": "embeddings.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let index = build_index(&directory, TokenizerKind::Character, &["あ"]);
+        let snapshot = build_costs(&directory, TokenizerKind::Character, costs.clone());
+
+        let (configured, _) = find_matches(&SearchOptions {
+            eta: Some(Cost::new_const(0.25)),
+            costs: Some(costs),
+            ..search_options(index.clone(), "x", Cost::new_const(0.25))
+        })
+        .unwrap();
+        let (compiled, _) = find_matches(&SearchOptions {
+            eta: Some(Cost::new_const(0.25)),
+            costs: Some(snapshot),
+            verify: true,
+            ..search_options(index, "x", Cost::new_const(0.25))
+        })
+        .unwrap();
+
+        assert_eq!(configured.len(), 1);
+        assert_eq!(compiled, configured);
+    }
+
+    #[test]
+    fn a_custom_cost_snapshot_searches_like_its_configuration() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "rules.jsonl",
+            "{\"operation\":\"substitution\",\"from\":\"colour\",\"to\":\"color\",\"cost\":0.25}\n",
+        );
+        let costs = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "custom",
+                "rules": {"path": "rules.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let index = build_index(&directory, TokenizerKind::Whitespace, &["color palette"]);
+        let snapshot = build_costs(&directory, TokenizerKind::Whitespace, costs);
+
+        let (matches, _) = find_matches(&SearchOptions {
+            eta: Some(Cost::new_const(0.25)),
+            costs: Some(snapshot),
+            ..search_options(index, "colour", Cost::new_const(0.25))
+        })
+        .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].byte_range, 0..5);
+        assert_eq!(matches[0].distance, 0.25);
+    }
+
+    #[test]
+    fn searching_rejects_a_snapshot_tokenized_unlike_the_index() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "rules.jsonl",
+            "{\"operation\":\"deletion\",\"token\":\"a\",\"cost\":0.25}\n",
+        );
+        let costs = directory.write(
+            "costs.json",
+            r#"{
+                "version": 1,
+                "type": "custom",
+                "rules": {"path": "rules.jsonl", "format": "jsonl"}
+            }"#,
+        );
+        let index = build_index(&directory, TokenizerKind::Whitespace, &["a b"]);
+        let snapshot = build_costs(&directory, TokenizerKind::Character, costs);
+
+        let error = find_matches(&SearchOptions {
+            costs: Some(snapshot),
+            ..search_options(index, "a", Cost::ZERO)
+        })
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("uses the character tokenizer"));
+        assert!(message.contains("the index uses whitespace"));
+    }
+
+    #[test]
+    fn building_a_snapshot_reports_an_invalid_configuration() {
+        let directory = TestDirectory::new();
+        let costs = directory.write("costs.json", "not json");
+
+        let error = run_costs(&CostsOptions {
+            costs,
+            snapshot: directory.path().join("costs-snapshot"),
+            tokenizer: TokenizerKind::Character,
+            timing: false,
+        })
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to build the cost snapshot")
+        );
+    }
+
+    #[test]
     fn csv_writer_quotes_tabs_in_output_fields() {
         let matches = vec![LocatedMatch {
             sequence_id: 0,
@@ -855,6 +1102,23 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "timing: read=12.345ms build=234.000ms save=1.234ms total=2000.000ms\n"
+        );
+    }
+
+    #[test]
+    fn costs_timings_are_reported_in_milliseconds() {
+        let timings = CostsTimings {
+            read: Duration::from_micros(12_345),
+            save: Duration::from_millis(234),
+            total: Duration::from_secs(2),
+        };
+        let mut output = Vec::new();
+
+        write_costs_timings(&mut output, &timings).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "timing: read=12.345ms save=234.000ms total=2000.000ms\n"
         );
     }
 
