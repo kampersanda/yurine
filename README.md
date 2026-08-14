@@ -9,7 +9,9 @@ example, brackets mark the returned range:
 
 ```text
 Indexed: Jinbocho is a [book town known] for curry
+                               |
                                |- sub(district, town) = 0.25
+                               |
 Query:                  book district known
 ```
 
