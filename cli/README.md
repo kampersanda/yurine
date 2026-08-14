@@ -142,9 +142,11 @@ rejects a snapshot compiled for a different one.
 
 Like an index, a snapshot is immutable and is replaced by recompiling the
 configuration. The files are written under temporary names, ending in `.tmp`,
-and are only put in place once all of them have been written, so a failed run
-leaves the previous snapshot usable. Do not recompile a snapshot while it is
-being searched, because a search maps `store.yurine` for as long as it runs.
+and are only put in place once all of them have been written; `metadata.json`,
+without which the other files are not read, is replaced last. A run that fails
+while reading its configuration or writing the cost files therefore leaves the
+previous snapshot usable. Do not recompile a snapshot while it is being
+searched, because a search maps `store.yurine` for as long as it runs.
 
 Searching with a configuration file keeps working, so a snapshot is worth
 building only for a policy that is searched more than once.
