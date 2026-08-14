@@ -252,6 +252,40 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
     Ok(())
 }
 
+/// Returns the dot product of two L2-normalized embeddings.
+///
+/// This is the innermost loop of a search: filtering evaluates it once per
+/// alphabet symbol per query position. Two details keep it vectorized. Splitting
+/// the sum across independent accumulators breaks the serial dependency chain
+/// that forbids reassociating floating-point addition, and iterating with
+/// `chunks_exact` gives each lane a statically known length, so no bounds check
+/// survives to block the vectorizer. Indexing the two slices directly is enough
+/// to lose both.
+///
+/// Accumulating in `f32` rather than `f64` is what makes the lanes worth having.
+/// Both arguments are L2-normalized, so the product stays within `1e-7` of the
+/// same sum computed in `f64`. That is below the tolerance `validate_embedding`
+/// already allows for the norm itself, and below the precision of the [`Cost`]
+/// that receives it.
+fn dot_product(from: &[f32], to: &[f32]) -> f32 {
+    const LANES: usize = 8;
+
+    let mut accumulators = [0.0; LANES];
+    let mut from_chunks = from.chunks_exact(LANES);
+    let mut to_chunks = to.chunks_exact(LANES);
+    for (from, to) in from_chunks.by_ref().zip(to_chunks.by_ref()) {
+        for lane in 0..LANES {
+            accumulators[lane] += from[lane] * to[lane];
+        }
+    }
+
+    let mut product: f32 = accumulators.iter().sum();
+    for (from, to) in from_chunks.remainder().iter().zip(to_chunks.remainder()) {
+        product += from * to;
+    }
+    product
+}
+
 /// Edit costs derived from cosine distances between static token embeddings.
 ///
 /// Substitution between equal tokens always costs zero. For different tokens
@@ -328,12 +362,7 @@ where
         let (Some(from), Some(to)) = (self.embeddings.get(from), self.embeddings.get(to)) else {
             return self.missing_substitution;
         };
-        let similarity: f64 = from
-            .iter()
-            .zip(to)
-            .map(|(from, to)| f64::from(*from) * f64::from(*to))
-            .sum();
-        let distance = (1.0 - similarity).clamp(0.0, 1.0) as f32;
+        let distance = (1.0 - dot_product(from, to)).clamp(0.0, 1.0);
         Cost::new_const(distance)
     }
 
@@ -490,6 +519,70 @@ mod tests {
         assert_abs_diff_eq!(costs.substitution(&'a', &'s').get(), 0.4);
         assert_abs_diff_eq!(costs.substitution(&'a', &'o').get(), 1.0);
         assert_abs_diff_eq!(costs.substitution(&'a', &'n').get(), 1.0);
+    }
+
+    /// The dot product consumes eight elements at a time, so a dimension that
+    /// is not a multiple of eight must still account for its trailing elements.
+    #[test]
+    fn substitution_cost_includes_elements_outside_the_whole_chunks() {
+        let dimension = 300;
+        let mut first = vec![0.0; dimension];
+        first[0] = 1.0;
+        first[298] = 1.0;
+        let mut second = vec![0.0; dimension];
+        second[298] = 1.0;
+        let mut store = EmbeddingStoreBuilder::new(nonzero(dimension));
+        store.insert('a', first).unwrap();
+        store.insert('b', second).unwrap();
+        let costs = CosineEmbeddingCosts::new(store.build());
+
+        // Dropping the four trailing elements would leave the two embeddings
+        // orthogonal, costing a full unit instead.
+        assert_abs_diff_eq!(
+            costs.substitution(&'a', &'b').get(),
+            1.0 - 1.0 / 2.0_f32.sqrt(),
+            epsilon = 1e-6
+        );
+    }
+
+    /// Summing the lanes in `f32` must not drift from the same sum accumulated
+    /// in `f64`, which is the value this cost policy has always reported.
+    #[test]
+    fn substitution_cost_matches_a_double_precision_sum() {
+        let dimension = 300;
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next_value = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u32 as f32 / u32::MAX as f32 - 0.5
+        };
+        // Two independent vectors of this many dimensions are near-orthogonal,
+        // which clamps the cost to one and hides whatever the sum reports. The
+        // second embedding perturbs the first so the cost stays strictly inside
+        // the clamp and every element contributes to it.
+        let first: Vec<f32> = (0..dimension).map(|_| next_value()).collect();
+        let second: Vec<f32> = first.iter().map(|value| value + next_value()).collect();
+        let mut store = EmbeddingStoreBuilder::new(nonzero(dimension));
+        store.insert('a', first).unwrap();
+        store.insert('b', second).unwrap();
+        let store = store.build();
+        let similarity: f64 = store
+            .get(&'a')
+            .unwrap()
+            .iter()
+            .zip(store.get(&'b').unwrap())
+            .map(|(first, second)| f64::from(*first) * f64::from(*second))
+            .sum();
+        let costs = CosineEmbeddingCosts::new(store);
+
+        let distance = costs.substitution(&'a', &'b').get();
+        assert!((0.0..1.0).contains(&distance), "clamped to {distance}");
+        assert_abs_diff_eq!(
+            distance,
+            (1.0 - similarity).clamp(0.0, 1.0) as f32,
+            epsilon = 1e-6
+        );
     }
 
     #[test]
