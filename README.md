@@ -8,10 +8,9 @@ Yurine finds approximate query segments inside longer token sequences. In this
 example, brackets mark the returned range:
 
 ```text
-Indexed: Jinbocho is a [book town     known for curry]
-Query:                  book district known for curry
-Match:                  book town     known for curry
-Edit:                        district -> town (cost 0.25)
+Indexed: Jinbocho is a [book town known] for curry
+                               |- sub(district, town) = 0.25
+Query:                  book district known
 ```
 
 ## Key characteristics
@@ -175,7 +174,7 @@ road networks, applied here to sequences of arbitrary tokens.
 
 > Satoshi Koide, Chuan Xiao, and Yoshiharu Ishikawa. Fast Subtrajectory
 > Similarity Search in Road Networks under Weighted Edit Distance Constraints.
-> *PVLDB*, 13(11): 2188–2201, 2020.
+> _PVLDB_, 13(11): 2188–2201, 2020.
 > <https://doi.org/10.14778/3407790.3407818>
 
 ## License
