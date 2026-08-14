@@ -105,6 +105,11 @@ impl SourceWriter {
         Ok(())
     }
 
+    /// Number of source texts written so far.
+    pub(crate) fn count(&self) -> usize {
+        self.count
+    }
+
     /// Flushes both files and returns the number of written source texts.
     pub(crate) fn finish(&mut self) -> Result<usize> {
         self.texts.flush()?;
