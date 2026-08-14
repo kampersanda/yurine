@@ -18,9 +18,8 @@ Query:                  book district known
 - **Segment search:** finds matching ranges within longer sequences.
 - **Weighted edits:** costs can vary by token, operation, and direction; they
   need not be symmetric or satisfy the triangle inequality.
-- **Embedding costs:** cosine distance can make semantically related tokens
-  with different spellings, such as `literature` and `books`, inexpensive
-  substitutions.
+- **Semantic matching:** substitution costs can come from token embeddings, so
+  `literature` matches `books` — paraphrases, not just exact spellings.
 - **Exact results:** returns every segment within the threshold; “exact” means
   complete results, not exact string matching.
 - **Reusable indexes:** supports generic token types, multiple cost policies,
@@ -61,6 +60,10 @@ sequence. It does not occur verbatim: replacing `district` with `town` costs
 
 ## Embedding-based search
 
+Feeding embedding-derived costs into the same weighted edit distance search
+turns segment search semantic: queries match paraphrases, not just exact
+spellings.
+
 `CosineEmbeddingCosts` derives substitution costs from token embeddings, so
 similar tokens can match without an explicit rule:
 
@@ -94,6 +97,11 @@ fn main() -> yurine::errors::Result<()> {
 Here, `literature` matches `books` by cosine distance, returning the
 `books and curry` segment. The crate-level Rust Doc contains the tested
 version of this example.
+
+[SoftMatcha](https://softmatcha.github.io/) is a similar project that
+efficiently solves a special case of this weighted edit distance
+at trillion-scale corpora; Yurine targets the general problem,
+with arbitrary per-token, per-operation costs.
 
 ## Optional persistence
 
