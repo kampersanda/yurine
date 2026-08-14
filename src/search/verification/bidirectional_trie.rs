@@ -1,4 +1,26 @@
 //! Anchor-local verification with bidirectional trie caches.
+//!
+//! Every candidate anchor forces one substitution between a query symbol and a
+//! data symbol, and the two directions around it are extended independently.
+//! This enumerates exactly the alignments pairing at least one query symbol
+//! with one data symbol, and no others.
+//!
+//! Those are all the alignments that matter when
+//! `substitution(from, to) <= deletion(from) + insertion(to)`. An alignment
+//! pairing no symbols deletes the whole query string and inserts the whole
+//! substring; replacing one such deletion and insertion by a substitution
+//! leaves the distance no larger, so an optimal alignment pairing at least one
+//! symbol always exists.
+//!
+//! Cost policies are not required to satisfy that inequality, and this verifier
+//! reports a larger distance than the weighted edit distance when they do not.
+//! Range search stays exact because it never reaches this verifier in that
+//! case: an alignment pairing no symbols costs at least the sum of deleting
+//! every query symbol, each query position contributes at most its deletion
+//! cost to `MinCandidateSelector`, and a threshold reaching that sum therefore
+//! leaves the selector unable to build a threshold subsequence. Such a search
+//! falls back to `smith_waterman`, which considers every alignment. A new
+//! caller of this module has to preserve that reasoning.
 
 use std::collections::BTreeMap;
 

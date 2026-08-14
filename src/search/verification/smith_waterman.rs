@@ -21,6 +21,13 @@ use crate::types::{SequenceId, Symbol};
 /// Candidate anchors select data strings, but do not localize the baseline DP.
 /// Each selected string is exhaustively verified once. Candidate string IDs,
 /// string positions, and query positions are validated before verification.
+///
+/// Measuring every alignment rather than only the anchored ones is also what
+/// makes this the fallback for cost policies that substitute more expensively
+/// than they delete and insert; see the [`bidirectional_trie`] module
+/// documentation.
+///
+/// [`bidirectional_trie`]: super::bidirectional_trie
 pub(super) fn verify<C>(
     query_string: &[Symbol],
     candidates: &[Candidate],
