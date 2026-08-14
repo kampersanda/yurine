@@ -125,4 +125,16 @@ mod tests {
         assert_eq!(excluded, Cost::new_const(0.75));
         assert_eq!(deletion, Cost::new_const(0.9));
     }
+
+    #[test]
+    fn scan_reports_an_empty_neighborhood_with_the_deletion_cost() {
+        // Both substitutions cost more than deleting the symbol, so nothing
+        // enters the neighborhood and deletion stays the cheapest way out.
+        let neighborhood = SubstitutionNeighborhood::new([Symbol::new(4), Symbol::new(8)]).unwrap();
+
+        let (neighbors, outside_cost) = neighborhood.scan(Symbol::new(0), Cost::ZERO, &RankedCosts);
+
+        assert!(neighbors.is_empty());
+        assert_eq!(outside_cost, Cost::new_const(0.9));
+    }
 }

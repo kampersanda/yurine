@@ -133,10 +133,6 @@ mod tests {
         StrictBound::from_inclusive(Cost::new(threshold).unwrap()).unwrap()
     }
 
-    fn positions(selected: &[SelectedPosition]) -> Vec<Position> {
-        selected.iter().map(|entry| entry.position).collect()
-    }
-
     fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
         for position in 0..count {
             builder
@@ -199,7 +195,21 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(positions(&selected), [Position::new(0), Position::new(1)]);
+        // Every selection round moves its neighborhood out of the scored
+        // items, so a later round must still hand over its own list.
+        assert_eq!(
+            selected,
+            [
+                SelectedPosition {
+                    position: Position::new(0),
+                    neighbors: vec![first],
+                },
+                SelectedPosition {
+                    position: Position::new(1),
+                    neighbors: vec![second],
+                },
+            ]
+        );
     }
 
     #[test]
