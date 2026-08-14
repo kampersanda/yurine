@@ -3,6 +3,7 @@
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
+use crate::search::bound::StrictBound;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::{Position, Symbol};
 
@@ -11,12 +12,11 @@ use crate::types::{Position, Symbol};
 pub(in crate::search) struct MinCandidateSelector;
 
 impl MinCandidateSelector {
-    /// Selects a subsequence complete for matches with distance at most
-    /// `threshold`.
+    /// Selects a subsequence complete for the matches `bound` admits.
     pub(in crate::search) fn select<C>(
         &self,
         query_string: &[Symbol],
-        threshold: Cost,
+        bound: StrictBound,
         eta: Cost,
         index: &PostingsIndex,
         costs: &C,
@@ -25,7 +25,6 @@ impl MinCandidateSelector {
     where
         C: EditCosts<Symbol>,
     {
-        let threshold = threshold.next_up()?;
         struct Item {
             contribution: f32,
             candidate_count: f32,
@@ -55,8 +54,11 @@ impl MinCandidateSelector {
         let mut selected = Vec::new();
         let mut selected_contribution = 0.0;
 
-        while selected_contribution < threshold {
-            let residual = threshold - selected_contribution;
+        // Selection continues until the contributions together leave the
+        // bound, so a match the bound admits cannot avoid every selected
+        // position.
+        while bound.admits(selected_contribution) {
+            let residual = bound.residual(selected_contribution);
             let mut best: Option<(usize, f32)> = None;
 
             for (position, item) in items.iter().enumerate() {
@@ -101,8 +103,14 @@ mod tests {
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::errors::Error;
     use crate::postings::PostingsIndexBuilder;
+    use crate::search::bound::StrictBound;
     use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
     use crate::types::{Position, Posting, SequenceId, Symbol};
+
+    /// The bound admitting exactly the distances at most `threshold`.
+    fn bound(threshold: f32) -> StrictBound {
+        StrictBound::from_inclusive(Cost::new(threshold).unwrap()).unwrap()
+    }
 
     fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
         for position in 0..count {
@@ -130,7 +138,7 @@ mod tests {
         let selected = MinCandidateSelector
             .select(
                 &[common, rare],
-                Cost::new_const(0.5),
+                bound(0.5),
                 Cost::ZERO,
                 &index.build(),
                 &LevenshteinCosts,
@@ -150,7 +158,7 @@ mod tests {
         let selected = MinCandidateSelector
             .select(
                 &[first, second],
-                Cost::ONE,
+                bound(1.0),
                 Cost::ZERO,
                 &PostingsIndexBuilder::new(0).build(),
                 &LevenshteinCosts,
@@ -168,7 +176,7 @@ mod tests {
 
         let result = MinCandidateSelector.select(
             &[symbol],
-            Cost::ONE,
+            bound(1.0),
             Cost::ZERO,
             &PostingsIndexBuilder::new(0).build(),
             &LevenshteinCosts,

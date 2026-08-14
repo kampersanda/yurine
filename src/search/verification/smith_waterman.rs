@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use super::{add_distance, create_match, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::search::bound::StrictBound;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::{SequenceId, Symbol};
@@ -12,7 +13,7 @@ use crate::types::{SequenceId, Symbol};
 /// Exact Smith-Waterman-based verification that preserves every start position.
 ///
 /// Unlike the usual `O(mn)` semi-global variant, this verifier's contract is to
-/// enumerate every substring below the threshold. Its intended baseline
+/// enumerate every substring the bound admits. Its intended baseline
 /// implementation therefore uses `O(n^2 m)` time and `O(m)` DP working space,
 /// as described in `docs/development/smith-waterman-verification.md`. It
 /// additionally uses `O(u)` space to deduplicate the `u` candidate-referenced
@@ -32,13 +33,12 @@ pub(super) fn verify<C>(
     query_string: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
-    threshold: Cost,
+    bound: StrictBound,
     costs: &C,
 ) -> Result<Vec<Match>>
 where
     C: EditCosts<Symbol>,
 {
-    let threshold = threshold.next_up()?;
     let string_ids = validated_candidate_strings(query_string, candidates, corpus)?;
     let mut matches = Vec::new();
 
@@ -46,14 +46,7 @@ where
         let string = corpus
             .string(string_id)?
             .ok_or(Error::UnknownString(string_id.as_usize()))?;
-        enumerate_substring_matches(
-            query_string,
-            string,
-            string_id,
-            threshold,
-            costs,
-            &mut matches,
-        )?;
+        enumerate_substring_matches(query_string, string, string_id, bound, costs, &mut matches)?;
     }
 
     Ok(matches)
@@ -75,13 +68,12 @@ fn validated_candidate_strings(
 }
 
 /// Enumerates every non-empty substring of `string` whose distance from
-/// `query_string` is strictly less than `threshold`. Each match is pushed to
-/// `matches`.
+/// `query_string` is admitted by `bound`. Each match is pushed to `matches`.
 fn enumerate_substring_matches<C>(
     query_string: &[Symbol],
     string: &[Symbol],
     string_id: SequenceId,
-    threshold: Cost,
+    bound: StrictBound,
     costs: &C,
     matches: &mut Vec<Match>,
 ) -> Result<()>
@@ -143,9 +135,8 @@ where
             // The final cell is
             // wed(query_string, string[symbol_start..=symbol_end]). Convert the
             // inclusive `symbol_end` used by this loop to the public
-            // end-exclusive token range. The internal threshold is the strict
-            // upper bound immediately above the public inclusive threshold.
-            if current[query_string.len()] < threshold {
+            // end-exclusive token range.
+            if bound.admits(current[query_string.len()]) {
                 matches.push(create_match(
                     string_id,
                     symbol_start,

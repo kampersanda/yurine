@@ -4,6 +4,7 @@
 //! a range searcher with [`SearchEngine::range_searcher`]. Search configuration
 //! and execution live in [`range_search`].
 
+mod bound;
 mod builder;
 mod encoding;
 mod filtering;
