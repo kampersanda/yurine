@@ -252,6 +252,38 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
     Ok(())
 }
 
+/// Returns the dot product of two L2-normalized embeddings.
+///
+/// Filtering evaluates this once per alphabet symbol per query position, so the
+/// shape is deliberate: independent accumulators break the serial dependency
+/// chain that forbids reassociating floating-point addition, and `chunks_exact`
+/// gives each lane a statically known length so no bounds check blocks the
+/// vectorizer. Indexing the two slices directly loses both.
+///
+/// The `f32` sum is approximate, by an error that grows with the dimension and
+/// is bounded by `dimension * EPSILON`. That stays well inside the margin
+/// filtering needs, except at an eta of zero, where costs sit exactly on the
+/// boundary rather than spread around it. Equal tokens return before reaching
+/// this function, so an exact search is unaffected.
+fn dot_product(from: &[f32], to: &[f32]) -> f32 {
+    const LANES: usize = 16;
+
+    let mut accumulators = [0.0; LANES];
+    let mut from_chunks = from.chunks_exact(LANES);
+    let mut to_chunks = to.chunks_exact(LANES);
+    for (from, to) in from_chunks.by_ref().zip(to_chunks.by_ref()) {
+        for lane in 0..LANES {
+            accumulators[lane] += from[lane] * to[lane];
+        }
+    }
+
+    let mut product: f32 = accumulators.iter().sum();
+    for (from, to) in from_chunks.remainder().iter().zip(to_chunks.remainder()) {
+        product += from * to;
+    }
+    product
+}
+
 /// Edit costs derived from cosine distances between static token embeddings.
 ///
 /// Substitution between equal tokens always costs zero. For different tokens
@@ -328,12 +360,7 @@ where
         let (Some(from), Some(to)) = (self.embeddings.get(from), self.embeddings.get(to)) else {
             return self.missing_substitution;
         };
-        let similarity: f64 = from
-            .iter()
-            .zip(to)
-            .map(|(from, to)| f64::from(*from) * f64::from(*to))
-            .sum();
-        let distance = (1.0 - similarity).clamp(0.0, 1.0) as f32;
+        let distance = (1.0 - dot_product(from, to)).clamp(0.0, 1.0);
         Cost::new_const(distance)
     }
 
@@ -490,6 +517,86 @@ mod tests {
         assert_abs_diff_eq!(costs.substitution(&'a', &'s').get(), 0.4);
         assert_abs_diff_eq!(costs.substitution(&'a', &'o').get(), 1.0);
         assert_abs_diff_eq!(costs.substitution(&'a', &'n').get(), 1.0);
+    }
+
+    /// The dot product consumes a fixed number of elements at a time, so a
+    /// dimension that is not a whole multiple of that must still account for
+    /// its trailing elements.
+    #[test]
+    fn substitution_cost_includes_elements_outside_the_whole_chunks() {
+        let dimension = 300;
+        let mut first = vec![0.0; dimension];
+        first[0] = 1.0;
+        first[298] = 1.0;
+        let mut second = vec![0.0; dimension];
+        second[298] = 1.0;
+        let mut store = EmbeddingStoreBuilder::new(nonzero(dimension));
+        store.insert('a', first).unwrap();
+        store.insert('b', second).unwrap();
+        let costs = CosineEmbeddingCosts::new(store.build());
+
+        // Dropping the trailing elements would leave the two embeddings
+        // orthogonal, costing a full unit instead.
+        assert_abs_diff_eq!(
+            costs.substitution(&'a', &'b').get(),
+            1.0 - 1.0 / 2.0_f32.sqrt(),
+            epsilon = 1e-6
+        );
+    }
+
+    /// Deterministic pseudo-random values in `-0.5..0.5`.
+    fn pseudo_random_embedding(state: &mut u64, dimension: usize) -> Vec<f32> {
+        (0..dimension)
+            .map(|_| {
+                *state ^= *state << 13;
+                *state ^= *state >> 7;
+                *state ^= *state << 17;
+                *state as u32 as f32 / u32::MAX as f32 - 0.5
+            })
+            .collect()
+    }
+
+    /// Splitting the sum across lanes reorders the additions and accumulates in
+    /// `f32`, so the cost drifts from a sequential `f64` sum. The tolerance is
+    /// the classical `dimension * EPSILON` bound for a dot product of unit
+    /// vectors: loose enough to admit that rounding at every dimension, tight
+    /// enough to catch a sum that drops terms.
+    #[test]
+    fn substitution_cost_matches_a_sequential_sum_at_any_dimension() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        for dimension in [64, 300, 1024, 4099] {
+            // Two independent vectors of this many dimensions are
+            // near-orthogonal, which clamps the cost to one and hides whatever
+            // the sum reports. Perturbing the first embedding keeps the cost
+            // strictly inside the clamp, so every element contributes to it.
+            let first = pseudo_random_embedding(&mut state, dimension);
+            let perturbation = pseudo_random_embedding(&mut state, dimension);
+            let second: Vec<f32> = first
+                .iter()
+                .zip(&perturbation)
+                .map(|(value, noise)| value + noise * 0.01)
+                .collect();
+            let mut store = EmbeddingStoreBuilder::new(nonzero(dimension));
+            store.insert('a', first).unwrap();
+            store.insert('b', second).unwrap();
+            let store = store.build();
+            let similarity: f64 = store
+                .get(&'a')
+                .unwrap()
+                .iter()
+                .zip(store.get(&'b').unwrap())
+                .map(|(first, second)| f64::from(*first) * f64::from(*second))
+                .sum();
+            let costs = CosineEmbeddingCosts::new(store);
+
+            let distance = costs.substitution(&'a', &'b').get();
+            assert!((0.0..1.0).contains(&distance), "clamped to {distance}");
+            assert_abs_diff_eq!(
+                distance,
+                (1.0 - similarity).clamp(0.0, 1.0) as f32,
+                epsilon = dimension as f32 * f32::EPSILON
+            );
+        }
     }
 
     #[test]
