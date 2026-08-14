@@ -21,6 +21,9 @@ use cost_config::RuntimeCosts;
 use index::{SourceReader, SourceWriter};
 use tokenization::{CharacterTokenizer, Tokenizer, TokenizerKind, WhitespaceTokenizer};
 
+/// Number of source texts between progress reports while building an index.
+const PROGRESS_INTERVAL: usize = 100_000;
+
 /// Search newline-delimited source texts with edit distance using Yurine.
 #[derive(Debug, Parser, PartialEq)]
 #[command(version)]
@@ -210,6 +213,7 @@ where
     let mut timings = IndexTimings::default();
     let mut sources = SourceWriter::create(directory)?;
     let mut builder = SearchEngineBuilder::new();
+    let mut next_report = PROGRESS_INTERVAL;
     for source_text in read_corpus(options.corpus.as_deref())?.lines() {
         let source_text = source_text.context("failed to read the corpus")?;
         let sequence: Vec<_> = tokenizer
@@ -219,13 +223,20 @@ where
             .collect();
         builder.add_sequence(sequence)?;
         sources.push(&source_text)?;
+        if sources.count() >= next_report {
+            eprintln!("read {} source texts", sources.count());
+            next_report += PROGRESS_INTERVAL;
+        }
     }
     let sequence_count = sources.finish()?;
+    eprintln!("read {sequence_count} source texts");
     timings.read = read_start.elapsed();
 
+    eprintln!("building index for {sequence_count} source texts");
     let build_start = Instant::now();
     let engine = builder.build()?;
     timings.build = build_start.elapsed();
+    eprintln!("built index for {sequence_count} source texts");
 
     // Publish the new index only once every stage has succeeded, so a failed
     // run leaves the index of a previous one usable.
