@@ -10,8 +10,8 @@ Run the CLI from the repository with Cargo:
 
 ```console
 $ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run -p yurine-cli -- search --threshold 1 corpus.index 'book district known for curry'
+$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run --release -p yurine-cli -- search --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 
@@ -84,7 +84,7 @@ one token. Tokenization does not normalize or lowercase text.
 Use `whitespace` for pre-tokenized text or word-level cost policies:
 
 ```console
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
 ```
 
 Cost rules and embeddings must use exactly one complete token under the
@@ -94,12 +94,12 @@ tokenizer of the index they are searched with.
 
 `yurine index` writes four files, and `yurine search` needs all of them:
 
-| File | Contents |
-| --- | --- |
+| File            | Contents                                              |
+| --------------- | ----------------------------------------------------- |
 | `metadata.json` | Format version, tokenizer, and number of source texts |
-| `engine.yurine` | The search index, memory-mapped when searching |
-| `sources.txt` | A copy of the corpus lines |
-| `sources.idx` | Byte offset of each line in `sources.txt` |
+| `engine.yurine` | The search index, memory-mapped when searching        |
+| `sources.txt`   | A copy of the corpus lines                            |
+| `sources.idx`   | Byte offset of each line in `sources.txt`             |
 
 Results report byte offsets into the original text, which tokenization does not
 preserve, so the source texts are stored next to the index. The offset table
@@ -123,17 +123,17 @@ writes the result in the same persisted form the index uses, so a search opens
 it instead:
 
 ```console
-$ cargo run -p yurine-cli --release -- costs --tokenizer whitespace \
+$ cargo run --release -p yurine-cli -- costs --tokenizer whitespace \
     costs.json costs.snapshot
-$ cargo run -p yurine-cli --release -- search --timing \
+$ cargo run --release -p yurine-cli -- search --timing \
     --costs costs.snapshot --threshold 0.2 corpus.index 'literature and curry'
 ```
 
-| File | Contents |
-| --- | --- |
-| `metadata.json` | Format version, cost policy kind, and tokenizer |
-| `costs.yurine` | The cost policy |
-| `store.yurine` | The embeddings, memory-mapped when searching; embedding policies only |
+| File            | Contents                                                              |
+| --------------- | --------------------------------------------------------------------- |
+| `metadata.json` | Format version, cost policy kind, and tokenizer                       |
+| `costs.yurine`  | The cost policy                                                       |
+| `store.yurine`  | The embeddings, memory-mapped when searching; embedding policies only |
 
 A snapshot is independent of any index: one policy can be used with several
 indexes, and one index with several policies. Only the tokenizer has to agree,
@@ -155,13 +155,13 @@ building only for a policy that is searched more than once.
 
 Results are headerless, tab-delimited CSV records with these fields:
 
-| Field | Meaning |
-| --- | --- |
-| 1 | Zero-based sequence ID, equal to the corpus line number |
-| 2 | Weighted edit distance |
-| 3 | Inclusive UTF-8 byte offset in the source line |
-| 4 | Exclusive UTF-8 byte offset in the source line |
-| 5 | Matched source text |
+| Field | Meaning                                                 |
+| ----- | ------------------------------------------------------- |
+| 1     | Zero-based sequence ID, equal to the corpus line number |
+| 2     | Weighted edit distance                                  |
+| 3     | Inclusive UTF-8 byte offset in the source line          |
+| 4     | Exclusive UTF-8 byte offset in the source line          |
+| 5     | Matched source text                                     |
 
 CSV quoting is applied when a field contains a tab, quote, or newline. Results
 are ordered by sequence ID, start offset, then end offset.
@@ -172,33 +172,33 @@ are ordered by sequence ID, start offset, then end offset.
 so it never mixes with the results on standard output:
 
 ```console
-$ cargo run -p yurine-cli --release -- index --timing \
+$ cargo run --release -p yurine-cli -- index --timing \
     --tokenizer whitespace corpus.index corpus.txt
 timing: read=0.403ms build=0.103ms save=8.422ms total=9.072ms
 
-$ cargo run -p yurine-cli --release -- costs --timing \
+$ cargo run --release -p yurine-cli -- costs --timing \
     --tokenizer whitespace costs.json costs.snapshot
 timing: read=0.337ms save=15.708ms total=16.101ms
 
-$ cargo run -p yurine-cli --release -- search --timing \
+$ cargo run --release -p yurine-cli -- search --timing \
     --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 timing: open=0.162ms costs=0.000ms search=0.050ms total=0.254ms
 ```
 
-| Command | Stage | Covers |
-| --- | --- | --- |
-| `index` | `read` | Reading the corpus, tokenizing it, and storing the source texts |
-| `index` | `build` | Building the index |
-| `index` | `save` | Writing the index and its metadata |
-| `index` | `total` | The whole run |
-| `costs` | `read` | Reading the cost configuration and its data files |
-| `costs` | `save` | Writing the snapshot and its metadata |
-| `costs` | `total` | The whole run |
-| `search` | `open` | Reading the metadata and opening the index, including `--verify` |
-| `search` | `costs` | Loading `--costs`, whether a configuration or a snapshot, including `--verify` |
-| `search` | `search` | Tokenizing the query and searching |
-| `search` | `total` | The whole run, including writing the results |
+| Command  | Stage    | Covers                                                                         |
+| -------- | -------- | ------------------------------------------------------------------------------ |
+| `index`  | `read`   | Reading the corpus, tokenizing it, and storing the source texts                |
+| `index`  | `build`  | Building the index                                                             |
+| `index`  | `save`   | Writing the index and its metadata                                             |
+| `index`  | `total`  | The whole run                                                                  |
+| `costs`  | `read`   | Reading the cost configuration and its data files                              |
+| `costs`  | `save`   | Writing the snapshot and its metadata                                          |
+| `costs`  | `total`  | The whole run                                                                  |
+| `search` | `open`   | Reading the metadata and opening the index, including `--verify`               |
+| `search` | `costs`  | Loading `--costs`, whether a configuration or a snapshot, including `--verify` |
+| `search` | `search` | Tokenizing the query and searching                                             |
+| `search` | `total`  | The whole run, including writing the results                                   |
 
 Every stage is always reported, so the fields are the same with and without
 `--costs`. When `--costs` is omitted, the `costs` stage only builds the unit-cost
@@ -234,7 +234,7 @@ Create `costs.json`:
 Create `rules.jsonl`:
 
 ```json
-{"operation":"substitution","from":"district","to":"town","cost":0.25}
+{ "operation": "substitution", "from": "district", "to": "town", "cost": 0.25 }
 ```
 
 Create `corpus.txt`:
@@ -246,8 +246,8 @@ Jinbocho is a book town known for curry
 Then run:
 
 ```console
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run -p yurine-cli -- search \
+$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run --release -p yurine-cli -- search \
     --costs costs.json \
     --threshold 0.25 \
     corpus.index \
@@ -297,8 +297,8 @@ Visitors enjoy books and curry in Jinbocho
 Then run:
 
 ```console
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run -p yurine-cli -- search \
+$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ cargo run --release -p yurine-cli -- search \
     --costs costs.json \
     --threshold 0.2 \
     corpus.index \
