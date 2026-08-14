@@ -9,8 +9,11 @@ example, brackets mark the returned segment:
 
 ```text
 Indexed: Jinbocho is a [book town known for curry] .
+                              │     │
                               │     └── ins(known) = 0.2
+                              │
                               ├── sub(district, town) = 0.1
+                              │
 Query:                  book district for curry
 ```
 
