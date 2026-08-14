@@ -1,7 +1,8 @@
 # Yurine data preparation tools
 
-This uv project provides separate commands for preparing static word
-embeddings and line-oriented corpora for the Yurine command-line interface.
+This uv project provides separate commands for fetching evaluation corpora and
+for preparing static word embeddings and line-oriented corpora for the Yurine
+command-line interface.
 
 ## Setup
 
@@ -43,6 +44,49 @@ The generated records look like this:
 
 Embedding records and generated cost configurations are validated and
 serialized through Pydantic models before they are written.
+
+## Fetch Japanese Wikipedia passages
+
+`fetch-jawiki` downloads a passage release from
+[Wikipedia-Utils](https://github.com/singletongue/wikipedia-utils) and writes
+one passage per line, which is what `preprocess-corpus` expects. The two
+commands compose directly:
+
+```console
+$ uv run yurine-fetch-jawiki output/jawiki.txt --limit 1000000
+$ uv run yurine-preprocess-corpus output/jawiki.txt output/corpus.txt
+```
+
+The default is `passages-c400` from the `20240401` dump: 5.81M passages of
+roughly 400 characters each. Passages keep several sentences per line, so a
+query can match a segment shorter than the indexed sequence. Use
+`--dataset passages-c300` or `--dataset passages-para` for other chunk sizes,
+and `--dump 20230403` for the earlier dump.
+
+The archive is streamed and decompressed as it arrives, so `--limit` stops the
+download early. It is the option to use when building a size ladder for
+measurements; the complete `passages-c400` archive is about 1.4 GB compressed.
+
+Whitespace inside a passage is collapsed so that one passage always occupies
+one line. Yurine reports matches by line position, so `--metadata` writes a
+JSON Lines file naming the article and section behind each line:
+
+```console
+$ uv run yurine-fetch-jawiki output/jawiki.txt --metadata output/jawiki.jsonl
+```
+
+```json
+{"line":1,"id":1,"pageid":5,"revid":99347164,"title":"アンパサンド","section":"__LEAD__"}
+```
+
+`--cache PATH` keeps the downloaded archive and reuses it on later runs, which
+avoids repeated downloads when generating several corpus sizes. A cached run
+downloads the whole archive even when `--limit` is small. The download goes to
+a temporary file first, so an interrupted run does not leave a partial archive
+behind as a cache hit.
+
+The Wikipedia-Utils data is derived from Japanese Wikipedia and is distributed
+under CC-BY-SA-3.0 and GFDL.
 
 ## Preprocess a corpus or query
 
@@ -106,6 +150,7 @@ src/yurine_tools/
 ├── cli/           # Tap argument definitions and command runners
 ├── corpus.py      # Corpus normalization and tokenization
 ├── embeddings.py  # Streaming embedding conversion
+├── jawiki.py      # Wikipedia-Utils release download and extraction
 ├── options.py     # Shared option types
 ├── schemas.py     # Pydantic output schemas
 └── text_io.py     # Standard and compressed text I/O

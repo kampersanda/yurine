@@ -1,6 +1,12 @@
+import gzip
+import json
+from pathlib import Path
+
 import pytest
 
+from yurine_tools.cli import fetch_jawiki
 from yurine_tools.cli.convert_embeddings import ConvertEmbeddingsArgs
+from yurine_tools.cli.fetch_jawiki import FetchJawikiArgs
 from yurine_tools.cli.preprocess_corpus import PreprocessCorpusArgs
 
 
@@ -73,6 +79,63 @@ def test_whitespace_tokenizer_rejects_sudachi_options(option: str, value: str) -
         PreprocessCorpusArgs().parse_args(
             ["input.txt", "output.txt", "--tokenizer", "whitespace", option, value]
         )
+
+
+def test_jawiki_defaults_to_the_latest_c400_passages() -> None:
+    args = FetchJawikiArgs().parse_args(["corpus.txt"])
+
+    assert args.dataset == "passages-c400"
+    assert args.dump == "20240401"
+    assert args.limit is None
+    assert args.cache is None
+
+
+def test_jawiki_rejects_a_nonpositive_limit() -> None:
+    with pytest.raises(ValueError, match="limit must be positive"):
+        FetchJawikiArgs().parse_args(["corpus.txt", "--limit", "0"])
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["corpus.txt", "--metadata", "corpus.txt"],
+        ["corpus.txt", "--cache", "corpus.txt"],
+        ["corpus.txt", "--metadata", "shared.jsonl", "--cache", "shared.jsonl"],
+    ],
+)
+def test_jawiki_rejects_colliding_paths(arguments: list[str]) -> None:
+    with pytest.raises(ValueError, match="path must differ"):
+        FetchJawikiArgs().parse_args(arguments)
+
+
+def test_jawiki_writes_a_corpus_and_aligned_metadata(tmp_path: Path, monkeypatch) -> None:
+    records = [
+        {
+            "id": index,
+            "pageid": 5,
+            "revid": 99347164,
+            "title": "アンパサンド",
+            "section": "__LEAD__",
+            "text": text,
+        }
+        for index, text in enumerate(["前半。\n後半。", "二番目", "三番目"], start=1)
+    ]
+    source = tmp_path / "source.json.gz"
+    with gzip.open(source, "wt", encoding="utf-8") as destination:
+        for record in records:
+            destination.write(json.dumps(record, ensure_ascii=False) + "\n")
+    monkeypatch.setattr(fetch_jawiki, "release_url", lambda *_: source.resolve().as_uri())
+    corpus = tmp_path / "corpus.txt"
+    metadata = tmp_path / "metadata.jsonl"
+
+    fetch_jawiki.run_command(
+        FetchJawikiArgs().parse_args([str(corpus), "--limit", "2", "--metadata", str(metadata)])
+    )
+
+    assert corpus.read_text(encoding="utf-8") == "前半。 後半。\n二番目\n"
+    lines = metadata.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["line"] for line in lines] == [1, 2]
+    assert json.loads(lines[0])["title"] == "アンパサンド"
 
 
 def test_path_aliases_are_rejected(tmp_path) -> None:

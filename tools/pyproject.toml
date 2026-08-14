@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 yurine-convert-embeddings = "yurine_tools.cli.convert_embeddings:main"
+yurine-fetch-jawiki = "yurine_tools.cli.fetch_jawiki:main"
 yurine-preprocess-corpus = "yurine_tools.cli.preprocess_corpus:main"
 
 [dependency-groups]

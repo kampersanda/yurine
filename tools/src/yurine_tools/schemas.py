@@ -28,6 +28,32 @@ class EmbeddingRecord(YurineModel):
     embedding: list[Float32] = Field(min_length=1)
 
 
+class JawikiPassage(YurineModel):
+    """One passage record published by the Wikipedia-Utils releases."""
+
+    id: int = Field(ge=0)
+    pageid: int = Field(ge=0)
+    revid: int = Field(ge=0)
+    title: str
+    section: str
+    text: str = Field(min_length=1)
+
+
+class JawikiPassageMetadata(YurineModel):
+    """Sidecar record locating one corpus line in Japanese Wikipedia.
+
+    Yurine reports matches by line position, so titles and identifiers are
+    kept out of the corpus itself and recovered from this file instead.
+    """
+
+    line: int = Field(gt=0)
+    id: int = Field(ge=0)
+    pageid: int = Field(ge=0)
+    revid: int = Field(ge=0)
+    title: str
+    section: str
+
+
 class EmbeddingSource(YurineModel):
     """Location and serialization format of an embedding data file."""
 
