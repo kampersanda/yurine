@@ -215,14 +215,7 @@ where
             }
             Err(error) => return Err(error),
         };
-        let candidates = generate_candidates(
-            query_string,
-            &selected,
-            eta,
-            &self.engine.index,
-            costs,
-            &self.engine.neighborhood,
-        )?;
+        let candidates = generate_candidates(&selected, &self.engine.index);
         let matches = Verifier::BidirectionalTrie.verify(
             query_string,
             &candidates,

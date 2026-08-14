@@ -7,12 +7,25 @@ use crate::search::bound::StrictBound;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::{Position, Symbol};
 
+/// A selected query position together with the neighborhood it was scored on.
+///
+/// Candidate generation reuses `neighbors` instead of scanning the alphabet
+/// again, so the two phases cannot disagree about the neighborhood.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::search) struct SelectedPosition {
+    pub(in crate::search) position: Position,
+    pub(in crate::search) neighbors: Vec<Symbol>,
+}
+
 /// The two-approximation MinCand selector described in the design material.
 #[derive(Debug, Clone, Copy, Default)]
 pub(in crate::search) struct MinCandidateSelector;
 
 impl MinCandidateSelector {
     /// Selects a subsequence complete for the matches `bound` admits.
+    ///
+    /// Positions are returned in selection order, each carrying its
+    /// substitution neighborhood.
     pub(in crate::search) fn select<C>(
         &self,
         query_string: &[Symbol],
@@ -21,11 +34,12 @@ impl MinCandidateSelector {
         index: &PostingsIndex,
         costs: &C,
         neighborhood: &SubstitutionNeighborhood,
-    ) -> Result<Vec<Position>>
+    ) -> Result<Vec<SelectedPosition>>
     where
         C: EditCosts<Symbol>,
     {
         struct Item {
+            neighbors: Vec<Symbol>,
             contribution: f32,
             candidate_count: f32,
             paid: f32,
@@ -34,17 +48,18 @@ impl MinCandidateSelector {
 
         let mut items = Vec::with_capacity(query_string.len());
         for symbol in query_string {
-            let contribution = neighborhood.minimum_outside_cost(*symbol, eta, costs).get();
+            let (neighbors, outside_cost) = neighborhood.scan(*symbol, eta, costs);
 
             let mut candidate_count = 0usize;
-            for neighbor in neighborhood.neighbors(*symbol, eta, costs) {
+            for neighbor in &neighbors {
                 candidate_count = candidate_count
-                    .checked_add(index.frequency(neighbor))
+                    .checked_add(index.frequency(*neighbor))
                     .ok_or(Error::ThresholdSubsequenceUnavailable)?;
             }
 
             items.push(Item {
-                contribution,
+                neighbors,
+                contribution: outside_cost.get(),
                 candidate_count: candidate_count as f32,
                 paid: 0.0,
                 selected: false,
@@ -87,9 +102,15 @@ impl MinCandidateSelector {
                 }
             }
 
-            items[best_position].selected = true;
-            selected_contribution += items[best_position].contribution;
-            selected.push(Position::from_usize(best_position)?);
+            let best = &mut items[best_position];
+            best.selected = true;
+            selected_contribution += best.contribution;
+            selected.push(SelectedPosition {
+                position: Position::from_usize(best_position)?,
+                // Handing the neighborhood over also releases it from `items`,
+                // so only the selected positions keep their lists alive.
+                neighbors: std::mem::take(&mut best.neighbors),
+            });
         }
 
         Ok(selected)
@@ -98,7 +119,7 @@ impl MinCandidateSelector {
 
 #[cfg(test)]
 mod tests {
-    use super::MinCandidateSelector;
+    use super::{MinCandidateSelector, SelectedPosition};
     use crate::costs::Cost;
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::errors::Error;
@@ -110,6 +131,10 @@ mod tests {
     /// The bound admitting exactly the distances at most `threshold`.
     fn bound(threshold: f32) -> StrictBound {
         StrictBound::from_inclusive(Cost::new(threshold).unwrap()).unwrap()
+    }
+
+    fn positions(selected: &[SelectedPosition]) -> Vec<Position> {
+        selected.iter().map(|entry| entry.position).collect()
     }
 
     fn add_occurrences(builder: &mut PostingsIndexBuilder, symbol: Symbol, count: u32) {
@@ -146,7 +171,15 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(selected, [Position::new(1)]);
+        // The selected position carries the neighborhood it was scored on, so
+        // candidate generation does not scan the alphabet again.
+        assert_eq!(
+            selected,
+            [SelectedPosition {
+                position: Position::new(1),
+                neighbors: vec![rare],
+            }]
+        );
     }
 
     #[test]
@@ -166,7 +199,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(selected, [Position::new(0), Position::new(1)]);
+        assert_eq!(positions(&selected), [Position::new(0), Position::new(1)]);
     }
 
     #[test]

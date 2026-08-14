@@ -1,16 +1,13 @@
 mod candidate;
 mod neighborhood;
 
-pub(in crate::search) use candidate::MinCandidateSelector;
+pub(in crate::search) use candidate::{MinCandidateSelector, SelectedPosition};
 pub(in crate::search) use neighborhood::SubstitutionNeighborhood;
 
-use crate::costs::{Cost, EditCosts};
-use crate::errors::{Error, Result};
 use crate::postings::PostingsIndex;
 use crate::search::Candidate;
-use crate::types::{Position, Symbol};
 
-/// Generates candidate anchors.
+/// Generates candidate anchors from the neighborhoods that selection computed.
 ///
 /// Candidates are returned in selected-position, neighborhood, and postings
 /// order. For engines created by [`crate::search::SearchEngineBuilder`], they
@@ -19,50 +16,29 @@ use crate::types::{Position, Symbol};
 /// overlap. If a future index can generate duplicate anchors, verification
 /// still consolidates identical result substrings; duplicates would add work
 /// but would not change search results.
-///
-/// Returns [`Error::InvalidQueryPosition`] if `selected` contains a position
-/// outside `query_string`.
-pub(super) fn generate_candidates<C>(
-    query_string: &[Symbol],
-    selected: &[Position],
-    eta: Cost,
+pub(super) fn generate_candidates(
+    selected: &[SelectedPosition],
     index: &PostingsIndex,
-    costs: &C,
-    neighborhood: &SubstitutionNeighborhood,
-) -> Result<Vec<Candidate>>
-where
-    C: EditCosts<Symbol>,
-{
+) -> Vec<Candidate> {
     let mut candidates = Vec::new();
 
     for selected_position in selected {
-        let query_symbol =
-            query_string
-                .get(selected_position.as_usize())
-                .ok_or(Error::InvalidQueryPosition {
-                    position: selected_position.as_usize(),
-                    query_len: query_string.len(),
-                })?;
-        for neighbor in neighborhood.neighbors(*query_symbol, eta, costs) {
-            for posting in index.postings(neighbor) {
+        for neighbor in &selected_position.neighbors {
+            for posting in index.postings(*neighbor) {
                 candidates.push(Candidate {
                     string_id: posting.string_id,
                     string_position: posting.position,
-                    query_position: *selected_position,
+                    query_position: selected_position.position,
                 });
             }
         }
     }
-    Ok(candidates)
+    candidates
 }
 
 #[cfg(test)]
 mod tests {
-    use super::generate_candidates;
-    use super::neighborhood::SubstitutionNeighborhood;
-    use crate::costs::Cost;
-    use crate::costs::levenshtein::LevenshteinCosts;
-    use crate::errors::Error;
+    use super::{SelectedPosition, generate_candidates};
     use crate::postings::PostingsIndexBuilder;
     use crate::search::Candidate;
     use crate::types::{Position, Posting, SequenceId, Symbol};
@@ -90,17 +66,20 @@ mod tests {
                 },
             )
             .unwrap();
-        let neighborhood = SubstitutionNeighborhood::new([first, second]).unwrap();
 
         let candidates = generate_candidates(
-            &[first, second],
-            &[Position::new(1), Position::new(0)],
-            Cost::ZERO,
+            &[
+                SelectedPosition {
+                    position: Position::new(1),
+                    neighbors: vec![second],
+                },
+                SelectedPosition {
+                    position: Position::new(0),
+                    neighbors: vec![first],
+                },
+            ],
             &index.build(),
-            &LevenshteinCosts,
-            &neighborhood,
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             candidates,
@@ -120,22 +99,36 @@ mod tests {
     }
 
     #[test]
-    fn rejects_selected_position_outside_the_query_string() {
-        let result = generate_candidates(
-            &[Symbol::new(0)],
-            &[Position::new(1)],
-            Cost::ZERO,
-            &PostingsIndexBuilder::new(0).build(),
-            &LevenshteinCosts,
-            &SubstitutionNeighborhood::new([]).unwrap(),
+    fn generates_candidates_in_neighborhood_order_within_a_position() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let mut index = PostingsIndexBuilder::new(2);
+        for (symbol, string_id) in [(first, 1), (second, 0)] {
+            index
+                .add_posting(
+                    symbol,
+                    Posting {
+                        string_id: SequenceId::new(string_id),
+                        position: Position::new(0),
+                    },
+                )
+                .unwrap();
+        }
+
+        let candidates = generate_candidates(
+            &[SelectedPosition {
+                position: Position::new(0),
+                neighbors: vec![first, second],
+            }],
+            &index.build(),
         );
 
         assert_eq!(
-            result,
-            Err(Error::InvalidQueryPosition {
-                position: 1,
-                query_len: 1,
-            })
+            candidates
+                .iter()
+                .map(|candidate| candidate.string_id)
+                .collect::<Vec<_>>(),
+            [SequenceId::new(1), SequenceId::new(0)]
         );
     }
 }

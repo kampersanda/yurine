@@ -35,43 +35,33 @@ impl SubstitutionNeighborhood {
         Ok(Self { alphabet })
     }
 
-    /// Visits symbols whose substitution cost from `symbol` is at most eta.
+    /// Splits the alphabet at eta in a single pass over the substitution costs.
     ///
-    /// The returned symbols must be unique. The supplied edit-cost policy is
-    /// the same policy that verification uses.
-    pub(in crate::search) fn neighbors<C>(
+    /// Returns the symbols whose substitution cost from `symbol` is at most
+    /// eta, in alphabet order, together with the minimum cost of deleting
+    /// `symbol` or substituting it with a symbol outside that neighborhood.
+    /// The returned symbols are unique because the alphabet is. The supplied
+    /// edit-cost policy is the same policy that verification uses.
+    pub(in crate::search) fn scan<C>(
         &self,
         symbol: Symbol,
         eta: Cost,
         costs: &C,
-    ) -> Vec<Symbol>
+    ) -> (Vec<Symbol>, Cost)
     where
         C: EditCosts<Symbol>,
     {
-        self.alphabet
-            .iter()
-            .copied()
-            .filter(|candidate| costs.substitution(&symbol, candidate) <= eta)
-            .collect()
-    }
-
-    /// Returns the minimum cost of deleting `symbol` or substituting it with a
-    /// symbol outside its neighborhood.
-    pub(in crate::search) fn minimum_outside_cost<C>(
-        &self,
-        symbol: Symbol,
-        eta: Cost,
-        costs: &C,
-    ) -> Cost
-    where
-        C: EditCosts<Symbol>,
-    {
-        self.alphabet
-            .iter()
-            .copied()
-            .map(|candidate| costs.substitution(&symbol, &candidate))
-            .filter(|substitution| *substitution > eta)
-            .fold(costs.deletion(&symbol), Cost::min)
+        let mut neighbors = Vec::new();
+        let mut outside_cost = costs.deletion(&symbol);
+        for candidate in self.alphabet.iter().copied() {
+            let substitution = costs.substitution(&symbol, &candidate);
+            if substitution <= eta {
+                neighbors.push(candidate);
+            } else {
+                outside_cost = outside_cost.min(substitution);
+            }
+        }
+        (neighbors, outside_cost)
     }
 }
 
@@ -113,30 +103,26 @@ mod tests {
     }
 
     #[test]
-    fn neighbors_include_the_eta_boundary_in_alphabet_order() {
+    fn scan_collects_neighbors_up_to_eta_in_alphabet_order() {
         let neighborhood =
             SubstitutionNeighborhood::new([Symbol::new(3), Symbol::new(1), Symbol::new(2)])
                 .unwrap();
 
-        assert_eq!(
-            neighborhood.neighbors(Symbol::new(0), Cost::new_const(0.5), &RankedCosts),
-            [Symbol::new(1), Symbol::new(2)]
-        );
+        let (neighbors, _) = neighborhood.scan(Symbol::new(0), Cost::new_const(0.5), &RankedCosts);
+
+        assert_eq!(neighbors, [Symbol::new(1), Symbol::new(2)]);
     }
 
     #[test]
-    fn minimum_outside_cost_uses_deletion_or_the_cheapest_excluded_substitution() {
+    fn scan_returns_deletion_or_the_cheapest_excluded_substitution() {
         let neighborhood =
             SubstitutionNeighborhood::new([Symbol::new(1), Symbol::new(2), Symbol::new(3)])
                 .unwrap();
 
-        assert_eq!(
-            neighborhood.minimum_outside_cost(Symbol::new(0), Cost::new_const(0.5), &RankedCosts,),
-            Cost::new_const(0.75)
-        );
-        assert_eq!(
-            neighborhood.minimum_outside_cost(Symbol::new(0), Cost::ONE, &RankedCosts),
-            Cost::new_const(0.9)
-        );
+        let (_, excluded) = neighborhood.scan(Symbol::new(0), Cost::new_const(0.5), &RankedCosts);
+        let (_, deletion) = neighborhood.scan(Symbol::new(0), Cost::ONE, &RankedCosts);
+
+        assert_eq!(excluded, Cost::new_const(0.75));
+        assert_eq!(deletion, Cost::new_const(0.9));
     }
 }
