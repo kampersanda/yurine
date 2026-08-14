@@ -254,37 +254,17 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 
 /// Returns the dot product of two L2-normalized embeddings.
 ///
-/// This is the innermost loop of a search: filtering evaluates it once per
-/// alphabet symbol per query position. Two details keep it vectorized. Splitting
-/// the sum across independent accumulators breaks the serial dependency chain
-/// that forbids reassociating floating-point addition, and iterating with
-/// `chunks_exact` gives each lane a statically known length, so no bounds check
-/// survives to block the vectorizer. Indexing the two slices directly is enough
-/// to lose both.
+/// Filtering evaluates this once per alphabet symbol per query position, so the
+/// shape is deliberate: independent accumulators break the serial dependency
+/// chain that forbids reassociating floating-point addition, and `chunks_exact`
+/// gives each lane a statically known length so no bounds check blocks the
+/// vectorizer. Indexing the two slices directly loses both.
 ///
-/// The lanes accumulate in `f32`, which is what makes them worth having: `f64`
-/// accumulators are half as wide and cost about a quarter of the speedup. The
-/// price is that rounding compounds once per term, so the error grows with the
-/// dimension rather than staying under any fixed constant. Against a sequential
-/// `f64` sum it measures around `2e-7` from 64 through 16384 dimensions, then
-/// `7e-7` at 65536 and `2e-6` at 262144. The classical bound for a dot product
-/// of unit vectors is `dimension * EPSILON`, which
-/// `substitution_cost_matches_a_sequential_sum_at_any_dimension` asserts.
-///
-/// That error is well clear of the decisions it feeds. Filtering keeps a symbol
-/// when its cost is at most eta, and cosine costs are continuous, so they land
-/// near eta only by coincidence: over 664,000 comparisons per eta on clustered
-/// embeddings, the closest any cost came to a nonzero eta was `1.5e-5`, and no
-/// symbol changed neighborhoods.
-///
-/// Eta of zero is the exception, because costs cluster exactly on it rather than
-/// spreading around it, and there the same sweep moved 41 of 664,000 symbols.
-/// Only distinct tokens with near-identical embeddings are affected: equal
-/// tokens never reach this function, so a threshold of zero still finds every
-/// exact match. Rows are stored as `f32`, so their norms are not exactly one and
-/// costs for such pairs are already approximate whatever this sum does.
-///
-/// Sixteen lanes rather than eight measured faster for both accumulator widths.
+/// The `f32` sum is approximate, by an error that grows with the dimension and
+/// is bounded by `dimension * EPSILON`. That stays well inside the margin
+/// filtering needs, except at an eta of zero, where costs sit exactly on the
+/// boundary rather than spread around it. Equal tokens return before reaching
+/// this function, so an exact search is unaffected.
 fn dot_product(from: &[f32], to: &[f32]) -> f32 {
     const LANES: usize = 16;
 
@@ -577,15 +557,10 @@ mod tests {
     }
 
     /// Splitting the sum across lanes reorders the additions and accumulates in
-    /// `f32`, so the cost drifts from a sequential `f64` sum by an amount that
-    /// grows with the dimension.
-    ///
-    /// The tolerance is the classical `dimension * EPSILON` bound for a
-    /// floating-point dot product of unit vectors, rather than a constant read
-    /// off one measurement. It is loose enough to admit honest rounding at every
-    /// dimension and tight enough to catch a sum that drops terms: leaving out
-    /// the trailing elements, or all but one lane, exceeds it by orders of
-    /// magnitude.
+    /// `f32`, so the cost drifts from a sequential `f64` sum. The tolerance is
+    /// the classical `dimension * EPSILON` bound for a dot product of unit
+    /// vectors: loose enough to admit that rounding at every dimension, tight
+    /// enough to catch a sum that drops terms.
     #[test]
     fn substitution_cost_matches_a_sequential_sum_at_any_dimension() {
         let mut state = 0x9e37_79b9_7f4a_7c15_u64;
