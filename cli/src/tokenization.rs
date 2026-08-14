@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Range;
 
 use clap::ValueEnum;
@@ -10,6 +11,16 @@ pub(crate) enum TokenizerKind {
     #[default]
     Character,
     Whitespace,
+}
+
+impl fmt::Display for TokenizerKind {
+    /// Writes the name the command line and the metadata files use.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Character => "character",
+            Self::Whitespace => "whitespace",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

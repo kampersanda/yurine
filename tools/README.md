@@ -90,12 +90,21 @@ $ cargo run -p yurine-cli -- index \
     --tokenizer whitespace \
     tools/output/corpus.index \
     tools/output/corpus.txt
+$ cargo run -p yurine-cli -- costs \
+    --tokenizer whitespace \
+    tools/output/costs.json \
+    tools/output/costs.snapshot
 $ cargo run -p yurine-cli -- search \
-    --costs tools/output/costs.json \
+    --costs tools/output/costs.snapshot \
     --threshold 0.3 \
     tools/output/corpus.index \
     '東京 都'
 ```
+
+Converted embeddings cover a large vocabulary, and reading them takes far
+longer than a search. The `costs` command compiles them once so that every
+later search opens the snapshot instead. Passing `costs.json` to `--costs`
+still works and reads the embeddings again for each query.
 
 Run each feature command with `--help` for all options.
 
