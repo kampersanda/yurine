@@ -262,17 +262,30 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 /// survives to block the vectorizer. Indexing the two slices directly is enough
 /// to lose both.
 ///
-/// The lanes accumulate in `f64`, keeping the cost identical to the sequential
-/// sum this replaced. Rounding compounds once per term, so an `f32` sum has no
-/// dimension-independent error bound, and [`EmbeddingStoreBuilder`] accepts any
-/// dimension: the error reaches `1e-7` around a thousand dimensions and keeps
-/// growing, which is enough to move the [`Cost`] and with it a threshold
-/// decision. Accumulating in `f64` holds the error near `1e-15`, far enough
-/// below the spacing of the `f32` it is rounded to that the two agree exactly.
+/// The lanes accumulate in `f32`, which is what makes them worth having: `f64`
+/// accumulators are half as wide and cost about a quarter of the speedup. The
+/// price is that rounding compounds once per term, so the error grows with the
+/// dimension rather than staying under any fixed constant. Against a sequential
+/// `f64` sum it measures around `2e-7` from 64 through 16384 dimensions, then
+/// `7e-7` at 65536 and `2e-6` at 262144. The classical bound for a dot product
+/// of unit vectors is `dimension * EPSILON`, which
+/// `substitution_cost_matches_a_sequential_sum_at_any_dimension` asserts.
 ///
-/// Sixteen lanes rather than eight because `f64` accumulators are half as wide,
-/// so twice as many are needed to fill the same vector registers.
-fn dot_product(from: &[f32], to: &[f32]) -> f64 {
+/// That error is well clear of the decisions it feeds. Filtering keeps a symbol
+/// when its cost is at most eta, and cosine costs are continuous, so they land
+/// near eta only by coincidence: over 664,000 comparisons per eta on clustered
+/// embeddings, the closest any cost came to a nonzero eta was `1.5e-5`, and no
+/// symbol changed neighborhoods.
+///
+/// Eta of zero is the exception, because costs cluster exactly on it rather than
+/// spreading around it, and there the same sweep moved 41 of 664,000 symbols.
+/// Only distinct tokens with near-identical embeddings are affected: equal
+/// tokens never reach this function, so a threshold of zero still finds every
+/// exact match. Rows are stored as `f32`, so their norms are not exactly one and
+/// costs for such pairs are already approximate whatever this sum does.
+///
+/// Sixteen lanes rather than eight measured faster for both accumulator widths.
+fn dot_product(from: &[f32], to: &[f32]) -> f32 {
     const LANES: usize = 16;
 
     let mut accumulators = [0.0; LANES];
@@ -280,13 +293,13 @@ fn dot_product(from: &[f32], to: &[f32]) -> f64 {
     let mut to_chunks = to.chunks_exact(LANES);
     for (from, to) in from_chunks.by_ref().zip(to_chunks.by_ref()) {
         for lane in 0..LANES {
-            accumulators[lane] += f64::from(from[lane]) * f64::from(to[lane]);
+            accumulators[lane] += from[lane] * to[lane];
         }
     }
 
-    let mut product: f64 = accumulators.iter().sum();
+    let mut product: f32 = accumulators.iter().sum();
     for (from, to) in from_chunks.remainder().iter().zip(to_chunks.remainder()) {
-        product += f64::from(*from) * f64::from(*to);
+        product += from * to;
     }
     product
 }
@@ -367,7 +380,7 @@ where
         let (Some(from), Some(to)) = (self.embeddings.get(from), self.embeddings.get(to)) else {
             return self.missing_substitution;
         };
-        let distance = (1.0 - dot_product(from, to)).clamp(0.0, 1.0) as f32;
+        let distance = (1.0 - dot_product(from, to)).clamp(0.0, 1.0);
         Cost::new_const(distance)
     }
 
@@ -563,13 +576,16 @@ mod tests {
             .collect()
     }
 
-    /// Splitting the sum across lanes reorders the additions, so the cost must
-    /// still be exactly what a sequential sum reports at any dimension.
+    /// Splitting the sum across lanes reorders the additions and accumulates in
+    /// `f32`, so the cost drifts from a sequential `f64` sum by an amount that
+    /// grows with the dimension.
     ///
-    /// Equality holds rather than mere closeness because the lanes accumulate
-    /// in `f64`, whose error stays around `1e-15` here, some seven orders of
-    /// magnitude below the spacing of the `f32` this is rounded to. Summing the
-    /// lanes in `f32` instead breaks this test at every dimension.
+    /// The tolerance is the classical `dimension * EPSILON` bound for a
+    /// floating-point dot product of unit vectors, rather than a constant read
+    /// off one measurement. It is loose enough to admit honest rounding at every
+    /// dimension and tight enough to catch a sum that drops terms: leaving out
+    /// the trailing elements, or all but one lane, exceeds it by orders of
+    /// magnitude.
     #[test]
     fn substitution_cost_matches_a_sequential_sum_at_any_dimension() {
         let mut state = 0x9e37_79b9_7f4a_7c15_u64;
@@ -600,10 +616,10 @@ mod tests {
 
             let distance = costs.substitution(&'a', &'b').get();
             assert!((0.0..1.0).contains(&distance), "clamped to {distance}");
-            assert_eq!(
+            assert_abs_diff_eq!(
                 distance,
                 (1.0 - similarity).clamp(0.0, 1.0) as f32,
-                "dimension {dimension}"
+                epsilon = dimension as f32 * f32::EPSILON
             );
         }
     }
