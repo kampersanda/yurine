@@ -12,6 +12,8 @@ from yurine_tools.corpus import TokenizerConfig, preprocess_blocks
 from yurine_tools.options import Normalization
 from yurine_tools.text_io import open_text_input, open_text_output
 
+_PROGRESS_LINES = 100_000
+
 
 class PreprocessCorpusArgs(Tap):
     """Typed command-line arguments for corpus preprocessing."""
@@ -61,6 +63,7 @@ def run_command(args: PreprocessCorpusArgs) -> None:
         config_path=args.sudachi_config,
     )
     count = 0
+    next_report = _PROGRESS_LINES
     with open_text_input(args.input) as source, open_text_output(args.output) as destination:
         blocks = preprocess_blocks(
             source, config, normalization=args.normalization, workers=args.workers
@@ -70,6 +73,9 @@ def run_command(args: PreprocessCorpusArgs) -> None:
             # Every output line is newline-terminated and tokens never contain
             # a newline, so this counts the lines the block carries.
             count += block.count("\n")
+            if count >= next_report:
+                print(f"processed {count} lines", file=sys.stderr)
+                next_report += _PROGRESS_LINES
     print(f"processed {count} lines", file=sys.stderr)
 
 

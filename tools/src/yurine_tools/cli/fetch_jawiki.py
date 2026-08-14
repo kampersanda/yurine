@@ -13,6 +13,8 @@ from yurine_tools.options import JawikiDataset, JawikiDump
 from yurine_tools.schemas import JawikiPassageMetadata
 from yurine_tools.text_io import open_text_output
 
+_PROGRESS_PASSAGES = 100_000
+
 
 class FetchJawikiArgs(Tap):
     """Typed command-line arguments for jawiki passage retrieval."""
@@ -54,6 +56,7 @@ def run_command(args: FetchJawikiArgs) -> None:
     )
 
     count = 0
+    next_report = _PROGRESS_PASSAGES
     with (
         open_archive(url, args.cache, report=_report) as archive,
         open_text_output(args.output) as destination,
@@ -74,6 +77,9 @@ def run_command(args: FetchJawikiArgs) -> None:
                 )
                 metadata.write(record.model_dump_json())
                 metadata.write("\n")
+            if count >= next_report:
+                _report(f"wrote {count} passages")
+                next_report += _PROGRESS_PASSAGES
     print(f"wrote {count} passages", file=sys.stderr)
 
 
