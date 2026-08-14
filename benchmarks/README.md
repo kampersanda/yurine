@@ -6,6 +6,12 @@ are observations, not CI pass/fail thresholds. Keep generated corpora and
 measurement results outside the repository; only the code and reproduction
 procedure are versioned.
 
+Both the corpus and the token embeddings are synthetic. They are built to
+compare one implementation against another under identical conditions, not to
+predict how the engine performs on real text: a synthetic corpus has no natural
+token distribution, and synthetic embeddings have no semantics. Read every
+number here as a before-and-after ratio.
+
 Generate the default whitespace-tokenized corpus:
 
 ```console
@@ -16,7 +22,9 @@ The generator uses a fixed seed, 20,000 data sequences, 32 tokens per sequence,
 a 256-token vocabulary, and an eight-token hot set. Every 128th sequence starts
 with the default query sequence, so the workload always has known exact matches.
 Every setting can be overridden; rerunning the same command produces identical
-bytes.
+bytes. The vocabulary may go up to 1,000,000 tokens, because embedding-based
+costs scan the whole vocabulary once per query position and their cost therefore
+grows with it.
 
 Measure construction and one cold plus five warm searches:
 
@@ -32,8 +40,61 @@ cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-baseline.txt \
   --persistent-index /tmp/yurine-baseline.index
 ```
 
+## Cosine embedding costs
+
+`--costs levenshtein` is the default and keeps the original workload.
+`--costs cosine` measures `CosineEmbeddingCosts` instead, over a synthetic
+embedding matrix covering the whole corpus vocabulary:
+
+```console
+cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-baseline.txt \
+  --costs cosine --dimension 300
+```
+
+The matrix is generated from the corpus, not read from a file, so no real
+embedding data is needed. Tokens are sorted, spread over `--embedding-clusters`
+clusters by their sorted position, and each embedding is the same fixed blend of
+its cluster center with an independent random direction, L2-normalized by the
+store. Two tokens in one cluster then have cosine similarity near
+`--embedding-cohesion`, and two tokens in different clusters are
+near-orthogonal. The same arguments always produce the same matrix, whatever
+order the corpus presents its tokens in.
+
+The clusters are what make the substitution neighborhood non-trivial.
+Independently drawn 300-dimensional vectors are all near-orthogonal, so at a
+small eta every neighborhood would hold only the query token itself, and any
+change whose cost depends on neighborhood size would measure as free.
+With the defaults, a 20,000-token vocabulary gives clusters of about 312 tokens
+that fall inside an eta of 0.25.
+
+`--embedding-seed` fixes the matrix, as `--seed` fixes the corpus. The embedding
+options are ignored under `--costs levenshtein`.
+
+Filtering evaluates substitutions across the vocabulary, while verification
+works on candidate anchors. A query of frequent tokens spends most of its time
+verifying, which hides the filtering cost this policy is slow in. To make
+filtering dominate, query rare tokens instead of the hot ones the default query
+uses:
+
+```console
+cargo run --release -p yurine-benchmarks -- generate /tmp/yurine-cosine.txt \
+  --vocabulary 20000 --hot-vocabulary 8
+cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-cosine.txt \
+  --costs cosine --threshold 2 --warm-runs 15 \
+  --query "t9000 t9001 t9002 t9003 t9004 t9005 t9006 t9007"
+```
+
+The matrix stays on the heap, whatever `--persistent-index` does with the
+engine; only the engine's own arrays are memory-mapped. It is built after the
+snapshot is reopened, so it does not disturb `open_heap_peak`, and it is counted
+in `engine_resident_heap`. A 20,000-token vocabulary at 300 dimensions is about
+24 MB.
+
+## Output
+
 Output is tab-separated `metric`, `value`, and `unit`. It includes:
 
+- the cost policy under measurement,
 - source corpus and persistent-index sizes,
 - corpus-load, engine-build, cold-search, and warm-search timings,
 - snapshot-save and mmap-open timings,
@@ -42,7 +103,21 @@ Output is tab-separated `metric`, `value`, and `unit`. It includes:
 - current file-backed RSS after open, cold search, and warm search on Linux,
 - engine-resident heap after releasing the input corpus,
 - whether exhaustive verification was used, selected query positions, and the
-  generated candidate count.
+  generated candidate count,
+- the number of substitution evaluations one search performs,
+- the embedding matrix's shape, seed, build time, and heap, under
+  `--costs cosine` only.
+
+Warm searches report their mean, median, and minimum. Prefer the median: a mean
+over few runs drifts with a single outlier, and comparing two implementations by
+means over three runs has already produced a ratio that fifteen runs did not
+confirm. Raise `--warm-runs` when comparing changes rather than reading one run.
+
+`substitution_calls` counts calls into the cost policy for one search. It is the
+direct measure of how much work filtering asks of the vocabulary, so a change
+that removes a redundant scan shows up here without needing a timing. The
+counted search runs after the timed ones and uses a counting wrapper around the
+same policy, so counting never enters a reported duration.
 
 `getrusage` supplies peak RSS on Linux and macOS. It is cumulative within the
 process, so search RSS includes any earlier construction peak. Heap peaks are
@@ -80,4 +155,5 @@ growth remains the implementation-independent memory metric.
 The library compatibility integration fixture separately fixes `SequenceId`,
 token range, weighted distance, and result order. CLI tests fix conversion from token
 ranges to UTF-8 byte ranges and matched source text. The benchmark package's unit
-test checks that corpus generation is byte-for-byte reproducible.
+tests check that corpus and embedding generation are reproducible, and that
+clustered embeddings separate near tokens from far ones.
