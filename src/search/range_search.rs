@@ -215,7 +215,8 @@ where
             }
             Err(error) => return Err(error),
         };
-        let candidates = generate_candidates(&selected, &self.engine.index);
+        let selected_query_positions = selected.len();
+        let candidates = generate_candidates(selected, &self.engine.index);
         let matches = Verifier::BidirectionalTrie.verify(
             query_string,
             &candidates,
@@ -227,7 +228,7 @@ where
             matches,
             RangeSearchMetrics {
                 used_exhaustive_verification: false,
-                selected_query_positions: selected.len(),
+                selected_query_positions,
                 generated_candidates: candidates.len(),
             },
         ))

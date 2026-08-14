@@ -128,8 +128,9 @@ mod tests {
 
     #[test]
     fn scan_reports_an_empty_neighborhood_with_the_deletion_cost() {
-        // Both substitutions cost more than deleting the symbol, so nothing
-        // enters the neighborhood and deletion stays the cheapest way out.
+        // Both substitutions exceed an eta of zero, so the neighborhood is
+        // empty, and both cost more than deletion, so deletion remains the
+        // cheapest way out.
         let neighborhood = SubstitutionNeighborhood::new([Symbol::new(4), Symbol::new(8)]).unwrap();
 
         let (neighbors, outside_cost) = neighborhood.scan(Symbol::new(0), Cost::ZERO, &RankedCosts);

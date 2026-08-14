@@ -16,15 +16,19 @@ use crate::search::Candidate;
 /// overlap. If a future index can generate duplicate anchors, verification
 /// still consolidates identical result substrings; duplicates would add work
 /// but would not change search results.
+///
+/// The selected positions are consumed so each neighborhood is released once
+/// expanded, rather than staying alive beside the candidates through
+/// verification.
 pub(super) fn generate_candidates(
-    selected: &[SelectedPosition],
+    selected: Vec<SelectedPosition>,
     index: &PostingsIndex,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
 
     for selected_position in selected {
-        for neighbor in &selected_position.neighbors {
-            for posting in index.postings(*neighbor) {
+        for neighbor in selected_position.neighbors {
+            for posting in index.postings(neighbor) {
                 candidates.push(Candidate {
                     string_id: posting.string_id,
                     string_position: posting.position,
@@ -68,7 +72,7 @@ mod tests {
             .unwrap();
 
         let candidates = generate_candidates(
-            &[
+            vec![
                 SelectedPosition {
                     position: Position::new(1),
                     neighbors: vec![second],
@@ -116,7 +120,7 @@ mod tests {
         }
 
         let candidates = generate_candidates(
-            &[SelectedPosition {
+            vec![SelectedPosition {
                 position: Position::new(0),
                 neighbors: vec![first, second],
             }],
