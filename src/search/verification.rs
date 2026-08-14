@@ -1,10 +1,11 @@
-//! Verification of candidates against a distance threshold.
+//! Verification of candidates against a distance bound.
 
 mod bidirectional_trie;
 mod smith_waterman;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::search::bound::StrictBound;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::{SequenceId, Symbol};
@@ -24,8 +25,8 @@ pub(in crate::search) enum Verifier {
 }
 
 impl Verifier {
-    /// Returns exactly the non-empty substrings whose distance is at most
-    /// `threshold`, subject to the alignments each algorithm measures.
+    /// Returns exactly the non-empty substrings whose distance `bound` admits,
+    /// subject to the alignments each algorithm measures.
     ///
     /// Each substring must occur exactly once. Results must be ordered by data
     /// string ID, then symbol-range start, then symbol-range end.
@@ -34,7 +35,7 @@ impl Verifier {
         query_string: &[Symbol],
         candidates: &[Candidate],
         corpus: &CorpusStore,
-        threshold: Cost,
+        bound: StrictBound,
         costs: &C,
     ) -> Result<Vec<Match>>
     where
@@ -42,10 +43,10 @@ impl Verifier {
     {
         match self {
             Self::BidirectionalTrie => {
-                bidirectional_trie::verify(query_string, candidates, corpus, threshold, costs)
+                bidirectional_trie::verify(query_string, candidates, corpus, bound, costs)
             }
             Self::SmithWaterman => {
-                smith_waterman::verify(query_string, candidates, corpus, threshold, costs)
+                smith_waterman::verify(query_string, candidates, corpus, bound, costs)
             }
         }
     }
@@ -96,7 +97,7 @@ fn validated_candidate_string<'a>(
 /// IEEE-754 addition can round `f32::MAX +` a sufficiently small positive
 /// value back to `f32::MAX`. The error-free transformation below recovers that
 /// positive residual so an unrepresentable distance cannot qualify at a
-/// finite strict search threshold.
+/// finite search bound.
 fn add_distance(left: f32, right: f32) -> f32 {
     let sum = left + right;
     if !sum.is_finite() {
@@ -173,12 +174,20 @@ where
 mod tests {
     use rstest::rstest;
 
-    use super::{Verifier, add_distance};
+    use super::{StrictBound, Verifier, add_distance};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
     use crate::search::{Candidate, Match};
     use crate::store::{CorpusStore, CorpusStoreBuilder};
     use crate::types::{Position, SequenceId, Symbol};
+
+    /// The bound admitting exactly the distances at most `threshold`.
+    ///
+    /// Verification tests state their expectations with the public inclusive
+    /// threshold, so each one converts it exactly where a search would.
+    fn bound(threshold: f32) -> StrictBound {
+        StrictBound::from_inclusive(Cost::new(threshold).unwrap()).unwrap()
+    }
 
     /// Ordinary Levenshtein costs.
     struct UnitCosts;
@@ -454,7 +463,7 @@ mod tests {
                 &query_string,
                 &candidates,
                 &corpus,
-                Cost::new(threshold).unwrap(),
+                bound(threshold),
                 &costs,
             )
             .unwrap();
@@ -476,7 +485,7 @@ mod tests {
         let candidates = all_candidates(&texts, 2);
 
         let matches = verifier
-            .verify(&symbols("ab"), &candidates, &corpus, Cost::ONE, &UnitCosts)
+            .verify(&symbols("ab"), &candidates, &corpus, bound(1.0), &UnitCosts)
             .unwrap();
 
         assert_eq!(
@@ -518,7 +527,7 @@ mod tests {
         let corpus = corpus(&["ab"]);
 
         let matches = verifier
-            .verify(&symbols("ab"), &[], &corpus, Cost::ONE, &UnitCosts)
+            .verify(&symbols("ab"), &[], &corpus, bound(1.0), &UnitCosts)
             .unwrap();
 
         assert!(matches.is_empty());
@@ -542,7 +551,7 @@ mod tests {
         ];
 
         let matches = verifier
-            .verify(&symbols("aa"), &candidates, &corpus, Cost::ONE, &UnitCosts)
+            .verify(&symbols("aa"), &candidates, &corpus, bound(1.0), &UnitCosts)
             .unwrap();
 
         assert_eq!(
@@ -579,7 +588,7 @@ mod tests {
                 &symbols("ab"),
                 &[anchor, anchor, anchor],
                 &corpus,
-                Cost::ZERO,
+                bound(0.0),
                 &UnitCosts,
             )
             .unwrap();
@@ -612,7 +621,7 @@ mod tests {
                 &symbols("ab"),
                 &candidates,
                 &corpus,
-                Cost::new(threshold).unwrap(),
+                bound(threshold),
                 &UnitCosts,
             )
             .unwrap();
@@ -643,7 +652,7 @@ mod tests {
                 &symbols("ab"),
                 &candidates,
                 &corpus,
-                Cost::ONE,
+                bound(1.0),
                 &CostPolicy::Unrepresentable,
             )
             .unwrap();
@@ -676,23 +685,6 @@ mod tests {
     }
 
     #[rstest]
-    fn verification_rejects_a_threshold_without_a_strict_upper_bound(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
-    ) {
-        let corpus = corpus(&["a"]);
-
-        let result = verifier.verify(
-            &symbols("a"),
-            &[candidate(0, 0, 0)],
-            &corpus,
-            Cost::MAX,
-            &UnitCosts,
-        );
-
-        assert_eq!(result, Err(Error::InvalidCost(f32::MAX)));
-    }
-
-    #[rstest]
     fn verification_rejects_unknown_string_before_returning_matches(
         #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
     ) {
@@ -702,7 +694,7 @@ mod tests {
             &symbols("a"),
             &[candidate(0, 0, 0), candidate(1, 0, 0)],
             &corpus,
-            Cost::ZERO,
+            bound(0.0),
             &UnitCosts,
         );
 
@@ -724,7 +716,7 @@ mod tests {
             &symbols("a"),
             &[candidate(0, string_position, 0)],
             &corpus,
-            Cost::ZERO,
+            bound(0.0),
             &UnitCosts,
         );
 
@@ -752,7 +744,7 @@ mod tests {
             &symbols(query_text),
             &[candidate(0, 0, query_position)],
             &corpus,
-            Cost::ZERO,
+            bound(0.0),
             &UnitCosts,
         );
 

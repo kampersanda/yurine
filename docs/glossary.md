@@ -15,3 +15,5 @@ This document defines Yurine's core terminology.
 | **Data sequence/string**  | A sequence submitted for indexing, or the string produced by encoding it.                                     |
 | **Query sequence/string** | A sequence submitted as a search query, or the string produced by encoding it for that search.                |
 | **Corpus**                | The ordered collection of strings produced from indexed data sequences.                                       |
+| **Inclusive threshold**   | The search parameter of the public API: a segment is a result when its distance is at most this value.        |
+| **Strict bound**          | The exclusive upper bound the core algorithms search with, immediately above the inclusive threshold.         |

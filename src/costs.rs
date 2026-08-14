@@ -132,16 +132,16 @@ impl Cost {
         self.0.total_cmp(&other.0)
     }
 
-    /// Returns the next representable cost above this one.
+    /// Returns the next representable cost above this one, or `None` if this
+    /// cost is [`Cost::MAX`].
     ///
-    /// # Errors
-    ///
-    /// Returns an error if this cost is [`Cost::MAX`].
-    pub fn next_up(self) -> Result<Self> {
+    /// This is how an inclusive search threshold becomes the strict bound the
+    /// core algorithms use, so it stays crate-internal; see `search::bound`.
+    pub(crate) fn next_up(self) -> Option<Self> {
         if self == Self::MAX {
-            return Err(Error::InvalidCost(self.0));
+            return None;
         }
-        Ok(Self(self.0.next_up()))
+        Some(Self(self.0.next_up()))
     }
 }
 
@@ -286,6 +286,6 @@ mod tests {
 
         assert!(next > Cost::ONE);
         assert_eq!(next.get().to_bits(), Cost::ONE.get().to_bits() + 1);
-        assert!(matches!(Cost::MAX.next_up(), Err(Error::InvalidCost(value)) if value == f32::MAX));
+        assert_eq!(Cost::MAX.next_up(), None);
     }
 }

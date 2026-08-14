@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use super::{add_distance, create_match, root_column, step_dp, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::search::bound::StrictBound;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
 use crate::types::{SequenceId, Symbol};
@@ -140,13 +141,12 @@ pub(super) fn verify<C>(
     query_string: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
-    threshold: Cost,
+    bound: StrictBound,
     costs: &C,
 ) -> Result<Vec<Match>>
 where
     C: EditCosts<Symbol>,
 {
-    let threshold = threshold.next_up()?;
     for candidate in candidates {
         validated_candidate_string(query_string, candidate, corpus)?;
     }
@@ -169,11 +169,11 @@ where
         let anchor_cost = costs
             .substitution(&query_string[query_position], &string[string_position])
             .get();
-        if anchor_cost >= threshold {
+        if !bound.admits(anchor_cost) {
             continue;
         }
 
-        let budget = threshold - anchor_cost;
+        let budget = bound.residual(anchor_cost);
         // Building these reference vectors is O(|Q|), so memoize them per
         // query-string position instead of repeating the allocation per
         // candidate.
@@ -219,7 +219,7 @@ where
                     add_distance(anchor_cost, backward_distance),
                     forward_distance,
                 );
-                if distance < threshold {
+                if bound.admits(distance) {
                     let symbol_start = string_position - backward_symbol_count;
                     let symbol_end = string_position + forward_symbol_count + 1;
                     substrings

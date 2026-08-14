@@ -5,6 +5,7 @@ use std::hash::Hash;
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
+use crate::search::bound::StrictBound;
 use crate::search::encoding::EncodedQuery;
 use crate::search::filtering::{MinCandidateSelector, generate_candidates};
 use crate::search::verification::Verifier;
@@ -18,7 +19,8 @@ use crate::types::{Position, SequenceId, Symbol};
 /// than or equal to [`Self::threshold`]. Most callers only need [`Self::new`];
 /// [`Self::with_eta`] is a filtering-performance tuning control and does not
 /// change which results are correct. Both values must be finite and
-/// non-negative; they are validated when a search starts.
+/// non-negative, and the threshold must also be less than [`f32::MAX`] so that
+/// a search bound exists above it; they are validated when a search starts.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RangeSearchParams {
     threshold: f32,
@@ -85,12 +87,11 @@ impl RangeSearchParams {
 
 /// Returns the default substitution-neighborhood radius for a query length.
 ///
-/// The radius is `threshold / query_sequence_len`. For an empty query sequence,
-/// this returns zero rather than dividing by zero; searching an empty query
-/// sequence retains its existing error behavior. [`Cost::MAX`] is rejected
-/// because it cannot be converted to a finite strict search bound.
+/// The radius is `threshold / query_sequence_len`, computed from the inclusive
+/// threshold. For an empty query sequence, this returns zero rather than
+/// dividing by zero; searching an empty query sequence retains its existing
+/// error behavior.
 pub(crate) fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost> {
-    // strict_threshold(threshold)?;
     if query_sequence_len == 0 {
         Ok(Cost::ZERO)
     } else {
@@ -167,21 +168,26 @@ where
         params: &RangeSearchParams,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)> {
         let threshold = Cost::new(params.threshold)?;
+        // The public threshold is inclusive and everything below this line
+        // searches for distances strictly below a bound, so the conversion
+        // happens here, once, where the two meet.
+        let bound = StrictBound::from_inclusive(threshold)?;
         let eta = params.eta.map(Cost::new).transpose()?;
         let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.engine.vocabulary)?;
         let costs = encoded_query.costs(&self.engine.vocabulary, &self.costs);
-        // strict_threshold(threshold)?;
         let eta = match eta {
             Some(eta) => eta,
+            // Eta bounds substitution costs rather than distances, so it
+            // divides the inclusive threshold and not the strict bound.
             None => automatic_eta(threshold, encoded_query.string().len())?,
         };
-        self.search_query_string(encoded_query.string(), threshold, eta, &costs)
+        self.search_query_string(encoded_query.string(), bound, eta, &costs)
     }
 
     fn search_query_string<S>(
         &self,
         query_string: &[Symbol],
-        threshold: Cost,
+        bound: StrictBound,
         eta: Cost,
         costs: &S,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)>
@@ -190,7 +196,7 @@ where
     {
         let selected = match MinCandidateSelector.select(
             query_string,
-            threshold,
+            bound,
             eta,
             &self.engine.index,
             costs,
@@ -198,8 +204,7 @@ where
         ) {
             Ok(selected) => selected,
             Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {
-                let matches =
-                    verify_exhaustively(query_string, threshold, &self.engine.store, costs)?;
+                let matches = verify_exhaustively(query_string, bound, &self.engine.store, costs)?;
                 return Ok((
                     matches,
                     RangeSearchMetrics {
@@ -222,7 +227,7 @@ where
             query_string,
             &candidates,
             &self.engine.store,
-            threshold,
+            bound,
             costs,
         )?;
         Ok((
@@ -244,7 +249,7 @@ where
 /// filter-and-verify path, but is guaranteed to be correct.
 fn verify_exhaustively<C>(
     query_string: &[Symbol],
-    threshold: Cost,
+    bound: StrictBound,
     corpus: &CorpusStore,
     costs: &C,
 ) -> Result<Vec<Match>>
@@ -268,14 +273,16 @@ where
             });
         }
     }
-    Verifier::SmithWaterman.verify(query_string, &candidates, corpus, threshold, costs)
+    Verifier::SmithWaterman.verify(query_string, &candidates, corpus, bound, costs)
 }
 
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
 
-    use super::{MinCandidateSelector, RangeSearchParams, automatic_eta, verify_exhaustively};
+    use super::{
+        MinCandidateSelector, RangeSearchParams, StrictBound, automatic_eta, verify_exhaustively,
+    };
     use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::costs::{Cost, EditCosts};
@@ -438,6 +445,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_threshold_without_a_strict_upper_bound() {
+        let engine = engine();
+
+        assert_eq!(
+            engine
+                .range_searcher(CharacterCosts)
+                .search(&['a'], &RangeSearchParams::new(f32::MAX)),
+            Err(Error::InvalidThreshold(f32::MAX))
+        );
+    }
+
+    #[test]
     fn automatic_eta_divides_threshold_by_query_sequence_length() {
         assert_eq!(automatic_eta(Cost::new_const(0.75), 3).unwrap(), 0.25);
         assert_eq!(automatic_eta(Cost::ONE, 0).unwrap(), Cost::ZERO);
@@ -538,7 +557,7 @@ mod tests {
             MinCandidateSelector
                 .select(
                     encoded_query.string(),
-                    threshold,
+                    StrictBound::from_inclusive(threshold).unwrap(),
                     eta,
                     &engine.index,
                     &encoded_costs,
@@ -555,7 +574,7 @@ mod tests {
             .unwrap();
         let exhaustive = verify_exhaustively(
             encoded_query.string(),
-            threshold,
+            StrictBound::from_inclusive(threshold).unwrap(),
             &engine.store,
             &encoded_costs,
         )
