@@ -196,9 +196,10 @@ mod tests {
     /// at least one query symbol with one data symbol, and that inequality is
     /// what makes such an alignment optimal, so both verifiers must agree.
     ///
-    /// All costs are multiples of `0.25` so that the sums produced by short
-    /// alignments are exact in `f32` and threshold comparisons cannot depend on
-    /// the order in which an implementation accumulates them.
+    /// Apart from [`CostPolicy::Unrepresentable`], all costs are multiples of
+    /// `0.25` so that the sums produced by short alignments are exact in `f32`
+    /// and threshold comparisons cannot depend on the order in which an
+    /// implementation accumulates them.
     #[derive(Debug, Clone, Copy)]
     enum CostPolicy {
         /// Symmetric unit costs.
@@ -206,10 +207,23 @@ mod tests {
         /// Deletion is cheaper than insertion, so confusing the query direction
         /// with the data direction changes the result.
         Asymmetric,
-        /// Costs depend on the symbols involved, so DP columns cached for one
-        /// symbol must never be reused for another.
+        /// Costs depend on the symbols involved, and the substitution cost
+        /// weighs the query symbol and the data symbol differently, so DP
+        /// columns cached for one symbol must never be reused for another.
         SymbolDependent,
+        /// Inserting [`UNREPRESENTABLE`] costs [`Cost::MAX`], so a DP cell that
+        /// grows past the largest representable distance sits next to cells
+        /// holding ordinary finite distances.
+        ///
+        /// The reference adds with plain `f32` arithmetic while the verifiers
+        /// use [`add_distance`], so the two disagree above [`Cost::MAX`]. Every
+        /// such value is far above the thresholds used here, so both sides
+        /// still agree on which substrings match and on their distances.
+        Unrepresentable,
     }
+
+    /// The data symbol that [`CostPolicy::Unrepresentable`] cannot insert.
+    const UNREPRESENTABLE: Symbol = Symbol::new(2);
 
     impl EditCosts<Symbol> for CostPolicy {
         fn substitution(&self, from: &Symbol, to: &Symbol) -> Cost {
@@ -217,20 +231,19 @@ mod tests {
                 return Cost::ZERO;
             }
             match self {
-                Self::Unit => Cost::ONE,
+                Self::Unit | Self::Unrepresentable => Cost::ONE,
                 Self::Asymmetric => Cost::new_const(1.25),
-                // The two symbols contribute different amounts, so the cost is
-                // also asymmetric in the substitution direction.
+                // The query symbol and the data symbol carry different
+                // coefficients, so this cost changes when the two are swapped.
                 Self::SymbolDependent => {
-                    Cost::new(0.25 * (from.get() as f32 + 1.0) + 0.25 * (to.get() as f32 + 2.0))
-                        .unwrap()
+                    Cost::new(0.25 * from.get() as f32 + 0.5 * to.get() as f32 + 0.25).unwrap()
                 }
             }
         }
 
         fn deletion(&self, symbol: &Symbol) -> Cost {
             match self {
-                Self::Unit => Cost::ONE,
+                Self::Unit | Self::Unrepresentable => Cost::ONE,
                 Self::Asymmetric => Cost::new_const(0.5),
                 Self::SymbolDependent => Cost::new(0.25 * (symbol.get() as f32 + 1.0)).unwrap(),
             }
@@ -241,25 +254,14 @@ mod tests {
                 Self::Unit => Cost::ONE,
                 Self::Asymmetric => Cost::new_const(1.5),
                 Self::SymbolDependent => Cost::new(0.5 * (symbol.get() as f32 + 1.0)).unwrap(),
+                Self::Unrepresentable => {
+                    if *symbol == UNREPRESENTABLE {
+                        Cost::MAX
+                    } else {
+                        Cost::ONE
+                    }
+                }
             }
-        }
-    }
-
-    /// Costs that make every edit unrepresentably expensive except an exact
-    /// symbol match.
-    struct SaturatingCosts;
-
-    impl EditCosts<Symbol> for SaturatingCosts {
-        fn substitution(&self, from: &Symbol, to: &Symbol) -> Cost {
-            if from == to { Cost::ZERO } else { Cost::MAX }
-        }
-
-        fn deletion(&self, _symbol: &Symbol) -> Cost {
-            Cost::MAX
-        }
-
-        fn insertion(&self, _symbol: &Symbol) -> Cost {
-            Cost::MAX
         }
     }
 
@@ -373,6 +375,45 @@ mod tests {
         matches
     }
 
+    /// The reference comparison below assumes the inequality documented on
+    /// [`CostPolicy`], so the policies are checked against it directly.
+    #[rstest]
+    fn every_cost_policy_keeps_substitution_within_deletion_and_insertion(
+        #[values(
+            CostPolicy::Unit,
+            CostPolicy::Asymmetric,
+            CostPolicy::SymbolDependent,
+            CostPolicy::Unrepresentable
+        )]
+        costs: CostPolicy,
+    ) {
+        for from in 0..26 {
+            for to in 0..26 {
+                let (from, to) = (Symbol::new(from), Symbol::new(to));
+                assert!(
+                    costs.substitution(&from, &to).get()
+                        <= costs.deletion(&from).get() + costs.insertion(&to).get(),
+                    "{costs:?} substitutes {from} with {to} more cheaply than it edits them"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn symbol_dependent_costs_separate_the_query_side_from_the_data_side() {
+        let costs = CostPolicy::SymbolDependent;
+        let from = Symbol::new(0);
+        let to = Symbol::new(1);
+
+        // Swapping the two symbols must change the substitution cost, otherwise
+        // the policy cannot detect a verifier that confuses the two directions.
+        assert_ne!(
+            costs.substitution(&from, &to),
+            costs.substitution(&to, &from)
+        );
+        assert_ne!(costs.deletion(&from), costs.insertion(&from));
+    }
+
     #[rstest]
     #[case::single_symbol("a", &["a"])]
     #[case::exact_and_shifted_occurrences("ab", &["xaby"])]
@@ -387,7 +428,12 @@ mod tests {
         #[case] query_text: &str,
         #[case] texts: &[&str],
         #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
-        #[values(CostPolicy::Unit, CostPolicy::Asymmetric, CostPolicy::SymbolDependent)]
+        #[values(
+            CostPolicy::Unit,
+            CostPolicy::Asymmetric,
+            CostPolicy::SymbolDependent,
+            CostPolicy::Unrepresentable
+        )]
         costs: CostPolicy,
         #[values(0.0, 0.5, 1.0, 2.0, 3.5)] threshold: f32,
     ) {
@@ -572,31 +618,52 @@ mod tests {
     }
 
     #[rstest]
-    fn verification_treats_unrepresentable_distances_as_unreachable(
+    fn verification_keeps_finite_matches_next_to_unrepresentable_distances(
         #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
     ) {
-        // Extending the exact match by the trailing symbol costs `Cost::MAX`,
-        // whose sum with the anchor cost is not a representable distance.
-        let corpus = corpus(&["ab"]);
-        let candidates = all_candidates(&["ab"], 1);
+        // Inserting "c" costs `Cost::MAX`, so the DP cell that only inserts it
+        // is unrepresentable once the following "b" is inserted as well, while
+        // the neighboring cell substituting "c" for the query symbol stays
+        // finite. Both cells are reached: the unrepresentable one must not
+        // suppress the ranges that remain within the threshold, and the ranges
+        // that pass through it must not become matches.
+        let corpus = corpus(&["acb"]);
+        let candidates = all_candidates(&["acb"], 2);
 
         let matches = verifier
             .verify(
-                &symbols("a"),
+                &symbols("ab"),
                 &candidates,
                 &corpus,
                 Cost::ONE,
-                &SaturatingCosts,
+                &CostPolicy::Unrepresentable,
             )
             .unwrap();
 
         assert_eq!(
             matches,
-            [Match {
-                sequence_id: 0,
-                token_range: 0..1,
-                distance: 0.0,
-            }]
+            [
+                Match {
+                    sequence_id: 0,
+                    token_range: 0..1,
+                    distance: 1.0,
+                },
+                Match {
+                    sequence_id: 0,
+                    token_range: 0..2,
+                    distance: 1.0,
+                },
+                Match {
+                    sequence_id: 0,
+                    token_range: 1..3,
+                    distance: 1.0,
+                },
+                Match {
+                    sequence_id: 0,
+                    token_range: 2..3,
+                    distance: 1.0,
+                },
+            ]
         );
     }
 
