@@ -1,8 +1,9 @@
 //! Bidirectional mappings between tokens and compact symbols.
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use hashbrown::HashMap;
 
 #[cfg(feature = "persist")]
 use crate::errors::Error;

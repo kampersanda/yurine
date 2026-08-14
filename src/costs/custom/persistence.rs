@@ -1,6 +1,7 @@
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::Path;
+
+use hashbrown::HashMap;
 
 use super::CustomCosts;
 use crate::costs::Cost;

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use hashbrown::HashSet;
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{BufRead, BufReader};

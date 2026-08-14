@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::path::Path;

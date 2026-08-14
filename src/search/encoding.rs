@@ -1,7 +1,8 @@
 //! Query-local conversion between public tokens and internal symbols.
 
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use hashbrown::HashMap;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
