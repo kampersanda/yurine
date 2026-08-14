@@ -5,14 +5,13 @@ Fast, exact search for sequence segments under weighted edit distance.
 ## What Yurine does
 
 Yurine finds approximate query segments inside longer token sequences. In this
-example, brackets mark the returned range:
+example, brackets mark the returned segment:
 
 ```text
-Indexed: Jinbocho is a [book town known] for curry
-                               |
-                               |- sub(district, town) = 0.25
-                               |
-Query:                  book district known
+Indexed: Jinbocho is a [book town known for curry] .
+                              │     └── ins(known) = 0.2
+                              ├── sub(district, town) = 0.1
+Query:                  book district for curry
 ```
 
 ## Key characteristics
