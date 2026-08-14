@@ -11,13 +11,21 @@ use crate::types::{SequenceId, Symbol};
 
 /// Verification algorithm used to check filtering candidates.
 pub(in crate::search) enum Verifier {
+    /// Verification local to each candidate anchor.
+    ///
+    /// This only measures alignments pairing at least one query symbol with one
+    /// data symbol, which is the complete answer for the cost policies
+    /// described in the [`bidirectional_trie`] module documentation.
     BidirectionalTrie,
+    /// Exhaustive verification of every substring of every candidate string.
+    ///
+    /// This measures every alignment, so it answers for any cost policy.
     SmithWaterman,
 }
 
 impl Verifier {
     /// Returns exactly the non-empty substrings whose distance is at most
-    /// `threshold`.
+    /// `threshold`, subject to the alignments each algorithm measures.
     ///
     /// Each substring must occur exactly once. Results must be ordered by data
     /// string ID, then symbol-range start, then symbol-range end.

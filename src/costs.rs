@@ -24,6 +24,27 @@ use crate::errors::{Error, Result};
 /// The search direction is always from the query sequence to a data segment.
 /// Thus, deletion consumes a query token and insertion consumes a
 /// data token.
+///
+/// # Substitution against deletion and insertion
+///
+/// The three operations need not be related in any particular way, and results
+/// are exact whatever their costs. The relationship does decide how a search
+/// is answered, and therefore how long it takes.
+///
+/// Filtering yields data segments anchored on a token pair, so verifying them
+/// only inspects alignments that pair at least one query token with one data
+/// token. Deleting a query token and inserting a data token can be replaced by
+/// substituting one for the other without increasing the distance exactly when
+/// `substitution(from, to) <= deletion(from) + insertion(to)`, which is what
+/// makes an anchored alignment optimal.
+///
+/// Where that inequality does not hold, the cheapest alignment of a segment
+/// may pair no tokens at all. Such an alignment deletes every query token, so
+/// it costs at least the sum of those deletions, and a search whose threshold
+/// reaches that sum is answered by exhaustive verification instead of by
+/// filtering. Costs that make deletion and insertion much cheaper than
+/// substitution therefore reach that slower path more often; see
+/// [`RangeSearcher::search`](crate::search::RangeSearcher::search).
 pub trait EditCosts<T> {
     /// Returns the cost of replacing `from` with `to`.
     ///

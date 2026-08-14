@@ -133,6 +133,14 @@ where
     /// `threshold >= query_sequence.len()` is
     /// such a case.
     ///
+    /// A query position contributes at most the cost of deleting its token, so
+    /// the fallback also covers every search that could match a data segment
+    /// without pairing any tokens with it. Such an alignment costs at least the
+    /// cost of deleting the whole query sequence, and a threshold reaching that
+    /// sum is exactly what leaves the threshold subsequence unavailable.
+    /// Filtering may therefore answer with anchored data segments whatever the
+    /// relationship between the operation costs; see [`EditCosts`].
+    ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query-sequence length
     /// `m` and
     /// data string lengths `n_i`, and can return `O(sum(n_i^2))` data
@@ -444,6 +452,55 @@ mod tests {
             .unwrap();
 
         assert_eq!(matches, expected_matches(1.0));
+    }
+
+    /// Costs that break `substitution <= deletion + insertion`, so the cheapest
+    /// alignment of a segment can pair no tokens with the query sequence.
+    struct CheapEditCosts;
+
+    impl EditCosts<char> for CheapEditCosts {
+        fn substitution(&self, from: &char, to: &char) -> Cost {
+            if from == to { Cost::ZERO } else { Cost::ONE }
+        }
+
+        fn deletion(&self, _token: &char) -> Cost {
+            Cost::new_const(0.1)
+        }
+
+        fn insertion(&self, _token: &char) -> Cost {
+            Cost::new_const(0.1)
+        }
+    }
+
+    #[test]
+    fn segments_matched_without_pairing_a_token_are_verified_exhaustively() {
+        // Deleting the query token and inserting a data token costs 0.2, while
+        // substituting one for the other costs 1.0. Anchored verification would
+        // miss every segment here, so the search must not reach it.
+        let mut builder = SearchEngineBuilder::new();
+        builder.add_sequence("xbz".chars()).unwrap();
+        let engine = builder.build().unwrap();
+
+        let (matches, metrics) = engine
+            .range_searcher(CheapEditCosts)
+            .search_with_metrics(&['a'], &RangeSearchParams::new(0.5))
+            .unwrap();
+
+        assert!(metrics.used_exhaustive_verification);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|matched| (matched.token_range.clone(), matched.distance))
+                .collect::<Vec<_>>(),
+            [
+                (0..1, 0.2),
+                (0..2, 0.3),
+                (0..3, 0.4),
+                (1..2, 0.2),
+                (1..3, 0.3),
+                (2..3, 0.2),
+            ]
+        );
     }
 
     #[test]
