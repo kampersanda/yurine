@@ -232,9 +232,11 @@ where
     eprintln!("read {sequence_count} source texts");
     timings.read = read_start.elapsed();
 
+    eprintln!("building index for {sequence_count} source texts");
     let build_start = Instant::now();
     let engine = builder.build()?;
     timings.build = build_start.elapsed();
+    eprintln!("built index for {sequence_count} source texts");
 
     // Publish the new index only once every stage has succeeded, so a failed
     // run leaves the index of a previous one usable.
