@@ -49,8 +49,10 @@ pub(crate) enum CostKind {
 /// Writes `costs` to `directory`, replacing the snapshot of a previous run.
 ///
 /// The cost files are written under temporary names and renamed into place
-/// only once all of them have been written, so a failed run leaves the
-/// snapshot of a previous one usable.
+/// only once all of them have been written, and the metadata that describes
+/// them is replaced last. A run that fails while reading its configuration or
+/// writing the cost files therefore leaves the snapshot of a previous one
+/// usable.
 pub(crate) fn save<T, C>(
     directory: &Path,
     costs: &RuntimeCosts<T>,
@@ -136,16 +138,23 @@ where
     Ok(costs)
 }
 
+/// Writes the metadata that makes a snapshot readable, replacing it in place.
+///
+/// The metadata is written under a temporary name and renamed, so a write that
+/// fails part way leaves the metadata of a previous run intact rather than
+/// truncating it.
 fn write_metadata(directory: &Path, kind: CostKind, tokenizer: TokenizerKind) -> Result<()> {
     let metadata = Metadata {
         version: FORMAT_VERSION,
         kind,
         tokenizer,
     };
-    let path = directory.join(METADATA_FILE);
     let contents = serde_json::to_string_pretty(&metadata)?;
-    fs::write(&path, format!("{contents}\n"))
-        .with_context(|| format!("failed to write '{}'", path.display()))
+    let written = temporary(directory, METADATA_FILE);
+    fs::write(&written, format!("{contents}\n"))
+        .with_context(|| format!("failed to write '{}'", written.display()))?;
+    let path = directory.join(METADATA_FILE);
+    fs::rename(&written, &path).with_context(|| format!("failed to publish '{}'", path.display()))
 }
 
 pub(crate) fn read_metadata(directory: &Path) -> Result<Metadata> {
@@ -338,6 +347,20 @@ mod tests {
             read_metadata(&snapshot).unwrap().kind,
             CostKind::Levenshtein
         );
+    }
+
+    #[test]
+    fn publishing_a_snapshot_leaves_no_temporary_files() {
+        let directory = TestDirectory::new();
+        let snapshot = compile_custom(&directory);
+
+        let mut names: Vec<_> = fs::read_dir(&snapshot)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+
+        assert_eq!(names, ["costs.yurine", "metadata.json"]);
     }
 
     #[test]
