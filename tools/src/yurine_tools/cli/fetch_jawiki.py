@@ -28,6 +28,11 @@ class FetchJawikiArgs(Tap):
         """Validate the limit and the paths before any download starts."""
         if self.limit is not None and self.limit <= 0:
             raise ValueError("limit must be positive")
+        # Only the corpus can go to standard output; a second stream there
+        # would interleave metadata with it, and a cache needs a real file.
+        for name, value in (("metadata", self.metadata), ("cache", self.cache)):
+            if value == "-":
+                raise ValueError(f"{name} must be a file path, not standard output")
         paths = [("output", self.output, True)]
         if self.metadata is not None:
             paths.append(("metadata", self.metadata, False))

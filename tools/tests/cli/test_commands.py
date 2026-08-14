@@ -108,6 +108,12 @@ def test_jawiki_rejects_colliding_paths(arguments: list[str]) -> None:
         FetchJawikiArgs().parse_args(arguments)
 
 
+@pytest.mark.parametrize("option", ["--metadata", "--cache"])
+def test_jawiki_keeps_standard_output_for_the_corpus(option: str) -> None:
+    with pytest.raises(ValueError, match="not standard output"):
+        FetchJawikiArgs().parse_args(["-", option, "-"])
+
+
 def test_jawiki_writes_a_corpus_and_aligned_metadata(tmp_path: Path, monkeypatch) -> None:
     records = [
         {

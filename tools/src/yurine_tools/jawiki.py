@@ -47,13 +47,19 @@ def download_archive(url: str, path: Path, *, report: Callable[[str], None]) -> 
     partial = path.with_name(f"{path.name}.part")
     downloaded = 0
     next_report = _PROGRESS_BYTES
-    with _open_stream(url) as response, partial.open("wb") as destination:
-        while chunk := response.read(_CHUNK_BYTES):
-            destination.write(chunk)
-            downloaded += len(chunk)
-            if downloaded >= next_report:
-                report(f"downloaded {downloaded // _CHUNK_BYTES} MiB")
-                next_report += _PROGRESS_BYTES
+    try:
+        with _open_stream(url) as response, partial.open("wb") as destination:
+            while chunk := response.read(_CHUNK_BYTES):
+                destination.write(chunk)
+                downloaded += len(chunk)
+                if downloaded >= next_report:
+                    report(f"downloaded {downloaded // _CHUNK_BYTES} MiB")
+                    next_report += _PROGRESS_BYTES
+    except BaseException:
+        # An interrupted download of a multi-gigabyte archive would otherwise
+        # leave its partial file behind for every retry.
+        partial.unlink(missing_ok=True)
+        raise
     partial.replace(path)
     return downloaded
 

@@ -5,6 +5,7 @@ from typing import get_args
 
 import pytest
 
+from yurine_tools import jawiki
 from yurine_tools.jawiki import (
     RELEASE_TAGS,
     download_archive,
@@ -129,4 +130,25 @@ def test_downloads_leave_no_partial_file(tmp_path: Path) -> None:
     size = download_archive(url, cache, report=lambda _: None)
 
     assert size == cache.stat().st_size
+    assert not cache.with_name(f"{cache.name}.part").exists()
+
+
+def test_interrupted_downloads_leave_no_partial_file(tmp_path: Path, monkeypatch) -> None:
+    class InterruptedStream:
+        def __enter__(self) -> "InterruptedStream":
+            return self
+
+        def __exit__(self, *_) -> bool:
+            return False
+
+        def read(self, _: int) -> bytes:
+            raise TimeoutError("connection timed out")
+
+    monkeypatch.setattr(jawiki, "_open_stream", lambda _: InterruptedStream())
+    cache = tmp_path / "passages.json.gz"
+
+    with pytest.raises(TimeoutError):
+        download_archive("https://example.invalid/passages.json.gz", cache, report=lambda _: None)
+
+    assert not cache.exists()
     assert not cache.with_name(f"{cache.name}.part").exists()
