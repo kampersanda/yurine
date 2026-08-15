@@ -4,14 +4,31 @@ The `yurine` command searches newline-delimited text for matching segments under
 weighted edit distance. Indexing and searching are separate commands, so a
 corpus is indexed once and searched any number of times without rebuilding.
 
-## Quick start
+## Installation
 
-Run the CLI from the repository with Cargo:
+Install the `yurine` command with Cargo, without cloning:
+
+```console
+$ cargo install --git https://github.com/kampersanda/yurine yurine-cli
+```
+
+or from the root of a clone:
+
+```console
+$ cargo install --path cli
+```
+
+Both build with optimizations and place the `yurine` binary in `~/.cargo/bin`,
+which a standard rustup setup already has on `PATH`. Check the installation
+with `yurine --version`, upgrade by rerunning the same command, and remove it
+with `cargo uninstall yurine-cli`.
+
+## Quick start
 
 ```console
 $ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
-$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run --release -p yurine-cli -- search --threshold 1 corpus.index 'book district known for curry'
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
+$ yurine search --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 
@@ -32,13 +49,6 @@ yurine search [OPTIONS] <INDEX> <QUERY>
 is `-`, `index` reads standard input. `QUERY` is the text to search for.
 `COSTS` is a cost configuration, and `SNAPSHOT` the directory `costs` compiles
 it into.
-
-To build a standalone binary:
-
-```console
-$ cargo build --release -p yurine-cli
-$ target/release/yurine --help
-```
 
 ### `index` options
 
@@ -84,7 +94,7 @@ one token. Tokenization does not normalize or lowercase text.
 Use `whitespace` for pre-tokenized text or word-level cost policies:
 
 ```console
-$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
 ```
 
 Cost rules and embeddings must use exactly one complete token under the
@@ -123,10 +133,9 @@ writes the result in the same persisted form the index uses, so a search opens
 it instead:
 
 ```console
-$ cargo run --release -p yurine-cli -- costs --tokenizer whitespace \
-    costs.json costs.snapshot
-$ cargo run --release -p yurine-cli -- search --timing \
-    --costs costs.snapshot --threshold 0.2 corpus.index 'literature and curry'
+$ yurine costs --tokenizer whitespace costs.json costs.snapshot
+$ yurine search --timing --costs costs.snapshot --threshold 0.2 \
+    corpus.index 'literature and curry'
 ```
 
 | File            | Contents                                                              |
@@ -172,16 +181,13 @@ are ordered by sequence ID, start offset, then end offset.
 so it never mixes with the results on standard output:
 
 ```console
-$ cargo run --release -p yurine-cli -- index --timing \
-    --tokenizer whitespace corpus.index corpus.txt
+$ yurine index --timing --tokenizer whitespace corpus.index corpus.txt
 timing: read=0.403ms build=0.103ms save=8.422ms total=9.072ms
 
-$ cargo run --release -p yurine-cli -- costs --timing \
-    --tokenizer whitespace costs.json costs.snapshot
+$ yurine costs --timing --tokenizer whitespace costs.json costs.snapshot
 timing: read=0.337ms save=15.708ms total=16.101ms
 
-$ cargo run --release -p yurine-cli -- search --timing \
-    --threshold 1 corpus.index 'book district known for curry'
+$ yurine search --timing --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 timing: open=0.162ms costs=0.000ms search=0.050ms total=0.254ms
 ```
@@ -207,10 +213,10 @@ decimal places, and the difference between `total` and the sum of the stages is
 output, start-up, and result-reading overhead.
 
 Each stage is measured once, without warm-up or repetition, so the numbers vary
-between runs. Build a release binary before comparing them, and use the
-[`benchmarks/`](../benchmarks/) crate for rigorous measurement. When the corpus
-comes from standard input, `read` includes time spent waiting for the upstream
-process.
+between runs. An installed `yurine` is built with optimizations, so its numbers
+are comparable; use the [`benchmarks/`](../benchmarks/) crate for rigorous
+measurement. When the corpus comes from standard input, `read` includes time
+spent waiting for the upstream process.
 
 ## Custom edit costs
 
@@ -246,12 +252,9 @@ Jinbocho is a book town known for curry
 Then run:
 
 ```console
-$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run --release -p yurine-cli -- search \
-    --costs costs.json \
-    --threshold 0.25 \
-    corpus.index \
-    'book district known for curry'
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
+$ yurine search --costs costs.json --threshold 0.25 \
+    corpus.index 'book district known for curry'
 0	0.25	14	39	book town known for curry
 ```
 
@@ -297,12 +300,9 @@ Visitors enjoy books and curry in Jinbocho
 Then run:
 
 ```console
-$ cargo run --release -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run --release -p yurine-cli -- search \
-    --costs costs.json \
-    --threshold 0.2 \
-    corpus.index \
-    'literature and curry'
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
+$ yurine search --costs costs.json --threshold 0.2 \
+    corpus.index 'literature and curry'
 0	0.19999999	15	30	books and curry
 ```
 

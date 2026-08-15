@@ -161,13 +161,13 @@ to the code and can be tested.
 
 The workspace includes the `yurine` command for searching newline-delimited
 text. It indexes a corpus once and searches the saved index any number of
-times. Run it from the repository with:
+times. Install it with Cargo and run it:
 
 ```console
+$ cargo install --git https://github.com/kampersanda/yurine yurine-cli
 $ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run -p yurine-cli -- search --threshold 1 corpus.index \
-    'book district known for curry'
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
+$ yurine search --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 
@@ -179,6 +179,35 @@ tokenization, and custom or embedding-based edit costs.
 The [`tools/`](tools/) project prepares tokenized corpora and static embeddings
 for the command-line interface. See [`tools/README.md`](tools/README.md) for its
 setup and commands.
+
+## Limitations
+
+Yurine is an early project. These are the limitations of the current release:
+
+- **Indexes are immutable.** Adding, changing, or removing a sequence means
+  building a new index.
+- **Building an index is expensive.** The whole corpus is held in memory, so
+  peak memory reaches roughly ten times the size of the text, and construction
+  has not been tuned for speed.
+- **Indexes are large.** Nothing is compressed yet: an indexed token costs
+  about 12 bytes, making an index a few times the size of the text it indexes.
+- **Searches are single-threaded.** One index can answer several queries at
+  once, but a single query uses one core.
+- **Search time grows with the vocabulary.** Every search considers the whole
+  vocabulary, so a larger one costs more even when the corpus does not change.
+- **Loose thresholds are slow.** A threshold approaching the length of the
+  query loses the filtering step, leaving a much slower search that can return
+  a very large number of overlapping segments.
+- **No ranking.** A search returns every segment within the threshold at once.
+  There is no top-k, relevance scoring, or streaming of results.
+- **Only static embeddings.** Substitution costs come from a fixed table of
+  token vectors; context-dependent embeddings are out of scope.
+- **Tokenization is up to the caller.** The library takes token sequences and
+  returns token ranges. The command-line interface tokenizes by character or
+  whitespace only, without normalization.
+- **Saved indexes are not portable.** They load only on little-endian targets
+  and only with the version of Yurine that wrote them. The API and the file
+  formats may still change before 1.0.
 
 ## References
 
