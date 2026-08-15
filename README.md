@@ -184,39 +184,25 @@ setup and commands.
 
 Yurine is an early project. These are the limitations of the current release:
 
-- **Indexes are immutable.** Adding, changing, or removing a sequence requires
-  building a new index, and building holds the whole corpus in memory even
-  though searching memory-maps it.
-- **A query is not parallelized.** A searcher can serve concurrent queries
-  because searching borrows it immutably, but a single search runs on one
-  thread.
-- **Filtering scans the vocabulary.** Candidate generation evaluates the
-  substitution cost of every vocabulary token for each query token, so a search
-  costs at least `O(query length × vocabulary size)` whatever the size of the
-  corpus. Large embedding vocabularies feel this most.
-- **Loose thresholds lose filtering.** A threshold that reaches the cost of
-  deleting the whole query — with unit costs, a threshold as large as the query
-  length — falls back to exhaustive verification, which is far slower and
-  returns far more segments. Costs that make deletion and insertion much
-  cheaper than substitution reach that path sooner.
-- **Every match is materialized.** A search returns all matching segments,
-  overlapping ones included, as one vector. There is no top-k, ranking, or
-  streaming, so a loose threshold can produce a very large result set.
-- **Costs are single-precision.** Costs and distances are `f32`, and long
-  alignments accumulate rounding, so compare distances with a tolerance rather
-  than for equality. Sequence identifiers, token positions, vocabulary symbols,
-  and embedding indexes are `u32`.
-- **Embeddings are static.** Substitution costs come from a fixed token-vector
-  table under cosine distance. Context-dependent embeddings are out of scope,
-  and a token absent from the store falls back to a constant cost.
-- **Tokenization is the caller's job.** The library indexes token sequences and
-  returns token ranges; mapping them back to source text is left to the caller.
-  The command-line interface offers character and whitespace tokenization only,
-  without normalization.
-- **Persisted files are not portable.** A snapshot loads only on a
-  little-endian target and only with the format version that wrote it, and it
-  must not be modified while it is mapped. The API and the formats may still
-  change before 1.0.
+- **Indexes are immutable.** Adding, changing, or removing a sequence means
+  building a new index, and building needs the whole corpus in memory.
+- **Searches are single-threaded.** One index can answer several queries at
+  once, but a single query uses one core.
+- **Search time grows with the vocabulary.** Every search considers the whole
+  vocabulary, so a larger one costs more even when the corpus does not change.
+- **Loose thresholds are slow.** A threshold approaching the length of the
+  query loses the filtering step, leaving a much slower search that can return
+  a very large number of overlapping segments.
+- **No ranking.** A search returns every segment within the threshold at once.
+  There is no top-k, relevance scoring, or streaming of results.
+- **Only static embeddings.** Substitution costs come from a fixed table of
+  token vectors; context-dependent embeddings are out of scope.
+- **Tokenization is up to the caller.** The library takes token sequences and
+  returns token ranges. The command-line interface tokenizes by character or
+  whitespace only, without normalization.
+- **Saved indexes are not portable.** They load only on little-endian targets
+  and only with the version of Yurine that wrote them. The API and the file
+  formats may still change before 1.0.
 
 ## References
 
