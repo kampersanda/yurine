@@ -161,13 +161,13 @@ to the code and can be tested.
 
 The workspace includes the `yurine` command for searching newline-delimited
 text. It indexes a corpus once and searches the saved index any number of
-times. Run it from the repository with:
+times. Install it with Cargo and run it:
 
 ```console
+$ cargo install --git https://github.com/kampersanda/yurine yurine-cli
 $ printf 'Jinbocho is a book town known for curry\n' > corpus.txt
-$ cargo run -p yurine-cli -- index --tokenizer whitespace corpus.index corpus.txt
-$ cargo run -p yurine-cli -- search --threshold 1 corpus.index \
-    'book district known for curry'
+$ yurine index --tokenizer whitespace corpus.index corpus.txt
+$ yurine search --threshold 1 corpus.index 'book district known for curry'
 0	1	14	39	book town known for curry
 ```
 
@@ -179,6 +179,44 @@ tokenization, and custom or embedding-based edit costs.
 The [`tools/`](tools/) project prepares tokenized corpora and static embeddings
 for the command-line interface. See [`tools/README.md`](tools/README.md) for its
 setup and commands.
+
+## Limitations
+
+Yurine is an early project. These are the limitations of the current release:
+
+- **Indexes are immutable.** Adding, changing, or removing a sequence requires
+  building a new index, and building holds the whole corpus in memory even
+  though searching memory-maps it.
+- **A query is not parallelized.** A searcher can serve concurrent queries
+  because searching borrows it immutably, but a single search runs on one
+  thread.
+- **Filtering scans the vocabulary.** Candidate generation evaluates the
+  substitution cost of every vocabulary token for each query token, so a search
+  costs at least `O(query length × vocabulary size)` whatever the size of the
+  corpus. Large embedding vocabularies feel this most.
+- **Loose thresholds lose filtering.** A threshold that reaches the cost of
+  deleting the whole query — with unit costs, a threshold as large as the query
+  length — falls back to exhaustive verification, which is far slower and
+  returns far more segments. Costs that make deletion and insertion much
+  cheaper than substitution reach that path sooner.
+- **Every match is materialized.** A search returns all matching segments,
+  overlapping ones included, as one vector. There is no top-k, ranking, or
+  streaming, so a loose threshold can produce a very large result set.
+- **Costs are single-precision.** Costs and distances are `f32`, and long
+  alignments accumulate rounding, so compare distances with a tolerance rather
+  than for equality. Sequence identifiers, token positions, vocabulary symbols,
+  and embedding indexes are `u32`.
+- **Embeddings are static.** Substitution costs come from a fixed token-vector
+  table under cosine distance. Context-dependent embeddings are out of scope,
+  and a token absent from the store falls back to a constant cost.
+- **Tokenization is the caller's job.** The library indexes token sequences and
+  returns token ranges; mapping them back to source text is left to the caller.
+  The command-line interface offers character and whitespace tokenization only,
+  without normalization.
+- **Persisted files are not portable.** A snapshot loads only on a
+  little-endian target and only with the format version that wrote it, and it
+  must not be modified while it is mapped. The API and the formats may still
+  change before 1.0.
 
 ## References
 

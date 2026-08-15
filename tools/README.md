@@ -129,18 +129,17 @@ $ uv run yurine-preprocess-corpus --workers 0 corpus.txt output/corpus.txt
 
 ## Search with Yurine
 
+The [`yurine` command](../cli/README.md#installation) is installed separately
+with `cargo install`:
+
 ```console
-$ cargo run -p yurine-cli -- index \
-    --tokenizer whitespace \
+$ yurine index --tokenizer whitespace \
     tools/output/corpus.index \
     tools/output/corpus.txt
-$ cargo run -p yurine-cli -- costs \
-    --tokenizer whitespace \
+$ yurine costs --tokenizer whitespace \
     tools/output/costs.json \
     tools/output/costs.snapshot
-$ cargo run -p yurine-cli -- search \
-    --costs tools/output/costs.snapshot \
-    --threshold 0.3 \
+$ yurine search --costs tools/output/costs.snapshot --threshold 0.3 \
     tools/output/corpus.index \
     '東京 都'
 ```
