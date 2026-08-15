@@ -185,7 +185,12 @@ setup and commands.
 Yurine is an early project. These are the limitations of the current release:
 
 - **Indexes are immutable.** Adding, changing, or removing a sequence means
-  building a new index, and building needs the whole corpus in memory.
+  building a new index.
+- **Building an index is expensive.** The whole corpus is held in memory, so
+  peak memory reaches roughly ten times the size of the text, and construction
+  has not been tuned for speed.
+- **Indexes are large.** Nothing is compressed yet: an indexed token costs
+  about 12 bytes, making an index a few times the size of the text it indexes.
 - **Searches are single-threaded.** One index can answer several queries at
   once, but a single query uses one core.
 - **Search time grows with the vocabulary.** Every search considers the whole
