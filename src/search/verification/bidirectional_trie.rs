@@ -39,10 +39,7 @@ struct TrieNode {
     // through this node. A child therefore needs exactly one `step_dp` call.
     column: Vec<f32>,
     // Labels are owned so a disk-backed store may release each decoded
-    // data string after processing one candidate. They are keyed rather than
-    // scanned because every candidate string enters the trie at the root, so
-    // fan-out there reaches the vocabulary size. Scanning made one search pay
-    // `O(candidates * depth * fan-out)` merely to reach the cached columns.
+    // data string after processing one candidate.
     children: HashMap<Symbol, TrieNode>,
 }
 
