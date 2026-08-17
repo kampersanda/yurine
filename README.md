@@ -193,13 +193,9 @@ Yurine is an early project. These are the limitations of the current release:
   about 12 bytes, making an index a few times the size of the text it indexes.
 - **Searches are single-threaded.** One index can answer several queries at
   once, but a single query uses one core.
-- **Search time grows with the vocabulary.** A larger vocabulary leaves
-  candidate segments sharing fewer prefixes, so verification reuses fewer of its
-  cached dynamic-programming columns, and filtering evaluates a substitution
-  neighborhood over the whole vocabulary once per query position, before it
-  selects which of those positions to generate candidates from. The
-  growth is mild for table-driven costs and steeper for embedding-based ones,
-  which compare a pair of vectors per vocabulary entry.
+- **Search time grows with the vocabulary.** A larger vocabulary costs more even
+  when the corpus does not change. The growth is mild with table-driven costs
+  and steep with embedding-based ones.
 - **Loose thresholds are slow.** A threshold approaching the length of the
   query loses the filtering step, leaving a much slower search that can return
   a very large number of overlapping segments.
