@@ -24,6 +24,8 @@
 
 use std::collections::BTreeMap;
 
+use hashbrown::HashMap;
+
 use super::{add_distance, create_match, root_column, step_dp, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
@@ -37,8 +39,11 @@ struct TrieNode {
     // through this node. A child therefore needs exactly one `step_dp` call.
     column: Vec<f32>,
     // Labels are owned so a disk-backed store may release each decoded
-    // data string after processing one candidate.
-    children: Vec<(Symbol, TrieNode)>,
+    // data string after processing one candidate. They are keyed rather than
+    // scanned because every candidate string enters the trie at the root, so
+    // fan-out there reaches the vocabulary size. Scanning made one search pay
+    // `O(candidates * depth * fan-out)` merely to reach the cached columns.
+    children: HashMap<Symbol, TrieNode>,
 }
 
 impl TrieNode {
@@ -48,7 +53,7 @@ impl TrieNode {
     {
         Self {
             column: root_column(query_string, costs),
-            children: Vec::new(),
+            children: HashMap::new(),
         }
     }
 }
@@ -104,27 +109,12 @@ where
         // The path label identifies the processed string prefix. Following an
         // existing edge reuses its complete DP column; a missing edge advances
         // the parent column once and caches the result for later candidates.
-        let child_index = node
-            .children
-            .iter()
-            .position(|(symbol, _)| *symbol == string_symbol);
-
-        let index = match child_index {
-            Some(index) => index,
-            None => {
-                let column = step_dp(query_string, string_symbol, &node.column, costs);
-                node.children.push((
-                    string_symbol,
-                    TrieNode {
-                        column,
-                        children: Vec::new(),
-                    },
-                ));
-                node.children.len() - 1
-            }
-        };
-
-        node = &mut node.children[index].1;
+        // Splitting the borrow lets one lookup serve both cases.
+        let TrieNode { column, children } = node;
+        node = children.entry(string_symbol).or_insert_with(|| TrieNode {
+            column: step_dp(query_string, string_symbol, column, costs),
+            children: HashMap::new(),
+        });
 
         // A cached DP column is candidate-independent, but the remaining
         // strict budget is not. Recheck the lower bound on every traversal.

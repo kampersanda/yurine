@@ -90,6 +90,44 @@ snapshot is reopened, so it does not disturb `open_heap_peak`, and it is counted
 in `engine_resident_heap`. A 20,000-token vocabulary at 300 dimensions is about
 24 MB.
 
+## Vocabulary sweep
+
+To measure how search time responds to the vocabulary alone, generate the same
+corpus shape at several vocabulary sizes and keep everything else fixed:
+
+```console
+for vocabulary in 256 2000 20000; do
+  cargo run --release -p yurine-benchmarks -- generate \
+    /tmp/yurine-vocabulary-$vocabulary.txt \
+    --sequences 20000 --tokens 20 --vocabulary $vocabulary --hot-vocabulary 8
+  cargo run --release -p yurine-benchmarks -- measure \
+    /tmp/yurine-vocabulary-$vocabulary.txt --threshold 0 --warm-runs 15
+done
+```
+
+An eight-token hot set keeps the default query on frequent tokens, so
+`generated_candidates` is 37,848 at every vocabulary and the three runs verify
+the same amount of work. Whatever the timings then do is a response to the
+vocabulary and nothing else; read `generated_candidates` first to confirm that
+premise still holds before reading the timings.
+
+This is the sweep that exposed the verification trie's linear child scan. Its
+nodes fan out to the vocabulary size near the root, so warm median search time
+rose by an order of magnitude across those three vocabularies while the verified
+work stayed identical. Keying the children by symbol left the response nearly
+flat. The residual slope is the method's own: a larger vocabulary leaves
+candidates sharing fewer prefixes, so the cache holds more nodes and reuses
+fewer columns.
+
+Keying costs heap: a map holds a node's children less compactly than a vector
+did, which raises `warm_search_heap_peak_growth` by roughly two fifths on this
+workload. The trie is call-local, so that is transient search memory rather than
+resident engine state, and `engine_resident_heap` does not move.
+
+Raising `--threshold` to one keeps the same property with a larger candidate set
+and admits `--costs cosine`, which is worth sweeping separately because its
+vocabulary response is much steeper.
+
 ## Output
 
 Output is tab-separated `metric`, `value`, and `unit`. It includes:
