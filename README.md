@@ -196,7 +196,8 @@ Yurine is an early project. These are the limitations of the current release:
 - **Search time grows with the vocabulary.** A larger vocabulary leaves
   candidate segments sharing fewer prefixes, so verification reuses fewer of its
   cached dynamic-programming columns, and filtering evaluates a substitution
-  neighborhood over the whole vocabulary once per selected query position. The
+  neighborhood over the whole vocabulary once per query position, before it
+  selects which of those positions to generate candidates from. The
   growth is mild for table-driven costs and steeper for embedding-based ones,
   which compare a pair of vectors per vocabulary entry.
 - **Loose thresholds are slow.** A threshold approaching the length of the

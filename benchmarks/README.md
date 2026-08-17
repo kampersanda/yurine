@@ -106,18 +106,20 @@ done
 ```
 
 An eight-token hot set keeps the default query on frequent tokens, so
-`generated_candidates` is 37,848 at every vocabulary and the three runs verify
-the same amount of work. Whatever the timings then do is a response to the
-vocabulary and nothing else; read `generated_candidates` first to confirm that
-premise still holds before reading the timings.
+`generated_candidates` is 37,848 at every vocabulary: the three runs verify the
+same number of candidate anchors. They do not verify them at the same cost. A
+larger vocabulary leaves those candidates sharing fewer prefixes, so the
+verification cache holds more nodes and reuses fewer of its columns. The sweep
+therefore isolates what the vocabulary does to the cost of verifying one anchor,
+not to how many anchors there are; read `generated_candidates` first to confirm
+that premise still holds before reading the timings.
 
 This is the sweep that exposed the verification trie's linear child scan. Its
-nodes fan out to the vocabulary size near the root, so warm median search time
-rose by an order of magnitude across those three vocabularies while the verified
-work stayed identical. Keying the children by symbol left the response nearly
-flat. The residual slope is the method's own: a larger vocabulary leaves
-candidates sharing fewer prefixes, so the cache holds more nodes and reuses
-fewer columns.
+nodes fan out to the vocabulary size near the root, which charged every step of
+every candidate a term the dynamic program never asked for, and warm median
+search time rose by an order of magnitude across those three vocabularies.
+Keying the children by symbol left the response nearly flat, and the slope left
+over is the reduced prefix sharing above, which is the method's own.
 
 Keying costs heap: a map holds a node's children less compactly than a vector
 did, which raises `warm_search_heap_peak_growth` by roughly two fifths on this
