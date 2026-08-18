@@ -8,7 +8,7 @@ use crate::search::SearchEngine;
 use crate::search::bound::StrictBound;
 use crate::search::encoding::EncodedQuery;
 use crate::search::filtering::{
-    MinCandidateSelector, SelectedPosition, generate_candidates, smallest_selectable_eta,
+    MinCandidateSelector, SelectedPosition, any_radius_can_select, generate_candidates, wider_radii,
 };
 use crate::search::verification::Verifier;
 use crate::search::{Candidate, Match};
@@ -264,20 +264,30 @@ where
             Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {}
             Err(error) => return Err(error),
         }
-
-        let Some(retuned) =
-            smallest_selectable_eta(query_string, bound, eta, costs, &self.engine.neighborhood)
-        else {
+        if !any_radius_can_select(query_string, bound, costs) {
             return Ok(None);
-        };
-        match self.select_at(query_string, bound, retuned, costs) {
-            Ok(selected) => Ok(Some((selected, Some(retuned)))),
-            // Re-tuning adds the contributions in query order while selection
-            // adds the ones it picks, so at the bound the two can part by a
-            // final bit. Exhaustive verification answers either way.
-            Err(Error::ThresholdSubsequenceUnavailable) => Ok(None),
-            Err(error) => Err(error),
         }
+
+        // Selection is what a radius has to satisfy, so the search runs it at
+        // each radius it weighs rather than predicting the outcome. A radius
+        // reported here therefore selected in fact, and exhaustive
+        // verification is reached only once selection has turned down the
+        // widest radius the alphabet offers.
+        let radii = wider_radii(query_string, eta, costs, &self.engine.neighborhood);
+        let mut narrowest = None;
+        let (mut low, mut high) = (0, radii.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            match self.select_at(query_string, bound, radii[middle], costs) {
+                Ok(selected) => {
+                    narrowest = Some((selected, Some(radii[middle])));
+                    high = middle;
+                }
+                Err(Error::ThresholdSubsequenceUnavailable) => low = middle + 1,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(narrowest)
     }
 
     /// Selects query positions at one eta.

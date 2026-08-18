@@ -198,7 +198,8 @@ growth remains the implementation-independent memory metric.
 `used_exhaustive_verification` and `eta_was_adjusted` are emitted as numeric
 boolean `0` or `1`. An eta too small to construct a threshold subsequence is
 raised to the smallest one that can, so a run reporting `eta_was_adjusted` as
-`1` filtered at a wider radius than `--eta` asked for; read it against
+`1` filtered at a radius wider than the one it started from: the automatic eta
+when `--eta` is omitted, and the explicit radius otherwise. Read it against
 `generated_candidates`.
 
 The library compatibility integration fixture separately fixes `SequenceId`,

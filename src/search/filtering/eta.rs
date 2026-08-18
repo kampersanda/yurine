@@ -1,32 +1,46 @@
-//! Re-tuning of the substitution-neighborhood radius.
+//! Widening of the substitution-neighborhood radius.
 
 use crate::costs::{Cost, EditCosts};
 use crate::search::bound::StrictBound;
 use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
 use crate::types::Symbol;
 
-/// Returns the smallest eta above `eta` that selection can work with, or
-/// `None` when no eta can.
+/// Returns whether any eta could let selection construct a threshold
+/// subsequence.
 ///
-/// Selection needs the query positions' contributions to together leave the
-/// bound. A contribution is the cheapest way out of its neighborhood, so it
-/// grows as eta widens the neighborhood, and it stops growing at the
-/// position's deletion cost once no substitution is left outside. No eta can
-/// therefore help a query whose deletion costs together stay within the bound,
-/// which is what makes exhaustive verification the last resort rather than the
-/// first answer.
-///
-/// The neighborhoods only change where eta crosses a substitution cost, so the
-/// smallest sufficient radius is one of those costs. Finding it binary searches
-/// them, which costs a few alphabet scans against the exhaustive verification
-/// it avoids.
-pub(in crate::search) fn smallest_selectable_eta<C>(
+/// A query position contributes the cheapest way out of its neighborhood, so
+/// widening eta grows that contribution until no substitution is left outside
+/// and deletion is all that remains. Deleting the whole query sequence is
+/// therefore the most the positions can ever contribute together, and a bound
+/// admitting that sum admits every radius. Answering this before looking at
+/// the alphabet keeps a search no radius can help from enumerating one radius
+/// per query position and vocabulary symbol on its way to the same conclusion.
+pub(in crate::search) fn any_radius_can_select<C>(
     query_string: &[Symbol],
     bound: StrictBound,
+    costs: &C,
+) -> bool
+where
+    C: EditCosts<Symbol>,
+{
+    let deletions: f32 = query_string
+        .iter()
+        .map(|symbol| costs.deletion(symbol).get())
+        .sum();
+    !bound.admits(deletions)
+}
+
+/// Returns the radii above `eta` that selection can behave differently at, in
+/// increasing order.
+///
+/// A neighborhood only changes where eta crosses one of its substitution
+/// costs, so those costs are the only radii worth trying.
+pub(in crate::search) fn wider_radii<C>(
+    query_string: &[Symbol],
     eta: Cost,
     costs: &C,
     neighborhood: &SubstitutionNeighborhood,
-) -> Option<Cost>
+) -> Vec<Cost>
 where
     C: EditCosts<Symbol>,
 {
@@ -42,33 +56,12 @@ where
         .collect();
     radii.sort_unstable();
     radii.dedup();
-
-    let selectable =
-        radii.partition_point(|radius| !selects(query_string, bound, *radius, costs, neighborhood));
-    radii.get(selectable).copied()
-}
-
-/// Returns whether the contributions at `eta` together leave the bound.
-fn selects<C>(
-    query_string: &[Symbol],
-    bound: StrictBound,
-    eta: Cost,
-    costs: &C,
-    neighborhood: &SubstitutionNeighborhood,
-) -> bool
-where
-    C: EditCosts<Symbol>,
-{
-    let contributions: f32 = query_string
-        .iter()
-        .map(|symbol| neighborhood.outside_cost(*symbol, eta, costs).get())
-        .sum();
-    !bound.admits(contributions)
+    radii
 }
 
 #[cfg(test)]
 mod tests {
-    use super::smallest_selectable_eta;
+    use super::{any_radius_can_select, wider_radii};
     use crate::costs::{Cost, EditCosts};
     use crate::search::bound::StrictBound;
     use crate::search::filtering::neighborhood::SubstitutionNeighborhood;
@@ -107,84 +100,67 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_smallest_radius_that_leaves_the_bound() {
-        // At eta zero the cheapest excluded substitution costs 0.1, which the
-        // threshold 0.25 admits. Raising eta past 0.1 and then 0.2 leaves 0.3
-        // as the cheapest way out, which the threshold no longer admits.
-        let costs = LadderCosts {
-            deletion: Cost::ONE,
-        };
-
-        assert_eq!(
-            smallest_selectable_eta(
-                &[Symbol::new(0)],
-                bound(0.25),
-                Cost::ZERO,
-                &costs,
-                &alphabet()
-            ),
-            Some(Cost::new_const(0.2))
-        );
-    }
-
-    #[test]
-    fn reports_no_radius_when_deleting_the_query_stays_within_the_bound() {
+    fn deleting_the_query_for_less_than_the_bound_rules_out_every_radius() {
         // Contributions stop growing at the deletion cost, so two positions
         // can never contribute more than 0.2 against a threshold of 0.5.
         let costs = LadderCosts {
             deletion: Cost::new_const(0.1),
         };
 
-        assert_eq!(
-            smallest_selectable_eta(
-                &[Symbol::new(0), Symbol::new(0)],
-                bound(0.5),
-                Cost::ZERO,
-                &costs,
-                &alphabet()
-            ),
-            None
-        );
+        assert!(!any_radius_can_select(
+            &[Symbol::new(0), Symbol::new(0)],
+            bound(0.5),
+            &costs
+        ));
     }
 
     #[test]
-    fn widens_past_every_substitution_when_only_deletion_leaves_the_bound() {
-        // Excluding the dearest substitution leaves 0.3 per position, which the
-        // threshold 1.0 still admits. Only deleting both positions, at 2.0
-        // each, leaves the bound, and that needs an eta excluding nothing.
+    fn deleting_the_query_for_more_than_the_bound_leaves_a_radius() {
         let costs = LadderCosts {
-            deletion: Cost::new_const(2.0),
+            deletion: Cost::new_const(0.4),
         };
 
-        assert_eq!(
-            smallest_selectable_eta(
-                &[Symbol::new(0), Symbol::new(0)],
-                bound(1.0),
-                Cost::ZERO,
-                &costs,
-                &alphabet()
-            ),
-            Some(Cost::new_const(0.3))
-        );
+        assert!(any_radius_can_select(
+            &[Symbol::new(0), Symbol::new(0)],
+            bound(0.5),
+            &costs
+        ));
     }
 
     #[test]
-    fn only_considers_radii_above_the_configured_one() {
+    fn collects_the_substitution_costs_as_radii() {
         let costs = LadderCosts {
             deletion: Cost::ONE,
         };
 
-        // The threshold admits nothing, so 0.1 would select too. Re-tuning
-        // answers a radius that could not select, and widening it is the only
-        // move that keeps the caller's radius meaningful.
-        let radius = smallest_selectable_eta(
-            &[Symbol::new(0)],
-            bound(0.0),
-            Cost::new_const(0.2),
-            &costs,
-            &alphabet(),
+        // Both positions share the same ladder, so the radii are the distinct
+        // substitution costs of one of them.
+        assert_eq!(
+            wider_radii(
+                &[Symbol::new(0), Symbol::new(0)],
+                Cost::ZERO,
+                &costs,
+                &alphabet()
+            ),
+            [
+                Cost::new_const(0.1),
+                Cost::new_const(0.2),
+                Cost::new_const(0.3)
+            ]
         );
+    }
 
-        assert_eq!(radius, Some(Cost::new_const(0.3)));
+    #[test]
+    fn offers_only_radii_above_the_configured_one() {
+        let costs = LadderCosts {
+            deletion: Cost::ONE,
+        };
+
+        // Selection already ran at the configured radius, so a narrower one
+        // has nothing left to offer.
+        assert_eq!(
+            wider_radii(&[Symbol::new(0)], Cost::new_const(0.1), &costs, &alphabet()),
+            [Cost::new_const(0.2), Cost::new_const(0.3)]
+        );
     }
 }
