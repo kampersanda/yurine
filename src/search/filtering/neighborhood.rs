@@ -35,6 +35,11 @@ impl SubstitutionNeighborhood {
         Ok(Self { alphabet })
     }
 
+    /// Returns the alphabet the neighborhood is enumerated from.
+    pub(in crate::search) fn alphabet(&self) -> &[Symbol] {
+        &self.alphabet
+    }
+
     /// Splits the alphabet at eta in a single pass over the substitution costs.
     ///
     /// Returns the symbols whose substitution cost from `symbol` is at most
@@ -62,6 +67,25 @@ impl SubstitutionNeighborhood {
             }
         }
         (neighbors, outside_cost)
+    }
+
+    /// Returns the cost of leaving `symbol`'s neighborhood at `eta`.
+    ///
+    /// This is the second element of [`Self::scan`] without the neighborhood
+    /// itself. Re-tuning eta weighs several radii and needs only the cost, so
+    /// it would otherwise collect a neighborhood per radius and drop it.
+    pub(in crate::search) fn outside_cost<C>(&self, symbol: Symbol, eta: Cost, costs: &C) -> Cost
+    where
+        C: EditCosts<Symbol>,
+    {
+        let mut outside_cost = costs.deletion(&symbol);
+        for candidate in &self.alphabet {
+            let substitution = costs.substitution(&symbol, candidate);
+            if substitution > eta {
+                outside_cost = outside_cost.min(substitution);
+            }
+        }
+        outside_cost
     }
 }
 
@@ -124,6 +148,22 @@ mod tests {
 
         assert_eq!(excluded, Cost::new_const(0.75));
         assert_eq!(deletion, Cost::new_const(0.9));
+    }
+
+    #[test]
+    fn outside_cost_agrees_with_scan() {
+        let neighborhood =
+            SubstitutionNeighborhood::new([Symbol::new(1), Symbol::new(2), Symbol::new(3)])
+                .unwrap();
+
+        for eta in [Cost::ZERO, Cost::new_const(0.5), Cost::ONE] {
+            let (_, scanned) = neighborhood.scan(Symbol::new(0), eta, &RankedCosts);
+
+            assert_eq!(
+                neighborhood.outside_cost(Symbol::new(0), eta, &RankedCosts),
+                scanned
+            );
+        }
     }
 
     #[test]

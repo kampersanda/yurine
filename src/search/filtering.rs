@@ -1,7 +1,9 @@
 mod candidate;
+mod eta;
 mod neighborhood;
 
 pub(in crate::search) use candidate::{MinCandidateSelector, SelectedPosition};
+pub(in crate::search) use eta::smallest_selectable_eta;
 pub(in crate::search) use neighborhood::SubstitutionNeighborhood;
 
 use crate::postings::PostingsIndex;
