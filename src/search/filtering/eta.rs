@@ -12,9 +12,12 @@ use crate::types::Symbol;
 /// widening eta grows that contribution until no substitution is left outside
 /// and deletion is all that remains. Deleting the whole query sequence is
 /// therefore the most the positions can ever contribute together, and a bound
-/// admitting that sum admits every radius. Answering this before looking at
-/// the alphabet keeps a search no radius can help from enumerating one radius
-/// per query position and vocabulary symbol on its way to the same conclusion.
+/// admitting that sum admits every radius.
+///
+/// This adds up one deletion cost per query position, so it takes `O(m)` time
+/// for query-string length `m` and allocates nothing. Answering it first keeps
+/// a search no radius can help from paying [`wider_radii`] on its way to the
+/// same conclusion.
 pub(in crate::search) fn any_radius_can_select<C>(
     query_string: &[Symbol],
     bound: StrictBound,
@@ -35,6 +38,13 @@ where
 ///
 /// A neighborhood only changes where eta crosses one of its substitution
 /// costs, so those costs are the only radii worth trying.
+///
+/// Collecting them evaluates the substitution cost from every query position
+/// to every alphabet symbol and then sorts the result, so for query-string
+/// length `m` and alphabet size `a` this takes `O(m * a * log(m * a))` time
+/// and holds `O(m * a)` costs. It is the most expensive step of widening, and
+/// [`any_radius_can_select`] rules out the searches that would pay it for
+/// nothing.
 pub(in crate::search) fn wider_radii<C>(
     query_string: &[Symbol],
     eta: Cost,

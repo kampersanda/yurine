@@ -26,6 +26,13 @@ impl MinCandidateSelector {
     ///
     /// Positions are returned in selection order, each carrying its
     /// substitution neighborhood.
+    ///
+    /// For query-string length `m` and alphabet size `a`, scoring the query
+    /// positions scans the alphabet once each and reads a posting-list length
+    /// per neighbor, and selection then makes at most `m` rounds over the
+    /// positions. This takes `O(m * a + m^2)` time and holds `O(m * a)`
+    /// neighborhood symbols. Corpus size enters only through posting-list
+    /// lengths, which are read in constant time.
     pub(in crate::search) fn select<C>(
         &self,
         query_string: &[Symbol],

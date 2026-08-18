@@ -164,6 +164,11 @@ where
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
     ///
+    /// Raising eta costs `O((m * a + m^2) * log(m * a))` time for alphabet size
+    /// `a`, which does not grow with the corpus. It buys the normal path for a
+    /// search that would otherwise take the fallback, and a query the
+    /// configured eta already filters with does not pay it at all.
+    ///
     /// Searching takes `&self`, so one searcher can serve concurrent queries.
     ///
     /// # Errors
@@ -247,6 +252,14 @@ where
     /// Returns the selected positions together with the radius they were
     /// re-tuned to, or `None` when no radius selects and the search has to
     /// verify exhaustively.
+    ///
+    /// Widening collects the radii for `O(m * a * log(m * a))` and then binary
+    /// searches them, running one selection per step, so for query-string
+    /// length `m` and alphabet size `a` the whole of it stays within
+    /// `O((m * a + m^2) * log(m * a))`. That is bounded by the query and the
+    /// alphabet alone, whereas the exhaustive verification it spares the
+    /// search grows with the corpus as `O(m * sum(n_i^2))`. None of it is paid
+    /// when the configured eta selects on its own.
     fn select_positions<S>(
         &self,
         query_string: &[Symbol],
