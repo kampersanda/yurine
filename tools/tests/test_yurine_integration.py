@@ -22,32 +22,36 @@ def test_generated_files_work_with_yurine_cli(tmp_path: Path) -> None:
     )
     corpus = tmp_path / "corpus.txt"
     corpus.write_text("あ b\n", encoding="utf-8")
+    index = tmp_path / "index"
     repository = Path(__file__).parents[2]
 
-    result = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--manifest-path",
-            str(repository / "Cargo.toml"),
-            "-p",
-            "yurine-cli",
-            "--",
-            "--tokenizer",
-            "whitespace",
-            "--costs",
-            str(config),
-            "--threshold",
-            "0.25",
-            "--eta",
-            "0.25",
-            "x",
-            str(corpus),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    def run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "--manifest-path",
+                str(repository / "Cargo.toml"),
+                "-p",
+                "yurine-cli",
+                "--",
+                *arguments,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    run_cli("index", "--tokenizer", "whitespace", str(index), str(corpus))
+    result = run_cli(
+        "search",
+        "--costs",
+        str(config),
+        "--threshold",
+        "0.25",
+        str(index),
+        "x",
     )
 
     row = next(csv.reader(StringIO(result.stdout), delimiter="\t"))
