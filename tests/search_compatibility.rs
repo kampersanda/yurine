@@ -107,25 +107,19 @@ fn repeated_postings_report_candidate_count_without_deduplication() {
 }
 
 #[test]
-fn exhaustive_fallback_result_contract_is_stable() {
+fn deleting_the_whole_query_error_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['a']).unwrap();
     builder.add_sequence([]).unwrap();
     let engine = builder.build().unwrap();
     let searcher = engine.range_searcher(CompatibilityCosts);
 
-    let (matches, metrics) = searcher
-        .search_with_metrics(&['a'], &RangeSearchParams::new(1.0))
-        .unwrap();
-
-    assert!(metrics.used_exhaustive_verification);
+    // Deleting the one query token costs 1.0, which the threshold reaches, so
+    // filtering cannot answer and the search is declined rather than served by
+    // a slower path.
     assert_eq!(
-        matches,
-        [Match {
-            sequence_id: 0,
-            token_range: 0..1,
-            distance: 0.0,
-        }]
+        searcher.search(&['a'], &RangeSearchParams::new(1.0)),
+        Err(Error::ThresholdSubsequenceUnavailable)
     );
 }
 

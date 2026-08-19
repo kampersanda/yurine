@@ -196,9 +196,10 @@ Yurine is an early project. These are the limitations of the current release:
 - **Search time grows with the vocabulary.** A larger vocabulary costs more even
   when the corpus does not change. The growth is mild with table-driven costs
   and steep with embedding-based ones.
-- **Loose thresholds are slow.** A threshold approaching the length of the
-  query loses the filtering step, leaving a much slower search that can return
-  a very large number of overlapping segments.
+- **Loose thresholds are rejected.** A threshold reaching the cost of deleting
+  the whole query leaves nothing for the index to filter on, and a search with
+  one returns an error instead of results. With unit costs that is a threshold
+  at or above the query's token count.
 - **No ranking.** A search returns every segment within the threshold at once.
   There is no top-k, relevance scoring, or streaming of results.
 - **Only static embeddings.** Substitution costs come from a fixed table of

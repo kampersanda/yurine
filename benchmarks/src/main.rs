@@ -370,11 +370,6 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     metric("cold_match_count", cold_match_count, "count");
     metric("warm_match_count", warm_matches, "count");
     metric(
-        "used_exhaustive_verification",
-        u8::from(metrics.used_exhaustive_verification),
-        "bool",
-    );
-    metric(
         "eta_was_adjusted",
         u8::from(metrics.adjusted_eta.is_some()),
         "bool",
