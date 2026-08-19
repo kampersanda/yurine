@@ -65,7 +65,8 @@ Independently drawn 300-dimensional vectors are all near-orthogonal, so at a
 small eta every neighborhood would hold only the query token itself, and any
 change whose cost depends on neighborhood size would measure as free.
 With the defaults, a 20,000-token vocabulary gives clusters of about 312 tokens
-that fall inside an eta of 0.25.
+that fall inside a radius of 0.25, which is what `--threshold 0.5` derives for a
+two-token query.
 
 `--embedding-seed` fixes the matrix, as `--seed` fixes the corpus. The embedding
 options are ignored under `--costs levenshtein`.
@@ -185,8 +186,8 @@ cargo run --release -p yurine-benchmarks -- measure /tmp/yurine-overlap.txt \
   --threshold 1
 ```
 
-When `--eta` is omitted, the benchmark uses the search engine's automatic eta,
-matching the public API default. Pass `--eta COST` to measure an explicit radius.
+The substitution-neighborhood radius is derived from `--threshold` and the
+query length, so `--query` and `--threshold` are what move it.
 
 The original implementation kept a `HashSet` beside the candidate `Vec` to
 remove duplicates. The baseline analysis established that candidates are
@@ -195,11 +196,10 @@ each posting list is deduplicated, and posting lists for different symbols do
 not overlap. The `HashSet` was therefore removed; allocator-observed search heap
 growth remains the implementation-independent memory metric.
 
-`eta_was_adjusted` is emitted as numeric boolean `0` or `1`. An eta too small
-to construct a threshold subsequence is raised to the smallest one that can, so
-a run reporting `1` filtered at a radius wider than the one it started from: the
-automatic eta when `--eta` is omitted, and the explicit radius otherwise. Read it
-against `generated_candidates`.
+`eta_was_adjusted` is emitted as numeric boolean `0` or `1`. A derived radius
+too small to construct a threshold subsequence is raised to the smallest one
+that can, so a run reporting `1` filtered at a wider radius than the threshold
+and query length alone imply. Read it against `generated_candidates`.
 
 The library compatibility integration fixture separately fixes `SequenceId`,
 token range, weighted distance, and result order. CLI tests fix conversion from token

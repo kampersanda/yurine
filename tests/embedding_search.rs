@@ -18,7 +18,7 @@ fn query_only_token_uses_embedding_for_candidate_generation_and_verification() {
     let searcher = engine.range_searcher(costs);
 
     let matches = searcher
-        .search(&['x'], &RangeSearchParams::new(0.25).with_eta(0.25))
+        .search(&['x'], &RangeSearchParams::new(0.25))
         .unwrap();
 
     assert_eq!(matches.len(), 1);

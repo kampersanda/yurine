@@ -117,9 +117,6 @@ struct MeasureOptions {
     #[arg(long, default_value = "0", value_parser = parse_cost)]
     threshold: Cost,
 
-    #[arg(long, value_parser = parse_cost)]
-    eta: Option<Cost>,
-
     #[arg(long, default_value = "5")]
     warm_runs: NonZeroUsize,
 
@@ -261,10 +258,7 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
     // buffer add anything, so the metric does not grow with `--warm-runs`.
     let engine_resident_heap = reset_heap_peak();
 
-    let mut params = RangeSearchParams::new(options.threshold.into());
-    if let Some(eta) = options.eta {
-        params = params.with_eta(eta.into());
-    }
+    let params = RangeSearchParams::new(options.threshold.into());
     let query_sequence: Vec<_> = options
         .query_source_text
         .split_whitespace()
@@ -661,8 +655,6 @@ mod tests {
             "corpus.txt",
             "--threshold",
             "1.5",
-            "--eta",
-            "0.25",
             "--warm-runs",
             "3",
         ])
@@ -673,7 +665,6 @@ mod tests {
 
         assert_eq!(options.query_source_text, DEFAULT_QUERY_SOURCE_TEXT);
         assert_eq!(options.threshold, Cost::new_const(1.5));
-        assert_eq!(options.eta, Some(Cost::new_const(0.25)));
         assert_eq!(options.warm_runs.get(), 3);
         assert!(
             Options::try_parse_from([
@@ -685,19 +676,6 @@ mod tests {
             ])
             .is_err()
         );
-
-        let automatic = Options::try_parse_from([
-            "yurine-baseline",
-            "measure",
-            "corpus.txt",
-            "--threshold",
-            "1",
-        ])
-        .unwrap();
-        let Command::Measure(automatic) = automatic.command else {
-            panic!("expected measure command");
-        };
-        assert_eq!(automatic.eta, None);
     }
 
     #[test]

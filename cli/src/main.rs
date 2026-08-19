@@ -98,10 +98,6 @@ struct SearchOptions {
     #[arg(short, long, default_value = "0", value_parser = parse_threshold)]
     threshold: Cost,
 
-    /// Substitution-neighborhood radius; calculated automatically if omitted.
-    #[arg(long, value_parser = parse_cost)]
-    eta: Option<Cost>,
-
     /// JSON file describing the edit-cost policy, or a snapshot directory
     /// built by the 'costs' command.
     #[arg(long)]
@@ -339,10 +335,7 @@ where
     timings.costs = costs_start.elapsed();
 
     let search_start = Instant::now();
-    let mut params = RangeSearchParams::new(options.threshold.into());
-    if let Some(eta) = options.eta {
-        params = params.with_eta(eta.into());
-    }
+    let params = RangeSearchParams::new(options.threshold.into());
     let query_sequence: Vec<_> = tokenizer
         .tokenize(&options.query_source_text)
         .into_iter()
@@ -587,7 +580,6 @@ mod tests {
             index,
             query_source_text: query_source_text.to_owned(),
             threshold,
-            eta: None,
             costs: None,
             verify: false,
             timing: false,
@@ -630,8 +622,6 @@ mod tests {
             "search",
             "--threshold",
             "1.5",
-            "--eta",
-            "0.25",
             "--costs",
             "costs.json",
             "--verify",
@@ -647,7 +637,6 @@ mod tests {
                 index: PathBuf::from("index-directory"),
                 query_source_text: "hello world".to_owned(),
                 threshold: Cost::new_const(1.5),
-                eta: Some(Cost::new_const(0.25)),
                 costs: Some(PathBuf::from("costs.json")),
                 verify: true,
                 timing: true,
@@ -690,7 +679,6 @@ mod tests {
                 index: PathBuf::from("index-directory"),
                 query_source_text: "query".to_owned(),
                 threshold: Cost::ZERO,
-                eta: None,
                 costs: None,
                 verify: false,
                 timing: false,
@@ -721,28 +709,14 @@ mod tests {
     }
 
     #[test]
-    fn threshold_rejects_maximum_cost_but_eta_accepts_it() {
+    fn threshold_rejects_the_maximum_cost() {
         let maximum = Cost::MAX.to_string();
 
         let error =
             Options::try_parse_from(["yurine", "search", "--threshold", &maximum, "i", "q"])
                 .unwrap_err();
-        assert!(error.to_string().contains("must be less than f32::MAX"));
 
-        let options =
-            Options::try_parse_from(["yurine", "search", "--eta", &maximum, "i", "q"]).unwrap();
-        assert_eq!(
-            options.command,
-            Command::Search(SearchOptions {
-                index: PathBuf::from("i"),
-                query_source_text: "q".to_owned(),
-                threshold: Cost::ZERO,
-                eta: Some(Cost::MAX),
-                costs: None,
-                verify: false,
-                timing: false,
-            })
-        );
+        assert!(error.to_string().contains("must be less than f32::MAX"));
     }
 
     #[test]
@@ -865,7 +839,6 @@ mod tests {
         let index = build_index(&directory, TokenizerKind::Character, &["あ"]);
 
         let (matches, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(costs),
             ..search_options(index, "x", Cost::new_const(0.25))
         })
@@ -896,7 +869,6 @@ mod tests {
         let index = build_index(&directory, TokenizerKind::Whitespace, &["color palette"]);
 
         let (matches, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(costs),
             ..search_options(index, "colour", Cost::new_const(0.25))
         })
@@ -925,7 +897,6 @@ mod tests {
         let index = build_index(&directory, TokenizerKind::Character, &["a"]);
 
         let (matches, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(costs),
             ..search_options(index, "x", Cost::new_const(0.25))
         })
@@ -954,7 +925,6 @@ mod tests {
         let index = build_index(&directory, TokenizerKind::Whitespace, &["color palette"]);
 
         let (matches, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(costs),
             ..search_options(index, "colour", Cost::new_const(0.25))
         })
@@ -987,13 +957,11 @@ mod tests {
         let snapshot = build_costs(&directory, TokenizerKind::Character, costs.clone());
 
         let (configured, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(costs),
             ..search_options(index.clone(), "x", Cost::new_const(0.25))
         })
         .unwrap();
         let (compiled, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(snapshot),
             verify: true,
             ..search_options(index, "x", Cost::new_const(0.25))
@@ -1023,7 +991,6 @@ mod tests {
         let snapshot = build_costs(&directory, TokenizerKind::Whitespace, costs);
 
         let (matches, _) = find_matches(&SearchOptions {
-            eta: Some(Cost::new_const(0.25)),
             costs: Some(snapshot),
             ..search_options(index, "colour", Cost::new_const(0.25))
         })
