@@ -41,9 +41,8 @@ use crate::errors::{Error, Result};
 /// Where that inequality does not hold, the cheapest alignment of a segment
 /// may pair no tokens at all. Such an alignment deletes every query token, so
 /// it costs at least the sum of those deletions, and a search whose threshold
-/// reaches that sum is answered by exhaustive verification instead of by
-/// filtering. Costs that make deletion and insertion much cheaper than
-/// substitution therefore reach that slower path more often; see
+/// reaches that sum is declined rather than answered. Costs that make deletion
+/// much cheaper than substitution therefore leave fewer thresholds usable; see
 /// [`RangeSearcher::search`](crate::search::RangeSearcher::search).
 pub trait EditCosts<T> {
     /// Returns the cost of replacing `from` with `to`.

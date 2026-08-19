@@ -1,6 +1,7 @@
 //! Verification of candidates against a distance bound.
 
 mod bidirectional_trie;
+#[cfg(test)]
 mod smith_waterman;
 
 use crate::costs::{Cost, EditCosts};
@@ -20,7 +21,10 @@ pub(in crate::search) enum Verifier {
     BidirectionalTrie,
     /// Exhaustive verification of every substring of every candidate string.
     ///
-    /// This measures every alignment, so it answers for any cost policy.
+    /// This measures every alignment, so it answers for any cost policy. Range
+    /// search declines the searches whose answer depends on that, so this
+    /// serves only as the oracle the anchored verifier is checked against.
+    #[cfg(test)]
     SmithWaterman,
 }
 
@@ -45,6 +49,7 @@ impl Verifier {
             Self::BidirectionalTrie => {
                 bidirectional_trie::verify(query_string, candidates, corpus, bound, costs)
             }
+            #[cfg(test)]
             Self::SmithWaterman => {
                 smith_waterman::verify(query_string, candidates, corpus, bound, costs)
             }

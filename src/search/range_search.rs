@@ -4,6 +4,7 @@ use std::hash::Hash;
 
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
+use crate::search::Match;
 use crate::search::SearchEngine;
 use crate::search::bound::StrictBound;
 use crate::search::encoding::EncodedQuery;
@@ -11,9 +12,7 @@ use crate::search::filtering::{
     MinCandidateSelector, SelectedPosition, any_radius_can_select, generate_candidates, wider_radii,
 };
 use crate::search::verification::Verifier;
-use crate::search::{Candidate, Match};
-use crate::store::CorpusStore;
-use crate::types::{Position, SequenceId, Symbol};
+use crate::types::Symbol;
 
 /// Parameters for threshold range search.
 ///
@@ -35,22 +34,14 @@ pub struct RangeSearchParams {
 /// across implementations without making elapsed time a test assertion.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RangeSearchMetrics {
-    /// Whether filtering was unavailable and exhaustive verification was used.
-    pub used_exhaustive_verification: bool,
     /// The eta filtering was re-tuned to, or `None` when the configured eta
     /// selected query positions on its own.
     ///
-    /// An eta too small to select is raised to the smallest one that can,
-    /// because the alternative is exhaustive verification. This is `None` when
-    /// exhaustive verification was used, since re-tuning is what failed there.
+    /// An eta too small to select is raised to the smallest one that can.
     pub adjusted_eta: Option<Cost>,
     /// Number of query positions chosen for candidate generation.
-    ///
-    /// This is zero when exhaustive verification was used.
     pub selected_query_positions: usize,
     /// Number of candidate anchors generated from postings.
-    ///
-    /// This is zero when exhaustive verification was used.
     pub generated_candidates: usize,
 }
 
@@ -136,45 +127,32 @@ where
     ///
     /// When eta is not configured, it defaults to
     /// `threshold / query_sequence.len()`. This favors constructing a
-    /// threshold subsequence for continuous substitution costs. An empty query
-    /// sequence uses eta zero and retains the existing empty-query error
-    /// behavior.
+    /// threshold subsequence for continuous substitution costs.
     ///
-    /// If the configured eta cannot construct a complete threshold subsequence
-    /// for a non-empty query sequence, the search raises eta to the smallest
-    /// radius that can and filters with that. A query position contributes at
-    /// most the cost of deleting its token, so no radius helps exactly when
-    /// deleting the whole query sequence stays within the threshold. Only then
-    /// does the engine fall back to exhaustive Smith-Waterman verification
-    /// instead of returning [`Error::ThresholdSubsequenceUnavailable`]. With
-    /// unit costs, `threshold >= query_sequence.len()` is
-    /// such a case.
-    ///
-    /// The fallback therefore also covers every search that could match a data
-    /// segment without pairing any tokens with it. Such an alignment costs at
-    /// least the cost of deleting the whole query sequence, which is exactly
-    /// the sum no eta can lift the contributions above. Filtering may
-    /// therefore answer with anchored data segments whatever the relationship
-    /// between the operation costs; see [`EditCosts`].
-    ///
-    /// The fallback takes `O(m * sum(n_i^2))` time for query-sequence length
-    /// `m` and
-    /// data string lengths `n_i`, and can return `O(sum(n_i^2))` data
-    /// segments.
-    /// It may therefore be substantially slower and produce many more results
-    /// than the normal filter-and-verify path.
-    ///
-    /// Raising eta costs `O((m * a + m^2) * log(m * a))` time for alphabet size
-    /// `a`, which does not grow with the corpus. It buys the normal path for a
-    /// search that would otherwise take the fallback, and a query the
-    /// configured eta already filters with does not pay it at all.
+    /// If the configured eta cannot construct a complete threshold subsequence,
+    /// the search raises eta to the smallest radius that can and filters with
+    /// that. Raising eta costs `O((m * a + m^2) * log(m * a))` time for
+    /// query-sequence length `m` and alphabet size `a`, which does not grow
+    /// with the corpus, and a query the configured eta already filters with
+    /// does not pay it at all.
     ///
     /// Searching takes `&self`, so one searcher can serve concurrent queries.
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty query, invalid parameters, or costs that
-    /// cannot be represented safely by the search algorithm.
+    /// Returns [`Error::ThresholdSubsequenceUnavailable`] when the threshold
+    /// reaches the cost of deleting the whole query sequence. A query position
+    /// contributes at most that token's deletion cost to filtering, so no eta
+    /// selects for such a search; equally, a data segment could match it
+    /// without pairing any tokens with it, which anchored verification does
+    /// not measure. Both are why the search declines it rather than answering
+    /// it slowly. With unit costs, `threshold >= query_sequence.len()` is such
+    /// a case, and so is an empty query sequence. Filtering answers every
+    /// accepted search with anchored data segments whatever the relationship
+    /// between the operation costs; see [`EditCosts`].
+    ///
+    /// Also returns an error for invalid parameters, or costs that cannot be
+    /// represented safely by the search algorithm.
     pub fn search(&self, query_sequence: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
         self.search_with_metrics(query_sequence, params)
             .map(|(matches, _)| matches)
@@ -214,18 +192,15 @@ where
     where
         S: EditCosts<Symbol>,
     {
-        let Some((selected, adjusted_eta)) =
-            self.select_positions(query_string, bound, eta, costs)?
-        else {
-            let matches = verify_exhaustively(query_string, bound, &self.engine.store, costs)?;
-            return Ok((
-                matches,
-                RangeSearchMetrics {
-                    used_exhaustive_verification: true,
-                    ..RangeSearchMetrics::default()
-                },
-            ));
-        };
+        // A query position contributes at most the cost of deleting its
+        // token, so a bound admitting the whole query's deletions admits an
+        // alignment that pairs nothing. Neither filtering nor anchored
+        // verification answers such a search, and this is the one check that
+        // keeps both out of that territory.
+        if !any_radius_can_select(query_string, bound, costs) {
+            return Err(Error::ThresholdSubsequenceUnavailable);
+        }
+        let (selected, adjusted_eta) = self.select_positions(query_string, bound, eta, costs)?;
         let selected_query_positions = selected.len();
         let candidates = generate_candidates(selected, &self.engine.index);
         let matches = Verifier::BidirectionalTrie.verify(
@@ -238,7 +213,6 @@ where
         Ok((
             matches,
             RangeSearchMetrics {
-                used_exhaustive_verification: false,
                 adjusted_eta,
                 selected_query_positions,
                 generated_candidates: candidates.len(),
@@ -250,42 +224,36 @@ where
     /// construct a threshold subsequence.
     ///
     /// Returns the selected positions together with the radius they were
-    /// re-tuned to, or `None` when no radius selects and the search has to
-    /// verify exhaustively.
+    /// re-tuned to. Callers check [`any_radius_can_select`] first, so a radius
+    /// that selects exists; the search reports
+    /// [`Error::ThresholdSubsequenceUnavailable`] if none is found anyway.
     ///
     /// Widening collects the radii for `O(m * a * log(m * a))` and then binary
     /// searches them, running one selection per step, so for query-string
     /// length `m` and alphabet size `a` the whole of it stays within
     /// `O((m * a + m^2) * log(m * a))`. That is bounded by the query and the
-    /// alphabet alone, whereas the exhaustive verification it spares the
-    /// search grows with the corpus as `O(m * sum(n_i^2))`. None of it is paid
-    /// when the configured eta selects on its own.
+    /// alphabet alone, and none of it is paid when the configured eta selects
+    /// on its own.
     fn select_positions<S>(
         &self,
         query_string: &[Symbol],
         bound: StrictBound,
         eta: Cost,
         costs: &S,
-    ) -> Result<Option<(Vec<SelectedPosition>, Option<Cost>)>>
+    ) -> Result<(Vec<SelectedPosition>, Option<Cost>)>
     where
         S: EditCosts<Symbol>,
     {
         match self.select_at(query_string, bound, eta, costs) {
-            Ok(selected) => return Ok(Some((selected, None))),
-            // An empty query sequence keeps reporting the unavailable
-            // subsequence rather than verifying every string against nothing.
-            Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {}
+            Ok(selected) => return Ok((selected, None)),
+            Err(Error::ThresholdSubsequenceUnavailable) => {}
             Err(error) => return Err(error),
-        }
-        if !any_radius_can_select(query_string, bound, costs) {
-            return Ok(None);
         }
 
         // Selection is what a radius has to satisfy, so the search runs it at
         // each radius it weighs rather than predicting the outcome. A radius
-        // reported here therefore selected in fact, and exhaustive
-        // verification is reached only once selection has turned down the
-        // widest radius the alphabet offers.
+        // reported here therefore selected in fact, and the widest radius the
+        // alphabet offers is always tried before giving up.
         let radii = wider_radii(query_string, eta, costs, &self.engine.neighborhood);
         let mut narrowest = None;
         let (mut low, mut high) = (0, radii.len());
@@ -300,7 +268,7 @@ where
                 Err(error) => return Err(error),
             }
         }
-        Ok(narrowest)
+        narrowest.ok_or(Error::ThresholdSubsequenceUnavailable)
     }
 
     /// Selects query positions at one eta.
@@ -325,59 +293,56 @@ where
     }
 }
 
-/// Exhaustively verifies every non-empty string in the corpus.
-///
-/// This is used
-/// when the selector cannot construct a complete threshold subsequence for a
-/// non-empty query. It is slower and can return more results than the normal
-/// filter-and-verify path, but is guaranteed to be correct.
-fn verify_exhaustively<C>(
-    query_string: &[Symbol],
-    bound: StrictBound,
-    corpus: &CorpusStore,
-    costs: &C,
-) -> Result<Vec<Match>>
-where
-    C: EditCosts<Symbol>,
-{
-    // Smith-Waterman verification uses candidates only to select data strings. One
-    // in-bounds anchor per non-empty string requests exhaustive verification
-    // without relying on the filtering guarantee that was unavailable.
-    let mut candidates = Vec::new();
-    for raw_id in 0..corpus.len() {
-        let string_id = SequenceId::from_usize(raw_id)?;
-        let string = corpus
-            .string(string_id)?
-            .ok_or(Error::UnknownString(string_id.as_usize()))?;
-        if !string.is_empty() {
-            candidates.push(Candidate {
-                string_id,
-                string_position: Position::new(0),
-                query_position: Position::new(0),
-            });
-        }
-    }
-    Verifier::SmithWaterman.verify(query_string, &candidates, corpus, bound, costs)
-}
-
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
 
-    use super::{
-        MinCandidateSelector, RangeSearchParams, StrictBound, automatic_eta, verify_exhaustively,
-    };
+    use super::{MinCandidateSelector, RangeSearchParams, StrictBound, automatic_eta};
     use crate::costs::embedding::{CosineEmbeddingCosts, EmbeddingStoreBuilder};
     use crate::costs::levenshtein::LevenshteinCosts;
     use crate::costs::{Cost, EditCosts};
-    use crate::errors::Error;
+    use crate::errors::{Error, Result};
     use crate::postings::PostingsIndexBuilder;
     use crate::search::SearchEngineBuilder;
     use crate::search::encoding::EncodedQuery;
-    use crate::search::{Match, SearchEngine};
-    use crate::store::CorpusStoreBuilder;
-    use crate::types::{Position, Posting, SequenceId};
+    use crate::search::verification::Verifier;
+    use crate::search::{Candidate, Match, SearchEngine};
+    use crate::store::{CorpusStore, CorpusStoreBuilder};
+    use crate::types::{Position, Posting, SequenceId, Symbol};
     use crate::vocabulary::VocabularyBuilder;
+
+    /// Exhaustively verifies every non-empty string in the corpus.
+    ///
+    /// Range search answers with anchored verification alone, so this is the
+    /// independent oracle its results are checked against.
+    fn verify_exhaustively<C>(
+        query_string: &[Symbol],
+        bound: StrictBound,
+        corpus: &CorpusStore,
+        costs: &C,
+    ) -> Result<Vec<Match>>
+    where
+        C: EditCosts<Symbol>,
+    {
+        // Smith-Waterman verification uses candidates only to select data
+        // strings. One in-bounds anchor per non-empty string requests
+        // exhaustive verification without relying on the filtering guarantee.
+        let mut candidates = Vec::new();
+        for raw_id in 0..corpus.len() {
+            let string_id = SequenceId::from_usize(raw_id)?;
+            let string = corpus
+                .string(string_id)?
+                .ok_or(Error::UnknownString(string_id.as_usize()))?;
+            if !string.is_empty() {
+                candidates.push(Candidate {
+                    string_id,
+                    string_position: Position::new(0),
+                    query_position: Position::new(0),
+                });
+            }
+        }
+        Verifier::SmithWaterman.verify(query_string, &candidates, corpus, bound, costs)
+    }
 
     struct CharacterCosts;
 
@@ -547,18 +512,17 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_exhaustive_search_when_no_threshold_subsequence_exists() {
-        // Deleting 'x' costs 0.25, so no eta lifts the contribution above the
-        // threshold of 1.0 and re-tuning has nothing to offer.
+    fn declines_a_threshold_reaching_the_query_deletion_cost() {
+        // Deleting 'x' costs 0.25, which the threshold of 1.0 admits, so no
+        // eta lifts the contribution above it and the search is declined.
         let engine = engine();
-        let (matches, metrics) = engine
-            .range_searcher(CharacterCosts)
-            .search_with_metrics(&['x'], &RangeSearchParams::new(1.0))
-            .unwrap();
 
-        assert_eq!(matches, expected_matches(1.0));
-        assert!(metrics.used_exhaustive_verification);
-        assert_eq!(metrics.adjusted_eta, None);
+        assert_eq!(
+            engine
+                .range_searcher(CharacterCosts)
+                .search(&['x'], &RangeSearchParams::new(1.0)),
+            Err(Error::ThresholdSubsequenceUnavailable)
+        );
     }
 
     #[test]
@@ -573,7 +537,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(matches, expected_matches(0.4));
-        assert!(!metrics.used_exhaustive_verification);
         assert_eq!(metrics.adjusted_eta, Some(Cost::new_const(0.4)));
     }
 
@@ -602,7 +565,6 @@ mod tests {
         .unwrap();
 
         assert!(metrics.adjusted_eta.is_some());
-        assert!(!metrics.used_exhaustive_verification);
         assert!(!filtered.is_empty());
         assert_eq!(filtered, exhaustive);
     }
@@ -637,20 +599,42 @@ mod tests {
     }
 
     #[test]
-    fn segments_matched_without_pairing_a_token_are_verified_exhaustively() {
+    fn declines_a_search_a_segment_could_match_without_pairing_a_token() {
         // Deleting the query token and inserting a data token costs 0.2, while
-        // substituting one for the other costs 1.0. Anchored verification would
-        // miss every segment here, so the search must not reach it.
+        // substituting one for the other costs 1.0. Anchored verification
+        // would miss every segment here, so the search must not reach it, and
+        // the deletion cost of 0.1 is what the threshold of 0.5 reaches.
         let mut builder = SearchEngineBuilder::new();
         builder.add_sequence("xbz".chars()).unwrap();
         let engine = builder.build().unwrap();
 
-        let (matches, metrics) = engine
-            .range_searcher(CheapEditCosts)
-            .search_with_metrics(&['a'], &RangeSearchParams::new(0.5))
-            .unwrap();
+        assert_eq!(
+            engine
+                .range_searcher(CheapEditCosts)
+                .search(&['a'], &RangeSearchParams::new(0.5)),
+            Err(Error::ThresholdSubsequenceUnavailable)
+        );
+    }
 
-        assert!(metrics.used_exhaustive_verification);
+    /// The oracle the declined search above would have needed.
+    ///
+    /// Anchored verification cannot answer it, which is why range search
+    /// declines it rather than returning these segments.
+    #[test]
+    fn exhaustive_verification_finds_the_segments_anchoring_would_miss() {
+        let mut builder = SearchEngineBuilder::new();
+        builder.add_sequence("xbz".chars()).unwrap();
+        let engine = builder.build().unwrap();
+        let encoded_query = EncodedQuery::new(vec!['a'], &engine.vocabulary).unwrap();
+
+        let matches = verify_exhaustively(
+            encoded_query.string(),
+            StrictBound::from_inclusive(Cost::new_const(0.5)).unwrap(),
+            &engine.store,
+            &encoded_query.costs(&engine.vocabulary, &CheapEditCosts),
+        )
+        .unwrap();
+
         assert_eq!(
             matches
                 .iter()

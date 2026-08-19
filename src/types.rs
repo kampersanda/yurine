@@ -50,6 +50,10 @@ pub(crate) struct Position(u32);
 
 impl Position {
     /// Creates a position from its zero-based integer representation.
+    ///
+    /// Positions reaching the search come from the corpus and the query, so
+    /// only tests build one from a literal.
+    #[cfg(test)]
     pub(crate) const fn new(value: u32) -> Self {
         Self(value)
     }

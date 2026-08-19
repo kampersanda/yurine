@@ -146,10 +146,10 @@ pub enum Error {
     #[error("unknown string id: {0}")]
     UnknownString(usize),
 
-    /// No threshold subsequence can be constructed for the query, possibly
-    /// because deletion costs are too small for the threshold.
+    /// The threshold reaches the cost of deleting the whole query sequence, so
+    /// no substitution neighborhood can filter the search.
     #[error(
-        "a threshold subsequence cannot be constructed; deletion costs may be too small for the threshold"
+        "the threshold reaches the cost of deleting the whole query; lower the threshold, or raise the deletion costs, to search through the index"
     )]
     ThresholdSubsequenceUnavailable,
 }
