@@ -148,8 +148,11 @@ pub enum Error {
 
     /// The threshold reaches the cost of deleting the whole query sequence, so
     /// no substitution neighborhood can filter the search.
+    ///
+    /// An empty query sequence reports this too: deleting it costs nothing, so
+    /// every threshold reaches that cost.
     #[error(
-        "the threshold reaches the cost of deleting the whole query; lower the threshold, or raise the deletion costs, to search through the index"
+        "the threshold reaches the cost of deleting the whole query; query a non-empty sequence whose deletion costs exceed the threshold, or lower the threshold"
     )]
     ThresholdSubsequenceUnavailable,
 }
