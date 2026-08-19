@@ -375,6 +375,11 @@ fn measure(options: MeasureOptions) -> Result<(), Box<dyn Error>> {
         "bool",
     );
     metric(
+        "eta_was_adjusted",
+        u8::from(metrics.adjusted_eta.is_some()),
+        "bool",
+    );
+    metric(
         "selected_query_positions",
         metrics.selected_query_positions,
         "count",

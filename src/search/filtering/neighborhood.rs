@@ -35,6 +35,11 @@ impl SubstitutionNeighborhood {
         Ok(Self { alphabet })
     }
 
+    /// Returns the alphabet the neighborhood is enumerated from.
+    pub(in crate::search) fn alphabet(&self) -> &[Symbol] {
+        &self.alphabet
+    }
+
     /// Splits the alphabet at eta in a single pass over the substitution costs.
     ///
     /// Returns the symbols whose substitution cost from `symbol` is at most

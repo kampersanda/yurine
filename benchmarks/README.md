@@ -142,8 +142,8 @@ Output is tab-separated `metric`, `value`, and `unit`. It includes:
 - process peak RSS after build, cold search, and warm search,
 - current file-backed RSS after open, cold search, and warm search on Linux,
 - engine-resident heap after releasing the input corpus,
-- whether exhaustive verification was used, selected query positions, and the
-  generated candidate count,
+- whether exhaustive verification was used, whether eta was adjusted, selected
+  query positions, and the generated candidate count,
 - the number of calls one search makes into the cost policy,
 - the embedding matrix's shape, seed, build time, and heap, under
   `--costs cosine` only.
@@ -195,7 +195,12 @@ each posting list is deduplicated, and posting lists for different symbols do
 not overlap. The `HashSet` was therefore removed; allocator-observed search heap
 growth remains the implementation-independent memory metric.
 
-`used_exhaustive_verification` is emitted as numeric boolean `0` or `1`.
+`used_exhaustive_verification` and `eta_was_adjusted` are emitted as numeric
+boolean `0` or `1`. An eta too small to construct a threshold subsequence is
+raised to the smallest one that can, so a run reporting `eta_was_adjusted` as
+`1` filtered at a radius wider than the one it started from: the automatic eta
+when `--eta` is omitted, and the explicit radius otherwise. Read it against
+`generated_candidates`.
 
 The library compatibility integration fixture separately fixes `SequenceId`,
 token range, weighted distance, and result order. CLI tests fix conversion from token

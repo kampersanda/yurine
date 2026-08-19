@@ -7,7 +7,9 @@ use crate::errors::{Error, Result};
 use crate::search::SearchEngine;
 use crate::search::bound::StrictBound;
 use crate::search::encoding::EncodedQuery;
-use crate::search::filtering::{MinCandidateSelector, generate_candidates};
+use crate::search::filtering::{
+    MinCandidateSelector, SelectedPosition, any_radius_can_select, generate_candidates, wider_radii,
+};
 use crate::search::verification::Verifier;
 use crate::search::{Candidate, Match};
 use crate::store::CorpusStore;
@@ -35,6 +37,13 @@ pub struct RangeSearchParams {
 pub struct RangeSearchMetrics {
     /// Whether filtering was unavailable and exhaustive verification was used.
     pub used_exhaustive_verification: bool,
+    /// The eta filtering was re-tuned to, or `None` when the configured eta
+    /// selected query positions on its own.
+    ///
+    /// An eta too small to select is raised to the smallest one that can,
+    /// because the alternative is exhaustive verification. This is `None` when
+    /// exhaustive verification was used, since re-tuning is what failed there.
+    pub adjusted_eta: Option<Cost>,
     /// Number of query positions chosen for candidate generation.
     ///
     /// This is zero when exhaustive verification was used.
@@ -69,6 +78,12 @@ impl RangeSearchParams {
     /// Leave this unset unless profiling shows that the automatic value is a
     /// bottleneck. The radius affects candidate generation, not the distance
     /// threshold used to verify results.
+    ///
+    /// A radius too small to construct a threshold subsequence is raised to
+    /// the smallest one that can, since the alternative is exhaustive
+    /// verification;
+    /// [`RangeSearchMetrics::adjusted_eta`] reports the radius
+    /// a search settled on.
     pub const fn with_eta(mut self, eta: f32) -> Self {
         self.eta = Some(eta);
         self
@@ -125,22 +140,22 @@ where
     /// sequence uses eta zero and retains the existing empty-query error
     /// behavior.
     ///
-    /// If the selector cannot construct a complete threshold subsequence for
-    /// a non-empty query sequence, the engine falls back to exhaustive
-    /// Smith-Waterman verification instead of returning
-    /// [`Error::ThresholdSubsequenceUnavailable`]. This occurs whenever the
-    /// query sequence's total filtering contribution is less than or equal to
-    /// the threshold. With unit costs,
-    /// `threshold >= query_sequence.len()` is
+    /// If the configured eta cannot construct a complete threshold subsequence
+    /// for a non-empty query sequence, the search raises eta to the smallest
+    /// radius that can and filters with that. A query position contributes at
+    /// most the cost of deleting its token, so no radius helps exactly when
+    /// deleting the whole query sequence stays within the threshold. Only then
+    /// does the engine fall back to exhaustive Smith-Waterman verification
+    /// instead of returning [`Error::ThresholdSubsequenceUnavailable`]. With
+    /// unit costs, `threshold >= query_sequence.len()` is
     /// such a case.
     ///
-    /// A query position contributes at most the cost of deleting its token, so
-    /// the fallback also covers every search that could match a data segment
-    /// without pairing any tokens with it. Such an alignment costs at least the
-    /// cost of deleting the whole query sequence, and a threshold reaching that
-    /// sum is exactly what leaves the threshold subsequence unavailable.
-    /// Filtering may therefore answer with anchored data segments whatever the
-    /// relationship between the operation costs; see [`EditCosts`].
+    /// The fallback therefore also covers every search that could match a data
+    /// segment without pairing any tokens with it. Such an alignment costs at
+    /// least the cost of deleting the whole query sequence, which is exactly
+    /// the sum no eta can lift the contributions above. Filtering may
+    /// therefore answer with anchored data segments whatever the relationship
+    /// between the operation costs; see [`EditCosts`].
     ///
     /// The fallback takes `O(m * sum(n_i^2))` time for query-sequence length
     /// `m` and
@@ -148,6 +163,11 @@ where
     /// segments.
     /// It may therefore be substantially slower and produce many more results
     /// than the normal filter-and-verify path.
+    ///
+    /// Raising eta costs `O((m * a + m^2) * log(m * a))` time for alphabet size
+    /// `a`, which does not grow with the corpus. It buys the normal path for a
+    /// search that would otherwise take the fallback, and a query the
+    /// configured eta already filters with does not pay it at all.
     ///
     /// Searching takes `&self`, so one searcher can serve concurrent queries.
     ///
@@ -194,26 +214,17 @@ where
     where
         S: EditCosts<Symbol>,
     {
-        let selected = match MinCandidateSelector.select(
-            query_string,
-            bound,
-            eta,
-            &self.engine.index,
-            costs,
-            &self.engine.neighborhood,
-        ) {
-            Ok(selected) => selected,
-            Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {
-                let matches = verify_exhaustively(query_string, bound, &self.engine.store, costs)?;
-                return Ok((
-                    matches,
-                    RangeSearchMetrics {
-                        used_exhaustive_verification: true,
-                        ..RangeSearchMetrics::default()
-                    },
-                ));
-            }
-            Err(error) => return Err(error),
+        let Some((selected, adjusted_eta)) =
+            self.select_positions(query_string, bound, eta, costs)?
+        else {
+            let matches = verify_exhaustively(query_string, bound, &self.engine.store, costs)?;
+            return Ok((
+                matches,
+                RangeSearchMetrics {
+                    used_exhaustive_verification: true,
+                    ..RangeSearchMetrics::default()
+                },
+            ));
         };
         let selected_query_positions = selected.len();
         let candidates = generate_candidates(selected, &self.engine.index);
@@ -228,10 +239,89 @@ where
             matches,
             RangeSearchMetrics {
                 used_exhaustive_verification: false,
+                adjusted_eta,
                 selected_query_positions,
                 generated_candidates: candidates.len(),
             },
         ))
+    }
+
+    /// Selects query positions, widening eta when the configured radius cannot
+    /// construct a threshold subsequence.
+    ///
+    /// Returns the selected positions together with the radius they were
+    /// re-tuned to, or `None` when no radius selects and the search has to
+    /// verify exhaustively.
+    ///
+    /// Widening collects the radii for `O(m * a * log(m * a))` and then binary
+    /// searches them, running one selection per step, so for query-string
+    /// length `m` and alphabet size `a` the whole of it stays within
+    /// `O((m * a + m^2) * log(m * a))`. That is bounded by the query and the
+    /// alphabet alone, whereas the exhaustive verification it spares the
+    /// search grows with the corpus as `O(m * sum(n_i^2))`. None of it is paid
+    /// when the configured eta selects on its own.
+    fn select_positions<S>(
+        &self,
+        query_string: &[Symbol],
+        bound: StrictBound,
+        eta: Cost,
+        costs: &S,
+    ) -> Result<Option<(Vec<SelectedPosition>, Option<Cost>)>>
+    where
+        S: EditCosts<Symbol>,
+    {
+        match self.select_at(query_string, bound, eta, costs) {
+            Ok(selected) => return Ok(Some((selected, None))),
+            // An empty query sequence keeps reporting the unavailable
+            // subsequence rather than verifying every string against nothing.
+            Err(Error::ThresholdSubsequenceUnavailable) if !query_string.is_empty() => {}
+            Err(error) => return Err(error),
+        }
+        if !any_radius_can_select(query_string, bound, costs) {
+            return Ok(None);
+        }
+
+        // Selection is what a radius has to satisfy, so the search runs it at
+        // each radius it weighs rather than predicting the outcome. A radius
+        // reported here therefore selected in fact, and exhaustive
+        // verification is reached only once selection has turned down the
+        // widest radius the alphabet offers.
+        let radii = wider_radii(query_string, eta, costs, &self.engine.neighborhood);
+        let mut narrowest = None;
+        let (mut low, mut high) = (0, radii.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            match self.select_at(query_string, bound, radii[middle], costs) {
+                Ok(selected) => {
+                    narrowest = Some((selected, Some(radii[middle])));
+                    high = middle;
+                }
+                Err(Error::ThresholdSubsequenceUnavailable) => low = middle + 1,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(narrowest)
+    }
+
+    /// Selects query positions at one eta.
+    fn select_at<S>(
+        &self,
+        query_string: &[Symbol],
+        bound: StrictBound,
+        eta: Cost,
+        costs: &S,
+    ) -> Result<Vec<SelectedPosition>>
+    where
+        S: EditCosts<Symbol>,
+    {
+        MinCandidateSelector.select(
+            query_string,
+            bound,
+            eta,
+            &self.engine.index,
+            costs,
+            &self.engine.neighborhood,
+        )
     }
 }
 
@@ -458,13 +548,74 @@ mod tests {
 
     #[test]
     fn falls_back_to_exhaustive_search_when_no_threshold_subsequence_exists() {
+        // Deleting 'x' costs 0.25, so no eta lifts the contribution above the
+        // threshold of 1.0 and re-tuning has nothing to offer.
         let engine = engine();
-        let matches = engine
+        let (matches, metrics) = engine
             .range_searcher(CharacterCosts)
-            .search(&['x'], &RangeSearchParams::new(1.0))
+            .search_with_metrics(&['x'], &RangeSearchParams::new(1.0))
             .unwrap();
 
         assert_eq!(matches, expected_matches(1.0));
+        assert!(metrics.used_exhaustive_verification);
+        assert_eq!(metrics.adjusted_eta, None);
+    }
+
+    #[test]
+    fn raises_an_eta_too_small_to_select_instead_of_verifying_exhaustively() {
+        // At eta zero the cheapest way out of 'y' is substituting it for 'a'
+        // at 0.4, which the threshold admits. Raising eta to 0.4 brings 'a'
+        // into the neighborhood and leaves deletion, at 1.0, as the way out.
+        let engine = engine();
+        let (matches, metrics) = engine
+            .range_searcher(CharacterCosts)
+            .search_with_metrics(&['y'], &RangeSearchParams::new(0.4).with_eta(0.0))
+            .unwrap();
+
+        assert_eq!(matches, expected_matches(0.4));
+        assert!(!metrics.used_exhaustive_verification);
+        assert_eq!(metrics.adjusted_eta, Some(Cost::new_const(0.4)));
+    }
+
+    #[test]
+    fn a_raised_eta_returns_what_exhaustive_verification_would() {
+        let mut builder = SearchEngineBuilder::new();
+        builder.add_sequence("xayb".chars()).unwrap();
+        builder.add_sequence("aax".chars()).unwrap();
+        let engine = builder.build().unwrap();
+        let searcher = engine.range_searcher(CharacterCosts);
+        // At eta zero the two positions contribute 0.4 and 1.0, which the
+        // threshold admits; raising eta to 0.4 makes both contribute 1.0.
+        let threshold = Cost::new_const(1.4);
+
+        let (filtered, metrics) = searcher
+            .search_with_metrics(&['y', 'a'], &RangeSearchParams::new(1.4).with_eta(0.0))
+            .unwrap();
+
+        let encoded_query = EncodedQuery::new(vec!['y', 'a'], &engine.vocabulary).unwrap();
+        let exhaustive = verify_exhaustively(
+            encoded_query.string(),
+            StrictBound::from_inclusive(threshold).unwrap(),
+            &engine.store,
+            &encoded_query.costs(&engine.vocabulary, &searcher.costs),
+        )
+        .unwrap();
+
+        assert!(metrics.adjusted_eta.is_some());
+        assert!(!metrics.used_exhaustive_verification);
+        assert!(!filtered.is_empty());
+        assert_eq!(filtered, exhaustive);
+    }
+
+    #[test]
+    fn an_eta_that_selects_on_its_own_is_left_alone() {
+        let engine = engine();
+        let (_, metrics) = engine
+            .range_searcher(CharacterCosts)
+            .search_with_metrics(&['y'], &RangeSearchParams::new(0.4))
+            .unwrap();
+
+        assert_eq!(metrics.adjusted_eta, None);
     }
 
     /// Costs that break `substitution <= deletion + insertion`, so the cheapest
