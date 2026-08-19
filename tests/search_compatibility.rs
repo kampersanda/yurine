@@ -54,7 +54,7 @@ fn assert_range_search_result_contract(engine: SearchEngine<char>) {
     let searcher = engine.range_searcher(CompatibilityCosts);
 
     let matches = searcher
-        .search(&['東', '京'], &RangeSearchParams::new(0.25).with_eta(0.25))
+        .search(&['東', '京'], &RangeSearchParams::new(0.25))
         .unwrap();
 
     assert_eq!(

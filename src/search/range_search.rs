@@ -17,15 +17,16 @@ use crate::types::Symbol;
 /// Parameters for threshold range search.
 ///
 /// The threshold is inclusive: a result is returned when its distance is less
-/// than or equal to [`Self::threshold`]. Most callers only need [`Self::new`];
-/// [`Self::with_eta`] is a filtering-performance tuning control and does not
-/// change which results are correct. Both values must be finite and
-/// non-negative, and the threshold must also be less than [`f32::MAX`] so that
-/// a search bound exists above it; they are validated when a search starts.
+/// than or equal to [`Self::threshold`]. It must be finite, non-negative, and
+/// less than [`f32::MAX`] so that a search bound exists above it; this is
+/// validated when a search starts.
+///
+/// The substitution-neighborhood radius filtering works at is derived from the
+/// threshold and the query length, not configured here. See
+/// [`RangeSearcher::search`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RangeSearchParams {
     threshold: f32,
-    eta: Option<f32>,
 }
 
 /// Measurements from the filtering phase of one range search.
@@ -34,10 +35,10 @@ pub struct RangeSearchParams {
 /// across implementations without making elapsed time a test assertion.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RangeSearchMetrics {
-    /// The eta filtering was re-tuned to, or `None` when the configured eta
-    /// selected query positions on its own.
+    /// The radius filtering was widened to, or `None` when the automatic
+    /// radius selected query positions on its own.
     ///
-    /// An eta too small to select is raised to the smallest one that can.
+    /// A radius too small to select is raised to the smallest one that can.
     pub adjusted_eta: Option<Cost>,
     /// Number of query positions chosen for candidate generation.
     pub selected_query_positions: usize,
@@ -56,47 +57,22 @@ pub struct RangeSearcher<'a, T, C> {
 }
 
 impl RangeSearchParams {
-    /// Creates parameters with automatic eta.
+    /// Creates parameters for an inclusive distance threshold.
     pub const fn new(threshold: f32) -> Self {
-        Self {
-            threshold,
-            eta: None,
-        }
-    }
-
-    /// Uses an explicit substitution-neighborhood radius for filtering.
-    ///
-    /// Leave this unset unless profiling shows that the automatic value is a
-    /// bottleneck. The radius affects candidate generation, not the distance
-    /// threshold used to verify results.
-    ///
-    /// A radius too small to construct a threshold subsequence is raised to
-    /// the smallest one that can, since the alternative is exhaustive
-    /// verification;
-    /// [`RangeSearchMetrics::adjusted_eta`] reports the radius
-    /// a search settled on.
-    pub const fn with_eta(mut self, eta: f32) -> Self {
-        self.eta = Some(eta);
-        self
+        Self { threshold }
     }
 
     /// Returns the inclusive distance threshold.
     pub const fn threshold(&self) -> f32 {
         self.threshold
     }
-
-    /// Returns the explicit eta, or `None` when eta is automatic.
-    pub const fn eta(&self) -> Option<f32> {
-        self.eta
-    }
 }
 
-/// Returns the default substitution-neighborhood radius for a query length.
+/// Returns the substitution-neighborhood radius for a query length.
 ///
 /// The radius is `threshold / query_sequence_len`, computed from the inclusive
 /// threshold. For an empty query sequence, this returns zero rather than
-/// dividing by zero; searching an empty query sequence retains its existing
-/// error behavior.
+/// dividing by zero; such a search is declined either way.
 pub(crate) fn automatic_eta(threshold: Cost, query_sequence_len: usize) -> Result<Cost> {
     if query_sequence_len == 0 {
         Ok(Cost::ZERO)
@@ -125,16 +101,17 @@ where
     /// Results are ordered by data sequence ID, then token-range start, then
     /// token-range end.
     ///
-    /// When eta is not configured, it defaults to
-    /// `threshold / query_sequence.len()`. This favors constructing a
-    /// threshold subsequence for continuous substitution costs.
+    /// Filtering derives its substitution-neighborhood radius from the search
+    /// itself, as `threshold / query_sequence.len()`. This favors constructing
+    /// a threshold subsequence for continuous substitution costs.
     ///
-    /// If the configured eta cannot construct a complete threshold subsequence,
-    /// the search raises eta to the smallest radius that can and filters with
-    /// that. Raising eta costs `O((m * a + m^2) * log(m * a))` time for
-    /// query-sequence length `m` and alphabet size `a`, which does not grow
-    /// with the corpus, and a query the configured eta already filters with
-    /// does not pay it at all.
+    /// If that radius cannot construct a complete threshold subsequence, the
+    /// search raises it to the smallest one that can and filters with that.
+    /// Widening costs `O((m * a + m^2) * log(m * a))` time for query-sequence
+    /// length `m` and alphabet size `a`, which does not grow with the corpus,
+    /// and a search the derived radius already filters with does not pay it at
+    /// all. [`RangeSearchMetrics::adjusted_eta`] reports what a search settled
+    /// on.
     ///
     /// Searching takes `&self`, so one searcher can serve concurrent queries.
     ///
@@ -170,15 +147,11 @@ where
         // searches for distances strictly below a bound, so the conversion
         // happens here, once, where the two meet.
         let bound = StrictBound::from_inclusive(threshold)?;
-        let eta = params.eta.map(Cost::new).transpose()?;
         let encoded_query = EncodedQuery::new(query_sequence.to_vec(), &self.engine.vocabulary)?;
         let costs = encoded_query.costs(&self.engine.vocabulary, &self.costs);
-        let eta = match eta {
-            Some(eta) => eta,
-            // Eta bounds substitution costs rather than distances, so it
-            // divides the inclusive threshold and not the strict bound.
-            None => automatic_eta(threshold, encoded_query.string().len())?,
-        };
+        // Eta bounds substitution costs rather than distances, so it divides
+        // the inclusive threshold and not the strict bound.
+        let eta = automatic_eta(threshold, encoded_query.string().len())?;
         self.search_query_string(encoded_query.string(), bound, eta, &costs)
     }
 
@@ -220,7 +193,7 @@ where
         ))
     }
 
-    /// Selects query positions, widening eta when the configured radius cannot
+    /// Selects query positions, widening eta when the derived radius cannot
     /// construct a threshold subsequence.
     ///
     /// Returns the selected positions together with the radius they were
@@ -232,7 +205,7 @@ where
     /// searches them, running one selection per step, so for query-string
     /// length `m` and alphabet size `a` the whole of it stays within
     /// `O((m * a + m^2) * log(m * a))`. That is bounded by the query and the
-    /// alphabet alone, and none of it is paid when the configured eta selects
+    /// alphabet alone, and none of it is paid when the derived radius selects
     /// on its own.
     fn select_positions<S>(
         &self,
@@ -465,17 +438,10 @@ mod tests {
     }
 
     #[test]
-    fn parameters_expose_threshold_and_optional_eta() {
+    fn parameters_expose_the_threshold() {
         let threshold = 0.75;
-        let eta = 0.25;
 
-        let automatic = RangeSearchParams::new(threshold);
-        let explicit = automatic.with_eta(eta);
-
-        assert_eq!(automatic.threshold(), threshold);
-        assert_eq!(automatic.eta(), None);
-        assert_eq!(explicit.threshold(), threshold);
-        assert_eq!(explicit.eta(), Some(eta));
+        assert_eq!(RangeSearchParams::new(threshold).threshold(), threshold);
     }
 
     #[test]
@@ -488,7 +454,7 @@ mod tests {
             Err(Error::InvalidCost(value)) if value.is_nan()
         ));
         assert_eq!(
-            searcher.search(&['a'], &RangeSearchParams::new(0.0).with_eta(-1.0)),
+            searcher.search(&['a'], &RangeSearchParams::new(-1.0)),
             Err(Error::InvalidCost(-1.0))
         );
     }
@@ -525,37 +491,79 @@ mod tests {
         );
     }
 
-    #[test]
-    fn raises_an_eta_too_small_to_select_instead_of_verifying_exhaustively() {
-        // At eta zero the cheapest way out of 'y' is substituting it for 'a'
-        // at 0.4, which the threshold admits. Raising eta to 0.4 brings 'a'
-        // into the neighborhood and leaves deletion, at 1.0, as the way out.
-        let engine = engine();
-        let (matches, metrics) = engine
-            .range_searcher(CharacterCosts)
-            .search_with_metrics(&['y'], &RangeSearchParams::new(0.4).with_eta(0.0))
-            .unwrap();
+    /// Deletion costs that differ between tokens, as `CustomCosts` allows.
+    ///
+    /// One token is nearly free to delete, so it can never contribute much,
+    /// and the derived radius leaves the other capped by a cheap substitution
+    /// rather than by its own deletion cost.
+    struct SkewedCosts;
 
-        assert_eq!(matches, expected_matches(0.4));
-        assert_eq!(metrics.adjusted_eta, Some(Cost::new_const(0.4)));
+    impl EditCosts<char> for SkewedCosts {
+        fn substitution(&self, from: &char, to: &char) -> Cost {
+            if from == to {
+                Cost::ZERO
+            } else {
+                Cost::new_const(0.6)
+            }
+        }
+
+        fn deletion(&self, token: &char) -> Cost {
+            if *token == 'a' {
+                Cost::new_const(0.05)
+            } else {
+                Cost::new_const(2.0)
+            }
+        }
+
+        fn insertion(&self, _token: &char) -> Cost {
+            Cost::ONE
+        }
+    }
+
+    /// An engine over the tokens `SkewedCosts` distinguishes.
+    fn skewed_engine() -> SearchEngine<char> {
+        let mut builder = SearchEngineBuilder::new();
+        builder.add_sequence("ab".chars()).unwrap();
+        builder.build().unwrap()
     }
 
     #[test]
-    fn a_raised_eta_returns_what_exhaustive_verification_would() {
-        let mut builder = SearchEngineBuilder::new();
-        builder.add_sequence("xayb".chars()).unwrap();
-        builder.add_sequence("aax".chars()).unwrap();
-        let engine = builder.build().unwrap();
-        let searcher = engine.range_searcher(CharacterCosts);
-        // At eta zero the two positions contribute 0.4 and 1.0, which the
-        // threshold admits; raising eta to 0.4 makes both contribute 1.0.
-        let threshold = Cost::new_const(1.4);
+    fn raises_a_radius_too_small_to_select() {
+        // The derived radius is 1.0 / 2 = 0.5, where 'a' contributes its 0.05
+        // deletion and 'b' is capped at the 0.6 substitution, for 0.65 against
+        // a threshold of 1.0. At 0.6 that substitution joins the neighborhood
+        // and 'b' contributes its 2.0 deletion instead.
+        let engine = skewed_engine();
 
-        let (filtered, metrics) = searcher
-            .search_with_metrics(&['y', 'a'], &RangeSearchParams::new(1.4).with_eta(0.0))
+        let (matches, metrics) = engine
+            .range_searcher(SkewedCosts)
+            .search_with_metrics(&['a', 'b'], &RangeSearchParams::new(1.0))
             .unwrap();
 
-        let encoded_query = EncodedQuery::new(vec!['y', 'a'], &engine.vocabulary).unwrap();
+        assert_eq!(metrics.adjusted_eta, Some(Cost::new_const(0.6)));
+        assert_eq!(metrics.selected_query_positions, 1);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|matched| (matched.token_range.clone(), matched.distance))
+                .collect::<Vec<_>>(),
+            // "a" matches by deleting the query's 'a' and substituting its
+            // 'b', which is cheaper than pairing 'a' and deleting 'b'.
+            [(0..1, 0.65000004), (0..2, 0.0), (1..2, 0.05)]
+        );
+    }
+
+    #[test]
+    fn a_raised_radius_returns_what_exhaustive_verification_would() {
+        let engine = skewed_engine();
+        let searcher = engine.range_searcher(SkewedCosts);
+        let threshold = Cost::ONE;
+
+        let (filtered, metrics) = searcher
+            .search_with_metrics(&['a', 'b'], &RangeSearchParams::new(1.0))
+            .unwrap();
+
+        let encoded_query = EncodedQuery::new(vec!['a', 'b'], &engine.vocabulary).unwrap();
         let exhaustive = verify_exhaustively(
             encoded_query.string(),
             StrictBound::from_inclusive(threshold).unwrap(),
@@ -695,11 +703,9 @@ mod tests {
                 .is_ok()
         );
 
+        // Two query tokens against this threshold derive exactly `eta`.
         let filtered = searcher
-            .search(
-                &['x', 'y'],
-                &RangeSearchParams::new(threshold.into()).with_eta(eta.into()),
-            )
+            .search(&['x', 'y'], &RangeSearchParams::new(threshold.into()))
             .unwrap();
         let exhaustive = verify_exhaustively(
             encoded_query.string(),

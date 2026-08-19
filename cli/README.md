@@ -69,9 +69,6 @@ it into.
   defaults to `0`.
 - `--costs <PATH>` loads a custom or embedding-based cost policy, either from a
   configuration file or from a snapshot directory built by `costs`.
-- `--eta <NUMBER>` overrides an internal candidate-generation radius. Most
-  users should leave it unset; it affects filtering performance, not the
-  distance threshold used to verify results.
 - `--verify` checks the internal integrity of `engine.yurine` and of the edit
   costs before searching, reading the whole file in both cases. It does not
   check the stored source texts, so a reported match is quoted as stored even
