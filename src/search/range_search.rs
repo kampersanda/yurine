@@ -9,7 +9,8 @@ use crate::search::SearchEngine;
 use crate::search::bound::StrictBound;
 use crate::search::encoding::EncodedQuery;
 use crate::search::filtering::{
-    MinCandidateSelector, SelectedPosition, any_radius_can_select, generate_candidates, wider_radii,
+    MinCandidateSelector, SelectedPosition, any_radius_can_select, count_candidates,
+    generate_candidates, wider_radii,
 };
 use crate::search::verification::Verifier;
 use crate::types::Symbol;
@@ -27,6 +28,7 @@ use crate::types::Symbol;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RangeSearchParams {
     threshold: f32,
+    max_candidates: Option<usize>,
 }
 
 /// Measurements from the filtering phase of one range search.
@@ -59,12 +61,37 @@ pub struct RangeSearcher<'a, T, C> {
 impl RangeSearchParams {
     /// Creates parameters for an inclusive distance threshold.
     pub const fn new(threshold: f32) -> Self {
-        Self { threshold }
+        Self {
+            threshold,
+            max_candidates: None,
+        }
+    }
+
+    /// Limits how many candidates filtering may generate.
+    ///
+    /// Filtering work grows with the threshold whatever a search returns, so a
+    /// loose threshold can make a search slow while it answers with little.
+    /// The candidate count is known exactly before any candidate is generated,
+    /// so a search above `max_candidates` is declined with
+    /// [`Error::SearchTooExpensive`] rather than answered slowly.
+    ///
+    /// Searches are unlimited by default.
+    /// [`RangeSearchMetrics::generated_candidates`] reports what a search
+    /// generated, which is the measurement to choose a limit from.
+    pub const fn with_max_candidates(mut self, max_candidates: usize) -> Self {
+        self.max_candidates = Some(max_candidates);
+        self
     }
 
     /// Returns the inclusive distance threshold.
     pub const fn threshold(&self) -> f32 {
         self.threshold
+    }
+
+    /// Returns the maximum number of candidates, or `None` when a search may
+    /// generate as many as filtering asks for.
+    pub const fn max_candidates(&self) -> Option<usize> {
+        self.max_candidates
     }
 }
 
@@ -128,6 +155,11 @@ where
     /// accepted search with anchored data segments whatever the relationship
     /// between the operation costs; see [`EditCosts`].
     ///
+    /// Returns [`Error::SearchTooExpensive`] when
+    /// [`RangeSearchParams::with_max_candidates`] set a maximum and filtering
+    /// would generate more candidates than that. Nothing is generated or
+    /// verified in that case.
+    ///
     /// Also returns an error for invalid parameters, or costs that cannot be
     /// represented safely by the search algorithm.
     pub fn search(&self, query_sequence: &[T], params: &RangeSearchParams) -> Result<Vec<Match>> {
@@ -152,7 +184,13 @@ where
         // Eta bounds substitution costs rather than distances, so it divides
         // the inclusive threshold and not the strict bound.
         let eta = automatic_eta(threshold, encoded_query.string().len())?;
-        self.search_query_string(encoded_query.string(), bound, eta, &costs)
+        self.search_query_string(
+            encoded_query.string(),
+            bound,
+            eta,
+            params.max_candidates,
+            &costs,
+        )
     }
 
     fn search_query_string<S>(
@@ -160,6 +198,7 @@ where
         query_string: &[Symbol],
         bound: StrictBound,
         eta: Cost,
+        max_candidates: Option<usize>,
         costs: &S,
     ) -> Result<(Vec<Match>, RangeSearchMetrics)>
     where
@@ -175,6 +214,15 @@ where
         }
         let (selected, adjusted_eta) = self.select_positions(query_string, bound, eta, costs)?;
         let selected_query_positions = selected.len();
+        // Counting reads posting-list lengths for the radius selection settled
+        // on, so a declined search has neither generated a candidate nor
+        // verified one.
+        if let Some(limit) = max_candidates {
+            let candidates = count_candidates(&selected, &self.engine.index);
+            if candidates > limit {
+                return Err(Error::SearchTooExpensive { candidates, limit });
+            }
+        }
         let candidates = generate_candidates(selected, &self.engine.index);
         let matches = Verifier::BidirectionalTrie.verify(
             query_string,
@@ -442,6 +490,51 @@ mod tests {
         let threshold = 0.75;
 
         assert_eq!(RangeSearchParams::new(threshold).threshold(), threshold);
+    }
+
+    #[test]
+    fn parameters_are_unlimited_until_a_candidate_maximum_is_set() {
+        let params = RangeSearchParams::new(0.75);
+
+        assert_eq!(params.max_candidates(), None);
+        assert_eq!(params.with_max_candidates(3).max_candidates(), Some(3));
+    }
+
+    #[test]
+    fn accepts_a_search_at_the_candidate_maximum() {
+        let engine = engine();
+        let params = RangeSearchParams::new(0.4).with_max_candidates(2);
+
+        assert_eq!(
+            engine
+                .range_searcher(CharacterCosts)
+                .search(&['y'], &params)
+                .unwrap(),
+            expected_matches(0.4)
+        );
+    }
+
+    #[test]
+    fn declines_a_search_above_the_candidate_maximum() {
+        let engine = engine();
+        let searcher = engine.range_searcher(CharacterCosts);
+        // The count a limit is compared against is the one an unlimited search
+        // reports, so the two are checked against each other here.
+        let (_, metrics) = searcher
+            .search_with_metrics(&['y'], &RangeSearchParams::new(0.4))
+            .unwrap();
+        let limit = metrics.generated_candidates - 1;
+
+        assert_eq!(
+            searcher.search(
+                &['y'],
+                &RangeSearchParams::new(0.4).with_max_candidates(limit)
+            ),
+            Err(Error::SearchTooExpensive {
+                candidates: metrics.generated_candidates,
+                limit,
+            })
+        );
     }
 
     #[test]

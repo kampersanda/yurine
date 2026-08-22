@@ -42,9 +42,26 @@ pub(super) fn generate_candidates(
     candidates
 }
 
+/// Returns how many candidates [`generate_candidates`] would generate from
+/// `selected`.
+///
+/// Each candidate is one posting of one neighborhood symbol, so this is the
+/// sum of the selected positions' neighborhood posting counts. Posting-list
+/// lengths are read in constant time, so this scans the neighborhoods alone
+/// and never touches the postings. It is an exact count rather than an
+/// estimate, and it lives beside generation so the two cannot disagree about
+/// what a candidate is.
+pub(super) fn count_candidates(selected: &[SelectedPosition], index: &PostingsIndex) -> usize {
+    selected
+        .iter()
+        .flat_map(|selected_position| selected_position.neighbors.iter())
+        .map(|neighbor| index.frequency(*neighbor))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SelectedPosition, generate_candidates};
+    use super::{SelectedPosition, count_candidates, generate_candidates};
     use crate::postings::PostingsIndexBuilder;
     use crate::search::Candidate;
     use crate::types::{Position, Posting, SequenceId, Symbol};
@@ -101,6 +118,40 @@ mod tests {
                     query_position: Position::new(0),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn counts_the_candidates_generation_would_produce() {
+        let first = Symbol::new(0);
+        let second = Symbol::new(1);
+        let mut index = PostingsIndexBuilder::new(2);
+        for (symbol, string_id, position) in [(first, 0, 0), (first, 1, 2), (second, 1, 3)] {
+            index
+                .add_posting(
+                    symbol,
+                    Posting {
+                        string_id: SequenceId::new(string_id),
+                        position: Position::new(position),
+                    },
+                )
+                .unwrap();
+        }
+        let index = index.build();
+        let selected = vec![
+            SelectedPosition {
+                position: Position::new(0),
+                neighbors: vec![first, second],
+            },
+            SelectedPosition {
+                position: Position::new(1),
+                neighbors: vec![second],
+            },
+        ];
+
+        assert_eq!(
+            count_candidates(&selected, &index),
+            generate_candidates(selected.clone(), &index).len()
         );
     }
 

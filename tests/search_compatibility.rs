@@ -107,6 +107,38 @@ fn repeated_postings_report_candidate_count_without_deduplication() {
 }
 
 #[test]
+fn candidate_maximum_error_contract_is_stable() {
+    let mut builder = SearchEngineBuilder::new();
+    for _ in 0..128 {
+        builder.add_sequence("aaaaaaaa".chars()).unwrap();
+    }
+    let engine = builder.build().unwrap();
+    let searcher = engine.range_searcher(CompatibilityCosts);
+    let candidates = 2 * 128 * 8;
+
+    // A maximum is compared against the count the metrics report, so the same
+    // search is declined one below it and served at it.
+    assert_eq!(
+        searcher.search(
+            &['a', 'a'],
+            &RangeSearchParams::new(1.0).with_max_candidates(candidates - 1)
+        ),
+        Err(Error::SearchTooExpensive {
+            candidates,
+            limit: candidates - 1
+        })
+    );
+    assert!(
+        searcher
+            .search(
+                &['a', 'a'],
+                &RangeSearchParams::new(1.0).with_max_candidates(candidates)
+            )
+            .is_ok()
+    );
+}
+
+#[test]
 fn deleting_the_whole_query_error_contract_is_stable() {
     let mut builder = SearchEngineBuilder::new();
     builder.add_sequence(['a']).unwrap();
