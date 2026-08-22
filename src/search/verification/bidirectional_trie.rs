@@ -5,6 +5,16 @@
 //! This enumerates exactly the alignments pairing at least one query symbol
 //! with one data symbol, and no others.
 //!
+//! Only each anchor's best segment is reported. The two directions meet at the
+//! forced substitution and their costs add, so that segment is found by
+//! minimizing each direction alone, without forming their product. Every
+//! segment an anchor reaches contains the anchor position, so they all overlap
+//! and only one of them can survive [`keep_best_per_overlap`]: the segment a
+//! group is reduced to attains its distance at some anchor, and no segment at
+//! that anchor is closer, or it would be the group's best instead. Reporting
+//! the product and reducing it afterwards would therefore reach the same
+//! answer through `O(L_b * L_f)` work per anchor rather than `O(L_b + L_f)`.
+//!
 //! Those are all the alignments that matter when
 //! `substitution(from, to) <= deletion(from) + insertion(to)`. An alignment
 //! pairing no symbols deletes the whole query string and inserts the whole
@@ -25,6 +35,8 @@ use std::collections::BTreeMap;
 
 use hashbrown::HashMap;
 
+#[cfg(doc)]
+use super::keep_best_per_overlap;
 use super::{add_distance, create_match, root_column, step_dp, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
@@ -123,12 +135,70 @@ where
     distances
 }
 
+/// Returns the shortest extension attaining the smallest distance.
+///
+/// The shortest one is taken so that a group reduced to this segment reports
+/// the tightest range achieving its distance, matching how
+/// [`keep_best_per_overlap`] breaks the same tie.
+fn shortest_closest(distances: &[f32]) -> (usize, f32) {
+    let mut closest = (0, f32::INFINITY);
+    for (symbol_count, distance) in distances.iter().copied().enumerate() {
+        if distance < closest.1 {
+            closest = (symbol_count, distance);
+        }
+    }
+    closest
+}
+
+/// What an anchor contributes to the result.
+enum Emit {
+    /// The anchor's closest segment alone.
+    Best,
+    /// Every segment the anchor reaches within the bound.
+    ///
+    /// This is the shape the module documentation reasons about. It exists so
+    /// tests can check the reported distances against a reference over all
+    /// substrings, which [`Emit::Best`] no longer enumerates.
+    #[cfg(test)]
+    All,
+}
+
+/// Returns the closest segment each candidate anchor reaches.
 pub(super) fn verify<C>(
     query_string: &[Symbol],
     candidates: &[Candidate],
     corpus: &CorpusStore,
     bound: StrictBound,
     costs: &C,
+) -> Result<Vec<Match>>
+where
+    C: EditCosts<Symbol>,
+{
+    run(query_string, candidates, corpus, bound, costs, Emit::Best)
+}
+
+/// Returns every segment the candidate anchors reach within the bound.
+#[cfg(test)]
+pub(super) fn verify_exhaustively<C>(
+    query_string: &[Symbol],
+    candidates: &[Candidate],
+    corpus: &CorpusStore,
+    bound: StrictBound,
+    costs: &C,
+) -> Result<Vec<Match>>
+where
+    C: EditCosts<Symbol>,
+{
+    run(query_string, candidates, corpus, bound, costs, Emit::All)
+}
+
+fn run<C>(
+    query_string: &[Symbol],
+    candidates: &[Candidate],
+    corpus: &CorpusStore,
+    bound: StrictBound,
+    costs: &C,
+    emit: Emit,
 ) -> Result<Vec<Match>>
 where
     C: EditCosts<Symbol>,
@@ -197,10 +267,11 @@ where
             costs,
         );
 
-        for (backward_symbol_count, backward_distance) in backward.iter().copied().enumerate() {
-            for (forward_symbol_count, forward_distance) in forward.iter().copied().enumerate() {
-                // The two directional edit sequences meet at the forced
-                // anchor substitution, so their costs add independently.
+        // The two directional edit sequences meet at the forced anchor
+        // substitution, so their costs add independently. Minimizing them
+        // separately therefore reaches this anchor's closest segment.
+        let mut record =
+            |backward_symbol_count, backward_distance, forward_symbol_count, forward_distance| {
                 let distance = add_distance(
                     add_distance(anchor_cost, backward_distance),
                     forward_distance,
@@ -212,6 +283,35 @@ where
                         .entry((candidate.string_id, symbol_start, symbol_end))
                         .and_modify(|stored| *stored = (*stored).min(distance))
                         .or_insert(distance);
+                }
+            };
+
+        match emit {
+            Emit::Best => {
+                let (backward_symbol_count, backward_distance) = shortest_closest(&backward);
+                let (forward_symbol_count, forward_distance) = shortest_closest(&forward);
+                record(
+                    backward_symbol_count,
+                    backward_distance,
+                    forward_symbol_count,
+                    forward_distance,
+                );
+            }
+            #[cfg(test)]
+            Emit::All => {
+                for (backward_symbol_count, backward_distance) in
+                    backward.iter().copied().enumerate()
+                {
+                    for (forward_symbol_count, forward_distance) in
+                        forward.iter().copied().enumerate()
+                    {
+                        record(
+                            backward_symbol_count,
+                            backward_distance,
+                            forward_symbol_count,
+                            forward_distance,
+                        );
+                    }
                 }
             }
         }

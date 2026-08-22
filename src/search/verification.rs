@@ -13,12 +13,20 @@ use crate::types::{SequenceId, Symbol};
 
 /// Verification algorithm used to check filtering candidates.
 pub(in crate::search) enum Verifier {
-    /// Verification local to each candidate anchor.
+    /// Verification local to each candidate anchor, reporting each anchor's
+    /// closest segment.
     ///
     /// This only measures alignments pairing at least one query symbol with one
     /// data symbol, which is the complete answer for the cost policies
     /// described in the [`bidirectional_trie`] module documentation.
     BidirectionalTrie,
+    /// Anchor-local verification reporting every segment within the bound.
+    ///
+    /// Search reduces overlapping segments to one, so this measures more than
+    /// an answer needs. It is the reference the reported distances are checked
+    /// against.
+    #[cfg(test)]
+    BidirectionalTrieExhaustive,
     /// Exhaustive verification of every substring of every candidate string.
     ///
     /// This measures every alignment, so it answers for any cost policy. Range
@@ -29,11 +37,14 @@ pub(in crate::search) enum Verifier {
 }
 
 impl Verifier {
-    /// Returns exactly the non-empty substrings whose distance `bound` admits,
-    /// subject to the alignments each algorithm measures.
+    /// Returns non-empty substrings whose distance `bound` admits, subject to
+    /// the alignments each algorithm measures and to how much of that each one
+    /// reports.
     ///
-    /// Each substring must occur exactly once. Results must be ordered by data
-    /// string ID, then symbol-range start, then symbol-range end.
+    /// Each substring must occur exactly once, carrying the smallest distance
+    /// the algorithm measured for it. Results must be ordered by data string
+    /// ID, then symbol-range start, then symbol-range end, which is the order
+    /// [`keep_best_per_overlap`] needs.
     pub(in crate::search) fn verify<C>(
         &self,
         query_string: &[Symbol],
@@ -50,10 +61,76 @@ impl Verifier {
                 bidirectional_trie::verify(query_string, candidates, corpus, bound, costs)
             }
             #[cfg(test)]
+            Self::BidirectionalTrieExhaustive => bidirectional_trie::verify_exhaustively(
+                query_string,
+                candidates,
+                corpus,
+                bound,
+                costs,
+            ),
+            #[cfg(test)]
             Self::SmithWaterman => {
                 smith_waterman::verify(query_string, candidates, corpus, bound, costs)
             }
         }
+    }
+}
+
+/// Keeps one match from each group of overlapping matches.
+///
+/// The kept match is the closest one; ties go to the shortest range and then
+/// to the leftmost. Matches must arrive ordered by sequence, range start, and
+/// range end, which is what [`Verifier::verify`] produces.
+///
+/// A group is a maximal run of overlap within one sequence, so what this
+/// returns never overlaps: two kept matches in one sequence come from
+/// different groups, and groups do not reach each other by construction.
+pub(in crate::search) fn keep_best_per_overlap(matches: Vec<Match>) -> Vec<Match> {
+    let mut kept = Vec::new();
+    // The running end is the group's, not the best match's: a group reaches as
+    // far as its longest member, whichever member is currently winning it.
+    let mut group: Option<(Match, usize)> = None;
+
+    for candidate in matches {
+        group = Some(match group {
+            Some((best, group_end))
+                if best.sequence_id == candidate.sequence_id
+                    && candidate.token_range.start < group_end =>
+            {
+                let group_end = group_end.max(candidate.token_range.end);
+                (closer(best, candidate), group_end)
+            }
+            Some((best, _)) => {
+                kept.push(best);
+                let group_end = candidate.token_range.end;
+                (candidate, group_end)
+            }
+            None => {
+                let group_end = candidate.token_range.end;
+                (candidate, group_end)
+            }
+        });
+    }
+    kept.extend(group.map(|(best, _)| best));
+    kept
+}
+
+/// Returns the match a group of overlapping matches reduces to.
+///
+/// Distances are finite, so ordering the three keys together is a total order
+/// and the tie-breaks cannot depend on which match arrived first.
+fn closer(best: Match, candidate: Match) -> Match {
+    let rank = |matched: &Match| {
+        (
+            matched.distance,
+            matched.token_range.len(),
+            matched.token_range.start,
+        )
+    };
+    if rank(&candidate) < rank(&best) {
+        candidate
+    } else {
+        best
     }
 }
 
@@ -176,10 +253,12 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::search) mod tests {
     use rstest::rstest;
 
-    use super::{StrictBound, Verifier, add_distance};
+    use std::ops::Range;
+
+    use super::{StrictBound, Verifier, add_distance, keep_best_per_overlap};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
     use crate::search::{Candidate, Match};
@@ -190,6 +269,72 @@ mod tests {
     ///
     /// Verification tests state their expectations with the public inclusive
     /// threshold, so each one converts it exactly where a search would.
+    /// Asserts that `matches` answers the search `exhaustive` describes.
+    ///
+    /// The two lists are not equal in general. Overlapping segments are
+    /// reduced to one, and reducing a complete list can join groups that a
+    /// search leaves apart, because a segment bridging two of them need not be
+    /// any anchor's closest. What must hold is that nothing is invented, that
+    /// no group of the complete list loses its closest segment, and that the
+    /// answer does not overlap itself.
+    pub(in crate::search) fn assert_answers(matches: &[Match], exhaustive: &[Match]) {
+        for matched in matches {
+            assert!(
+                exhaustive.contains(matched),
+                "{matched:?} is not a segment exhaustive verification found"
+            );
+        }
+
+        for pair in matches.windows(2) {
+            let (earlier, later) = (&pair[0], &pair[1]);
+            assert!(
+                earlier.sequence_id != later.sequence_id
+                    || later.token_range.start >= earlier.token_range.end,
+                "{earlier:?} and {later:?} overlap"
+            );
+        }
+
+        for group in overlap_groups(exhaustive) {
+            // A group may hold several returned matches, because a search
+            // reduces the segments it reports rather than the complete list,
+            // and a bridging segment it never reports leaves them apart. What
+            // the group must not lose is its closest segment.
+            let closest = matches
+                .iter()
+                .filter(|matched| {
+                    matched.sequence_id == group.sequence_id
+                        && matched.token_range.start >= group.token_range.start
+                        && matched.token_range.end <= group.token_range.end
+                })
+                .map(|matched| matched.distance)
+                .min_by(|left, right| left.total_cmp(right))
+                .unwrap_or_else(|| panic!("no match inside the group spanning {group:?}"));
+            assert_eq!(
+                closest, group.distance,
+                "the closest match inside {group:?} is not that group's closest segment"
+            );
+        }
+    }
+
+    /// Collapses matches into their overlapping groups, each carrying the
+    /// smallest distance within it.
+    fn overlap_groups(matches: &[Match]) -> Vec<Match> {
+        let mut groups: Vec<Match> = Vec::new();
+        for matched in matches {
+            match groups.last_mut() {
+                Some(group)
+                    if group.sequence_id == matched.sequence_id
+                        && matched.token_range.start < group.token_range.end =>
+                {
+                    group.token_range.end = group.token_range.end.max(matched.token_range.end);
+                    group.distance = group.distance.min(matched.distance);
+                }
+                _ => groups.push(matched.clone()),
+            }
+        }
+        groups
+    }
+
     fn bound(threshold: f32) -> StrictBound {
         StrictBound::from_inclusive(Cost::new(threshold).unwrap()).unwrap()
     }
@@ -449,7 +594,8 @@ mod tests {
     fn verifier_returns_exactly_the_substrings_below_the_threshold(
         #[case] query_text: &str,
         #[case] texts: &[&str],
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
         #[values(
             CostPolicy::Unit,
             CostPolicy::Asymmetric,
@@ -480,8 +626,81 @@ mod tests {
     }
 
     #[rstest]
+    #[case::single_symbol("a", &["a"])]
+    #[case::exact_and_shifted_occurrences("ab", &["xaby"])]
+    #[case::repeated_symbols("aa", &["aaaa"])]
+    #[case::interleaved_repetitions("abc", &["abcabc"])]
+    #[case::several_strings("bc", &["abc", "cba", "b", "cbcb"])]
+    #[case::empty_string_between_strings("ab", &["", "ab", ""])]
+    #[case::query_longer_than_every_string("abcd", &["ab", "cd"])]
+    #[case::disjoint_alphabets("ab", &["cd"])]
+    #[case::transposition("ab", &["ba"])]
+    fn reduced_anchor_bests_keep_the_closest_segment_of_every_group(
+        #[case] query_text: &str,
+        #[case] texts: &[&str],
+        #[values(
+            CostPolicy::Unit,
+            CostPolicy::Asymmetric,
+            CostPolicy::SymbolDependent,
+            CostPolicy::Unrepresentable
+        )]
+        costs: CostPolicy,
+        #[values(0.0, 0.5, 1.0, 2.0, 3.5)] threshold: f32,
+    ) {
+        let query_string = symbols(query_text);
+        let corpus = corpus(texts);
+        let candidates = all_candidates(texts, query_string.len());
+
+        // Reporting one segment per anchor skips the product of the two
+        // directions, so this is where that shortcut is checked against every
+        // substring a reference computes.
+        let matches = keep_best_per_overlap(
+            Verifier::BidirectionalTrie
+                .verify(
+                    &query_string,
+                    &candidates,
+                    &corpus,
+                    bound(threshold),
+                    &costs,
+                )
+                .unwrap(),
+        );
+
+        assert_answers(
+            &matches,
+            &reference_matches(&query_string, texts, threshold, &costs),
+        );
+    }
+
+    #[rstest]
+    #[case::adjacent_ranges_do_not_overlap(&[(0, 0..1, 1.0), (0, 1..2, 0.5)], &[(0, 0..1, 1.0), (0, 1..2, 0.5)])]
+    #[case::the_closest_of_a_group_survives(&[(0, 0..3, 1.0), (0, 1..2, 0.5), (0, 1..4, 2.0)], &[(0, 1..2, 0.5)])]
+    #[case::equal_distances_prefer_the_shortest(&[(0, 0..3, 0.5), (0, 1..2, 0.5)], &[(0, 1..2, 0.5)])]
+    #[case::equal_distances_and_lengths_prefer_the_leftmost(&[(0, 0..2, 0.5), (0, 1..3, 0.5)], &[(0, 0..2, 0.5)])]
+    #[case::a_group_reaches_as_far_as_its_longest_member(&[(0, 0..4, 2.0), (0, 1..2, 0.5), (0, 3..5, 0.25)], &[(0, 3..5, 0.25)])]
+    #[case::groups_do_not_cross_sequences(&[(0, 0..2, 1.0), (1, 1..3, 0.5)], &[(0, 0..2, 1.0), (1, 1..3, 0.5)])]
+    fn reduction_keeps_one_match_from_each_overlapping_group(
+        #[case] matches: &[(usize, Range<usize>, f32)],
+        #[case] expected: &[(usize, Range<usize>, f32)],
+    ) {
+        let build = |matches: &[(usize, Range<usize>, f32)]| {
+            matches
+                .iter()
+                .map(|(sequence_id, token_range, distance)| Match {
+                    sequence_id: *sequence_id,
+                    token_range: token_range.clone(),
+                    distance: *distance,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(keep_best_per_overlap(build(matches)), build(expected));
+    }
+
+    #[rstest]
     fn verification_orders_matches_by_string_then_range(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         // The exact match of the query sits between two costlier ranges of the
         // same string, so ordering by distance rather than by range is visible.
@@ -527,7 +746,8 @@ mod tests {
 
     #[rstest]
     fn verification_without_candidates_returns_no_matches(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         let corpus = corpus(&["ab"]);
 
@@ -540,7 +760,8 @@ mod tests {
 
     #[rstest]
     fn verification_reports_each_substring_once_at_its_smallest_distance(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         // Range 0..2 is reachable from several anchors: aligning the query
         // symbols in order costs nothing, while anchoring the second query
@@ -583,7 +804,8 @@ mod tests {
 
     #[rstest]
     fn verification_ignores_duplicated_candidates(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         let corpus = corpus(&["ab"]);
         let anchor = candidate(0, 0, 0);
@@ -614,7 +836,8 @@ mod tests {
     fn verification_applies_the_threshold_inclusively(
         #[case] threshold: f32,
         #[case] expected: bool,
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         // Substituting the second symbol turns "ac" into the query "ab" at a
         // distance of exactly one.
@@ -641,7 +864,8 @@ mod tests {
 
     #[rstest]
     fn verification_keeps_finite_matches_next_to_unrepresentable_distances(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         // Inserting "c" costs `Cost::MAX`, so the DP cell that only inserts it
         // is unrepresentable once the following "b" is inserted as well, while
@@ -691,7 +915,8 @@ mod tests {
 
     #[rstest]
     fn verification_rejects_unknown_string_before_returning_matches(
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         let corpus = corpus(&["a"]);
 
@@ -713,7 +938,8 @@ mod tests {
     fn verification_rejects_out_of_bounds_string_position(
         #[case] text: &str,
         #[case] string_position: u32,
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         let corpus = corpus(&[text]);
 
@@ -741,7 +967,8 @@ mod tests {
     fn verification_rejects_out_of_bounds_query_position(
         #[case] query_text: &str,
         #[case] query_position: u32,
-        #[values(Verifier::BidirectionalTrie, Verifier::SmithWaterman)] verifier: Verifier,
+        #[values(Verifier::BidirectionalTrieExhaustive, Verifier::SmithWaterman)]
+        verifier: Verifier,
     ) {
         let corpus = corpus(&["a"]);
 

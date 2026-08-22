@@ -12,7 +12,7 @@ use crate::search::filtering::{
     MinCandidateSelector, SelectedPosition, any_radius_can_select, count_candidates,
     generate_candidates, wider_radii,
 };
-use crate::search::verification::Verifier;
+use crate::search::verification::{Verifier, keep_best_per_overlap};
 use crate::types::Symbol;
 
 /// Parameters for threshold range search.
@@ -125,6 +125,13 @@ where
 {
     /// Finds non-empty data segments satisfying the configured range search.
     ///
+    /// Overlapping segments describe one match, so a search returns one segment
+    /// for each group of them: the closest to the query, and among equally
+    /// close ones the shortest and then the leftmost. Segments returned for a
+    /// data sequence therefore never overlap. A segment that a threshold admits
+    /// is not returned when a segment overlapping it is closer; raising the
+    /// threshold reaches further segments rather than more of the same match.
+    ///
     /// Results are ordered by data sequence ID, then token-range start, then
     /// token-range end.
     ///
@@ -231,6 +238,10 @@ where
             bound,
             costs,
         )?;
+        // Anchors that reach the same part of a data sequence report segments
+        // that overlap. Reducing them here is what makes one result stand for
+        // one match.
+        let matches = keep_best_per_overlap(matches);
         Ok((
             matches,
             RangeSearchMetrics {
@@ -327,6 +338,7 @@ mod tests {
     use crate::search::SearchEngineBuilder;
     use crate::search::encoding::EncodedQuery;
     use crate::search::verification::Verifier;
+    use crate::search::verification::tests::assert_answers;
     use crate::search::{Candidate, Match, SearchEngine};
     use crate::store::{CorpusStore, CorpusStoreBuilder};
     use crate::types::{Position, Posting, SequenceId, Symbol};
@@ -640,9 +652,10 @@ mod tests {
                 .iter()
                 .map(|matched| (matched.token_range.clone(), matched.distance))
                 .collect::<Vec<_>>(),
-            // "a" matches by deleting the query's 'a' and substituting its
-            // 'b', which is cheaper than pairing 'a' and deleting 'b'.
-            [(0..1, 0.65000004), (0..2, 0.0), (1..2, 0.05)]
+            // The whole string matches the query exactly. The two
+            // single-token segments overlapping it are further away, at
+            // 0.65 and 0.05, so the group reduces to the exact match.
+            [(0..2, 0.0)]
         );
     }
 
@@ -667,7 +680,7 @@ mod tests {
 
         assert!(metrics.adjusted_eta.is_some());
         assert!(!filtered.is_empty());
-        assert_eq!(filtered, exhaustive);
+        assert_answers(&filtered, &exhaustive);
     }
 
     #[test]
@@ -808,7 +821,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(filtered, exhaustive);
+        assert_answers(&filtered, &exhaustive);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].sequence_id, 0);
         assert_eq!(filtered[0].token_range, 0..2);

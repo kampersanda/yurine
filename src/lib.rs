@@ -2,10 +2,12 @@
 //!
 //! Yurine indexes sequences of any cloneable, hashable token type. A query
 //! matches every non-empty segment whose edit distance is at most the supplied
-//! threshold. Returned ranges are zero-based token ranges; callers remain
-//! responsible for tokenization and for mapping them back to source text.
-//! Here, "exact search" means that qualifying approximate matches are not
-//! omitted; it does not mean exact string matching.
+//! threshold, and segments overlapping one another are reported as the closest
+//! of them, so one result stands for one match. Returned ranges are zero-based
+//! token ranges; callers remain responsible for tokenization and for mapping
+//! them back to source text. Here, "exact search" means that qualifying
+//! approximate matches are not omitted; it does not mean exact string
+//! matching.
 //!
 //! # Quick start
 //!

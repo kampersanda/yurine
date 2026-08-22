@@ -36,6 +36,10 @@ struct Candidate {
 }
 
 /// A verified data segment satisfying the inclusive distance threshold.
+///
+/// One match stands for one part of a data sequence, not for one alignment:
+/// segments overlapping it that the threshold also admits are reduced to the
+/// closest of them. See [`RangeSearcher::search`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Match {
     /// The identifier returned when the matched data sequence was added.

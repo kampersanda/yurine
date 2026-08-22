@@ -167,13 +167,16 @@ mod tests {
     #[test]
     fn indexes_repeated_tokens_at_each_position() {
         let mut builder = SearchEngineBuilder::new();
-        builder.add_sequence(['a', 'a', 'a']).unwrap();
+        builder.add_sequence(['a', 'b', 'a', 'b', 'a']).unwrap();
 
+        // The two occurrences do not overlap, so an index that only recorded
+        // each token's first position would lose the second one rather than
+        // have it reduced away with the first.
         let matches = builder
             .build()
             .unwrap()
             .range_searcher(LevenshteinCosts::new())
-            .search(&['a', 'a'], &RangeSearchParams::new(0.0))
+            .search(&['a', 'b'], &RangeSearchParams::new(0.0))
             .unwrap();
 
         assert_eq!(
@@ -186,7 +189,7 @@ mod tests {
                 },
                 Match {
                     sequence_id: 0,
-                    token_range: 1..3,
+                    token_range: 2..4,
                     distance: 0.0,
                 },
             ]

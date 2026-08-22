@@ -24,7 +24,7 @@ Query:                  book district for curry
   need not be symmetric or satisfy the triangle inequality.
 - **Semantic matching:** substitution costs can come from token embeddings, so
   `literature` matches `books` — paraphrases, not just exact spellings.
-- **Exact results:** returns every segment within the threshold; “exact” means
+- **Exact results:** no match within the threshold is missed; “exact” means
   complete results, not exact string matching.
 - **Reusable indexes:** supports generic token types, multiple cost policies,
   and memory-mapped persistence.
@@ -200,7 +200,10 @@ Yurine is an early project. These are the limitations of the current release:
   the whole query leaves nothing for the index to filter on, and a search with
   one returns an error instead of results. With unit costs that is a threshold
   at or above the query's token count.
-- **No ranking.** A search returns every segment within the threshold at once.
+- **One result per match.** Overlapping segments describe one match, so a
+  search returns the closest of them rather than each one. Two occurrences that
+  overlap, such as `aa` twice in `aaa`, are reported once.
+- **No ranking.** A search returns every match within the threshold at once.
   There is no top-k, relevance scoring, or streaming of results.
 - **Only static embeddings.** Substitution costs come from a fixed table of
   token vectors; context-dependent embeddings are out of scope.
