@@ -48,15 +48,20 @@ pub(super) fn generate_candidates(
 /// Each candidate is one posting of one neighborhood symbol, so this is the
 /// sum of the selected positions' neighborhood posting counts. Posting-list
 /// lengths are read in constant time, so this scans the neighborhoods alone
-/// and never touches the postings. It is an exact count rather than an
-/// estimate, and it lives beside generation so the two cannot disagree about
-/// what a candidate is.
+/// and never touches the postings. Counting lives beside generation so the two
+/// cannot disagree about what a candidate is.
+///
+/// Selected positions may share a neighborhood, and each one generates its own
+/// candidates from it, so the sum reaches the query length times the corpus's
+/// posting count. Saturating keeps a total beyond `usize` above every limit,
+/// which declines the search rather than wrapping to a total that looks small
+/// enough to serve.
 pub(super) fn count_candidates(selected: &[SelectedPosition], index: &PostingsIndex) -> usize {
     selected
         .iter()
         .flat_map(|selected_position| selected_position.neighbors.iter())
         .map(|neighbor| index.frequency(*neighbor))
-        .sum()
+        .fold(0, usize::saturating_add)
 }
 
 #[cfg(test)]
