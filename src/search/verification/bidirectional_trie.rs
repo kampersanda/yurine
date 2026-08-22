@@ -5,15 +5,18 @@
 //! This enumerates exactly the alignments pairing at least one query symbol
 //! with one data symbol, and no others.
 //!
-//! Only each anchor's best segment is reported. The two directions meet at the
-//! forced substitution and their costs add, so that segment is found by
-//! minimizing each direction alone, without forming their product. Every
-//! segment an anchor reaches contains the anchor position, so they all overlap
-//! and only one of them can survive [`keep_best_per_overlap`]: the segment a
-//! group is reduced to attains its distance at some anchor, and no segment at
-//! that anchor is closer, or it would be the group's best instead. Reporting
-//! the product and reducing it afterwards would therefore reach the same
-//! answer through `O(L_b * L_f)` work per anchor rather than `O(L_b + L_f)`.
+//! Only each anchor's closest segment is reported. The two directions meet at
+//! the forced substitution and their costs add, so that segment is reached by
+//! minimizing each direction alone rather than by forming their product.
+//!
+//! Reporting the product instead would not change the answer. Every segment an
+//! anchor reaches contains the anchor position, so they all overlap and
+//! [`keep_best_per_overlap`] would reduce them to one anyway. Nor does an
+//! anchor's closest segment lose a group its own: the segment a group reduces
+//! to attains its distance at some anchor, and no segment at that anchor is
+//! closer, or it would be the group's closest instead. What the product costs
+//! is `O(L_b * L_f)` work per anchor where minimizing separately takes
+//! `O(L_b + L_f)`.
 //!
 //! Those are all the alignments that matter when
 //! `substitution(from, to) <= deletion(from) + insertion(to)`. An alignment
@@ -30,13 +33,13 @@
 //! reaching that sum is exactly what `RangeSearcher::search_with_metrics`
 //! declines up front. A caller of this module has to establish the same
 //! precondition.
+//!
+//! [`keep_best_per_overlap`]: super::keep_best_per_overlap
 
 use std::collections::BTreeMap;
 
 use hashbrown::HashMap;
 
-#[cfg(doc)]
-use super::keep_best_per_overlap;
 use super::{add_distance, create_match, root_column, step_dp, validated_candidate_string};
 use crate::costs::{Cost, EditCosts};
 use crate::errors::{Error, Result};
@@ -139,7 +142,7 @@ where
 ///
 /// The shortest one is taken so that a group reduced to this segment reports
 /// the tightest range achieving its distance, matching how
-/// [`keep_best_per_overlap`] breaks the same tie.
+/// [`keep_best_per_overlap`](super::keep_best_per_overlap) breaks the same tie.
 fn shortest_closest(distances: &[f32]) -> (usize, f32) {
     let mut closest = (0, f32::INFINITY);
     for (symbol_count, distance) in distances.iter().copied().enumerate() {

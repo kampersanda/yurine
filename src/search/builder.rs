@@ -169,9 +169,9 @@ mod tests {
         let mut builder = SearchEngineBuilder::new();
         builder.add_sequence(['a', 'b', 'a', 'b', 'a']).unwrap();
 
-        // The two occurrences do not overlap, so an index that only recorded
-        // each token's first position would lose the second one rather than
-        // have it reduced away with the first.
+        // The two occurrences do not overlap, so an index recording only each
+        // token's first position loses the second match outright instead of
+        // having it reduced away with the first.
         let matches = builder
             .build()
             .unwrap()

@@ -86,40 +86,37 @@ impl Verifier {
 /// returns never overlaps: two kept matches in one sequence come from
 /// different groups, and groups do not reach each other by construction.
 pub(in crate::search) fn keep_best_per_overlap(matches: Vec<Match>) -> Vec<Match> {
-    let mut kept = Vec::new();
-    // The running end is the group's, not the best match's: a group reaches as
-    // far as its longest member, whichever member is currently winning it.
-    let mut group: Option<(Match, usize)> = None;
+    let mut kept: Vec<Match> = Vec::new();
+    // A group reaches as far as its longest member, which need not be the
+    // member currently winning it, so the end is tracked apart from `kept`.
+    let mut group_end = 0;
 
     for candidate in matches {
-        group = Some(match group {
-            Some((best, group_end))
+        match kept.last_mut() {
+            Some(best)
                 if best.sequence_id == candidate.sequence_id
                     && candidate.token_range.start < group_end =>
             {
-                let group_end = group_end.max(candidate.token_range.end);
-                (closer(best, candidate), group_end)
+                group_end = group_end.max(candidate.token_range.end);
+                if is_closer(&candidate, best) {
+                    *best = candidate;
+                }
             }
-            Some((best, _)) => {
-                kept.push(best);
-                let group_end = candidate.token_range.end;
-                (candidate, group_end)
+            _ => {
+                group_end = candidate.token_range.end;
+                kept.push(candidate);
             }
-            None => {
-                let group_end = candidate.token_range.end;
-                (candidate, group_end)
-            }
-        });
+        }
     }
-    kept.extend(group.map(|(best, _)| best));
     kept
 }
 
-/// Returns the match a group of overlapping matches reduces to.
+/// Returns whether a group of overlapping matches reduces to `candidate`
+/// rather than to the `best` one so far.
 ///
 /// Distances are finite, so ordering the three keys together is a total order
 /// and the tie-breaks cannot depend on which match arrived first.
-fn closer(best: Match, candidate: Match) -> Match {
+fn is_closer(candidate: &Match, best: &Match) -> bool {
     let rank = |matched: &Match| {
         (
             matched.distance,
@@ -127,11 +124,7 @@ fn closer(best: Match, candidate: Match) -> Match {
             matched.token_range.start,
         )
     };
-    if rank(&candidate) < rank(&best) {
-        candidate
-    } else {
-        best
-    }
+    rank(candidate) < rank(best)
 }
 
 fn create_match(
