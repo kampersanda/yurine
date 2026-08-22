@@ -9,14 +9,17 @@
 //! the forced substitution and their costs add, so that segment is reached by
 //! minimizing each direction alone rather than by forming their product.
 //!
-//! Reporting the product instead would not change the answer. Every segment an
-//! anchor reaches contains the anchor position, so they all overlap and
-//! [`keep_best_per_overlap`] would reduce them to one anyway. Nor does an
-//! anchor's closest segment lose a group its own: the segment a group reduces
-//! to attains its distance at some anchor, and no segment at that anchor is
-//! closer, or it would be the group's closest instead. What the product costs
-//! is `O(L_b * L_f)` work per anchor where minimizing separately takes
-//! `O(L_b + L_f)`.
+//! Reporting the product instead would not reach a closer segment. Every
+//! segment an anchor reaches contains the anchor position, so they all overlap
+//! and [`keep_best_per_overlap`] reduces them to one either way; and the
+//! segment a group reduces to attains its distance at some anchor, where
+//! nothing is closer, or it would be that group's own.
+//!
+//! What the product does change is which segments share a group. A segment no
+//! anchor reports can bridge two groups that otherwise stay apart, and
+//! enumerating it merges them into one answer instead of two. Reporting each
+//! anchor's closest segment therefore answers at least as finely, for
+//! `O(L_b + L_f)` work per anchor rather than `O(L_b * L_f)`.
 //!
 //! Those are all the alignments that matter when
 //! `substitution(from, to) <= deletion(from) + insertion(to)`. An alignment
@@ -143,6 +146,13 @@ where
 /// The shortest one is taken so that a group reduced to this segment reports
 /// the tightest range achieving its distance, matching how
 /// [`keep_best_per_overlap`](super::keep_best_per_overlap) breaks the same tie.
+///
+/// The tie is resolved here, on the directional distances, before the anchor
+/// and the opposite direction are added. Two extensions whose distances differ
+/// can round to one `f32` once those are added, and this keeps the closer one
+/// rather than the shorter of the two the sum no longer separates. Comparing
+/// the sums instead would need them, and forming them for every extension is
+/// the product this avoids. The distance reported is the same either way.
 fn shortest_closest(distances: &[f32]) -> (usize, f32) {
     let mut closest = (0, f32::INFINITY);
     for (symbol_count, distance) in distances.iter().copied().enumerate() {

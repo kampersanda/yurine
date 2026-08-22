@@ -251,7 +251,7 @@ pub(in crate::search) mod tests {
 
     use std::ops::Range;
 
-    use super::{StrictBound, Verifier, add_distance, keep_best_per_overlap};
+    use super::{StrictBound, Verifier, add_distance, is_closer, keep_best_per_overlap};
     use crate::costs::{Cost, EditCosts};
     use crate::errors::Error;
     use crate::search::{Candidate, Match};
@@ -287,42 +287,52 @@ pub(in crate::search) mod tests {
             );
         }
 
-        for group in overlap_groups(exhaustive) {
+        for (span, winner) in overlap_groups(exhaustive) {
             // A group may hold several returned matches, because a search
             // reduces the segments it reports rather than the complete list,
             // and a bridging segment it never reports leaves them apart. What
-            // the group must not lose is its closest segment.
-            let closest = matches
+            // the group must not lose is the segment it reduces to.
+            let reported = matches
                 .iter()
                 .filter(|matched| {
-                    matched.sequence_id == group.sequence_id
-                        && matched.token_range.start >= group.token_range.start
-                        && matched.token_range.end <= group.token_range.end
+                    matched.sequence_id == span.sequence_id
+                        && matched.token_range.start >= span.token_range.start
+                        && matched.token_range.end <= span.token_range.end
                 })
-                .map(|matched| matched.distance)
-                .min_by(|left, right| left.total_cmp(right))
-                .unwrap_or_else(|| panic!("no match inside the group spanning {group:?}"));
+                .reduce(|best, matched| {
+                    if is_closer(matched, best) {
+                        matched
+                    } else {
+                        best
+                    }
+                })
+                .unwrap_or_else(|| panic!("no match inside the group spanning {span:?}"));
             assert_eq!(
-                closest, group.distance,
-                "the closest match inside {group:?} is not that group's closest segment"
+                *reported, winner,
+                "the group spanning {span:?} does not reduce to the segment it should"
             );
         }
     }
 
-    /// Collapses matches into their overlapping groups, each carrying the
-    /// smallest distance within it.
-    fn overlap_groups(matches: &[Match]) -> Vec<Match> {
-        let mut groups: Vec<Match> = Vec::new();
+    /// Collapses matches into their overlapping groups.
+    ///
+    /// Each group is returned as its span together with the segment the group
+    /// reduces to, which is the closest one and then the shortest and leftmost
+    /// of those.
+    fn overlap_groups(matches: &[Match]) -> Vec<(Match, Match)> {
+        let mut groups: Vec<(Match, Match)> = Vec::new();
         for matched in matches {
             match groups.last_mut() {
-                Some(group)
-                    if group.sequence_id == matched.sequence_id
-                        && matched.token_range.start < group.token_range.end =>
+                Some((span, winner))
+                    if span.sequence_id == matched.sequence_id
+                        && matched.token_range.start < span.token_range.end =>
                 {
-                    group.token_range.end = group.token_range.end.max(matched.token_range.end);
-                    group.distance = group.distance.min(matched.distance);
+                    span.token_range.end = span.token_range.end.max(matched.token_range.end);
+                    if is_closer(matched, winner) {
+                        *winner = matched.clone();
+                    }
                 }
-                _ => groups.push(matched.clone()),
+                _ => groups.push((matched.clone(), matched.clone())),
             }
         }
         groups

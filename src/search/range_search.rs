@@ -128,7 +128,9 @@ where
     /// Overlapping segments describe one match, so a search returns one segment
     /// for each group of them: the closest to the query, and among equally
     /// close ones the shortest and then the leftmost. Segments returned for a
-    /// data sequence therefore never overlap. A segment that a threshold admits
+    /// data sequence therefore never overlap. Where rounding leaves two
+    /// distances indistinguishable, which of the two segments is returned
+    /// follows the distances before rounding. A segment that a threshold admits
     /// is not returned when a segment overlapping it is closer; raising the
     /// threshold reaches further segments rather than more of the same match.
     ///
