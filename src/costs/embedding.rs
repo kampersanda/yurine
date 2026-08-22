@@ -257,7 +257,7 @@ fn validate_embedding(embedding: &[f32]) -> Result<()> {
 ///
 /// Filtering evaluates this once per alphabet symbol per query position, so the
 /// shape is deliberate: independent accumulators break the serial dependency
-/// chain that forbids reassociating floating-point addition, and `chunks_exact`
+/// chain that forbids reassociating floating-point addition, and `as_chunks`
 /// gives each lane a statically known length so no bounds check blocks the
 /// vectorizer. Indexing the two slices directly loses both.
 ///
@@ -270,16 +270,16 @@ fn dot_product(from: &[f32], to: &[f32]) -> f32 {
     const LANES: usize = 16;
 
     let mut accumulators = [0.0; LANES];
-    let mut from_chunks = from.chunks_exact(LANES);
-    let mut to_chunks = to.chunks_exact(LANES);
-    for (from, to) in from_chunks.by_ref().zip(to_chunks.by_ref()) {
+    let (from_chunks, from_remainder) = from.as_chunks::<LANES>();
+    let (to_chunks, to_remainder) = to.as_chunks::<LANES>();
+    for (from, to) in from_chunks.iter().zip(to_chunks) {
         for lane in 0..LANES {
             accumulators[lane] += from[lane] * to[lane];
         }
     }
 
     let mut product: f32 = accumulators.iter().sum();
-    for (from, to) in from_chunks.remainder().iter().zip(to_chunks.remainder()) {
+    for (from, to) in from_remainder.iter().zip(to_remainder) {
         product += from * to;
     }
     product

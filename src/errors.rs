@@ -155,6 +155,21 @@ pub enum Error {
         "the threshold reaches the cost of deleting the whole query; query a non-empty sequence whose deletion costs exceed the threshold, or lower the threshold"
     )]
     ThresholdSubsequenceUnavailable,
+
+    /// Filtering would generate more candidate anchors than the search allows.
+    ///
+    /// The count is exact rather than estimated, and it is known before any
+    /// candidate is generated, so a search reporting this has not verified
+    /// anything.
+    #[error(
+        "filtering would generate {candidates} candidate anchors, above the maximum of {limit}; raise the maximum or lower the threshold"
+    )]
+    SearchTooExpensive {
+        /// The number of candidate anchors filtering would generate.
+        candidates: usize,
+        /// The maximum the search was configured with.
+        limit: usize,
+    },
 }
 
 impl Error {
